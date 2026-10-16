@@ -169,9 +169,35 @@ func (r *Registry) AttachToDispatcher(dispatcher *ext.Dispatcher) error {
 				dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbCopy.Prefix), wrappedCb))
 			}
 		}
+
+		// Register message handlers if the plugin implements MessagePlugin
+		if msgPlugin, ok := p.(MessagePlugin); ok {
+			for _, mh := range msgPlugin.MessageHandlers() {
+				mhCopy := mh
+				wrappedMh := r.wrapMessageHandler(mhCopy)
+				dispatcher.AddHandler(handlers.NewMessage(mhCopy.Filter, wrappedMh))
+			}
+		}
 	}
 
 	return nil
+}
+
+// wrapMessageHandler wraps a message handler with panic recovery and structured logging.
+func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
+	return func(b *gotgbot.Bot, ctx *ext.Context) (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("panic in message handler: %v", rec)
+				if r.appCtx != nil && r.appCtx.Logger != nil {
+					r.appCtx.Logger.Error("panic recovered in message handler",
+						"panic", rec,
+					)
+				}
+			}
+		}()
+		return mh.Handler(b, ctx)
+	}
 }
 
 // wrapCallbackHandler wraps a callback handler with panic recovery and structured logging.

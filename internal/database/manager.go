@@ -157,3 +157,10 @@ func (m *DatabaseManager) SqlMediaRepo() *sql.MediaRepository {
 	defer m.mu.RUnlock()
 	return m.sqlMediaRepo
 }
+
+// SQLManager returns the underlying SQLite DBManager.
+func (m *DatabaseManager) SQLManager() *sql.DBManager {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sqlManager
+}

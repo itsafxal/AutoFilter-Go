@@ -11,6 +11,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/MYTGBOTZ/internal/search"
 	"github.com/itsafxal/MYTGBOTZ/internal/telegram"
 )
 
@@ -23,6 +24,7 @@ type App struct {
 	BotService      *telegram.BotService
 	DBManager       *database.DatabaseManager
 	DeliveryService delivery.MediaDeliveryService
+	SearchService   search.SearchService
 	StartTime       time.Time
 }
 
@@ -38,6 +40,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	startTime := time.Now()
 	dbManager := database.NewDatabaseManager(cfg, logger)
 	deliveryService := delivery.NewService(dbManager, logger)
+	searchService := search.NewService(dbManager, logger)
 
 	appCtx := &plugins.AppContext{
 		Config:    cfg,
@@ -45,6 +48,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		StartTime: startTime,
 		DB:        dbManager,
 		Delivery:  deliveryService,
+		Search:    searchService,
 	}
 
 	reg := plugins.NewRegistry(appCtx)
@@ -58,6 +62,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		BotService:      botService,
 		DBManager:       dbManager,
 		DeliveryService: deliveryService,
+		SearchService:   searchService,
 		StartTime:       startTime,
 	}, nil
 }

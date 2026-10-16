@@ -6,9 +6,11 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/MYTGBOTZ/internal/search"
 )
 
 // AppContext carries shared application dependencies passed to plugins.
@@ -20,6 +22,7 @@ type AppContext struct {
 	Registry  *Registry
 	DB        *database.DatabaseManager
 	Delivery  delivery.MediaDeliveryService
+	Search    search.SearchService
 }
 
 // HandlerFunc is the gotgbot command handler function signature.
@@ -71,4 +74,16 @@ type Plugin interface {
 type CallbackPlugin interface {
 	Plugin
 	CallbackHandlers() []CallbackDefinition
+}
+
+// MessageDefinition defines a message handler with a filter.
+type MessageDefinition struct {
+	Filter  filters.Message
+	Handler HandlerFunc
+}
+
+// MessagePlugin is an optional interface plugins can implement to register generic message handlers (e.g. search).
+type MessagePlugin interface {
+	Plugin
+	MessageHandlers() []MessageDefinition
 }
