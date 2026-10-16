@@ -238,17 +238,16 @@ type MediaRepository struct {
 // NewMediaRepository creates a new MediaRepository referencing configured media collections.
 func NewMediaRepository(colName string, databases ...*mongo.Database) *MediaRepository {
 	cols := make([]*mongo.Collection, 0, len(databases))
-	seen := make(map[string]struct{})
+	seen := make(map[*mongo.Database]struct{})
 
 	for _, db := range databases {
 		if db == nil {
 			continue
 		}
-		key := db.Name() + "/" + colName
-		if _, exists := seen[key]; exists {
+		if _, exists := seen[db]; exists {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[db] = struct{}{}
 		cols = append(cols, db.Collection(colName))
 	}
 
