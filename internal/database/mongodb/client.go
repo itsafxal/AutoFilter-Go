@@ -166,7 +166,17 @@ func (m *ClientManager) DB2() *mongo.Database {
 	return m.db2
 }
 
+// HasDB2 reports whether a distinct DB2 secondary database was configured and connected.
+func (m *ClientManager) HasDB2() bool {
+	return m.cfg.DatabaseURI2 != "" && m.cfg.DatabaseURI2 != m.cfg.DatabaseURI && m.db2 != nil && m.db2 != m.primaryDB
+}
+
 // DB3 returns the tertiary media database (or primary if not distinct).
 func (m *ClientManager) DB3() *mongo.Database {
 	return m.db3
+}
+
+// HasDB3 reports whether a distinct DB3 tertiary database was configured and connected.
+func (m *ClientManager) HasDB3() bool {
+	return m.cfg.DatabaseURI3 != "" && m.cfg.DatabaseURI3 != m.cfg.DatabaseURI && m.cfg.DatabaseURI3 != m.cfg.DatabaseURI2 && m.db3 != nil && m.db3 != m.primaryDB && m.db3 != m.db2
 }

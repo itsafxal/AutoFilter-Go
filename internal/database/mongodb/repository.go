@@ -229,18 +229,30 @@ func (r *GroupRepository) TotalGroupsCount(ctx context.Context) (int64, error) {
 	return r.col.CountDocuments(ctx, bson.M{})
 }
 
-// MediaRepository provides read access to the authoritative MongoDB media collections
-// across primary and replica/sharded databases (DB2, DB3).
-type MediaRepository struct {
-	collections []*mongo.Collection
+// MediaShard represents an authoritative MongoDB collection shard with a descriptive label.
+type MediaShard struct {
+	Label string
+	Col   *mongo.Collection
 }
 
-// NewMediaRepository creates a new MediaRepository referencing configured media collections.
+// ShardCount represents the file count discovered in a MongoDB shard cluster.
+type ShardCount struct {
+	Label string
+	Count int64
+}
+
+// MediaRepository provides read access to the authoritative MongoDB media collections
+// across sharded database clusters (e.g. DB2, DB3).
+type MediaRepository struct {
+	shards []MediaShard
+}
+
+// NewMediaRepository creates a new MediaRepository referencing configured databases with DB1..DBn labels.
 func NewMediaRepository(colName string, databases ...*mongo.Database) *MediaRepository {
-	cols := make([]*mongo.Collection, 0, len(databases))
+	shards := make([]MediaShard, 0, len(databases))
 	seen := make(map[*mongo.Database]struct{})
 
-	for _, db := range databases {
+	for i, db := range databases {
 		if db == nil {
 			continue
 		}
@@ -248,79 +260,156 @@ func NewMediaRepository(colName string, databases ...*mongo.Database) *MediaRepo
 			continue
 		}
 		seen[db] = struct{}{}
-		cols = append(cols, db.Collection(colName))
+		shards = append(shards, MediaShard{
+			Label: fmt.Sprintf("DB%d", i+1),
+			Col:   db.Collection(colName),
+		})
 	}
 
 	return &MediaRepository{
-		collections: cols,
+		shards: shards,
 	}
 }
 
-// TotalMediaCount counts documents across all configured media collections.
-func (r *MediaRepository) TotalMediaCount(ctx context.Context) (int64, error) {
-	if r == nil || len(r.collections) == 0 {
-		return 0, nil
+// NewShardedMediaRepository creates a new MediaRepository from explicitly labeled shards.
+func NewShardedMediaRepository(shards ...MediaShard) *MediaRepository {
+	return &MediaRepository{
+		shards: shards,
+	}
+}
+
+// Shards returns the configured media collection shards.
+func (r *MediaRepository) Shards() []MediaShard {
+	if r == nil {
+		return nil
+	}
+	return r.shards
+}
+
+// GetShardCounts inspects document counts across each shard cluster upfront using constant-time metadata.
+func (r *MediaRepository) GetShardCounts(ctx context.Context) ([]ShardCount, int64, error) {
+	if r == nil || len(r.shards) == 0 {
+		return nil, 0, nil
 	}
 
+	counts := make([]ShardCount, len(r.shards))
 	var total int64
-	for _, col := range r.collections {
-		count, err := col.CountDocuments(ctx, bson.M{})
-		if err != nil {
-			return total, fmt.Errorf("error counting documents in %s: %w", col.Name(), err)
+
+	for i, shard := range r.shards {
+		counts[i].Label = shard.Label
+		if shard.Col == nil {
+			continue
 		}
-		total += count
+
+		// Fast metadata estimate from MongoDB collection stats
+		cnt, err := shard.Col.EstimatedDocumentCount(ctx)
+		if err != nil {
+			// Fallback to standard CountDocuments if estimated is unsupported
+			cnt, err = shard.Col.CountDocuments(ctx, bson.M{})
+		}
+		if err == nil {
+			counts[i].Count = cnt
+			total += cnt
+		}
 	}
-	return total, nil
+
+	return counts, total, nil
+}
+
+// TotalMediaCount counts documents across all configured media shards.
+func (r *MediaRepository) TotalMediaCount(ctx context.Context) (int64, error) {
+	_, total, err := r.GetShardCounts(ctx)
+	return total, err
+}
+
+// StreamShard streams all MediaDoc records from a specific shard index using high-performance batching and field projections.
+func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callback func(doc MediaDoc) error) (int64, error) {
+	if r == nil || shardIndex < 0 || shardIndex >= len(r.shards) {
+		return 0, fmt.Errorf("invalid shard index: %d", shardIndex)
+	}
+
+	shard := r.shards[shardIndex]
+	if shard.Col == nil {
+		return 0, fmt.Errorf("shard %s collection is nil", shard.Label)
+	}
+
+	// Optimize wire transfer by projecting only required fields and requesting 10,000 docs per network batch
+	opts := options.Find().
+		SetBatchSize(10000).
+		SetProjection(bson.M{
+			"_id":       1,
+			"file_ref":  1,
+			"file_name": 1,
+			"file_size": 1,
+			"size":      1,
+			"file_type": 1,
+			"mime_type": 1,
+			"caption":   1,
+			"date":      1,
+		})
+
+	cursor, err := shard.Col.Find(ctx, bson.M{}, opts)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
+	}
+	defer cursor.Close(ctx)
+
+	var streamed int64
+	for cursor.Next(ctx) {
+		var doc MediaDoc
+		if err := cursor.Decode(&doc); err != nil {
+			// Skip malformed document rather than failing the entire migration
+			continue
+		}
+
+		if doc.FileID == "" {
+			continue
+		}
+
+		if err := callback(doc); err != nil {
+			return streamed, err
+		}
+		streamed++
+	}
+
+	if err := cursor.Err(); err != nil {
+		return streamed, fmt.Errorf("cursor error on shard %s: %w", shard.Label, err)
+	}
+
+	return streamed, nil
 }
 
 // StreamAllDocuments streams all MediaDoc records across all media collections in order to
-// feed the SQLite synchronization engine with minimal memory consumption.
+// feed the SQLite synchronization engine.
 func (r *MediaRepository) StreamAllDocuments(ctx context.Context, callback func(doc MediaDoc) error) (int64, error) {
-	if r == nil || len(r.collections) == 0 {
+	if r == nil || len(r.shards) == 0 {
 		return 0, nil
 	}
 
 	var totalStreamed int64
-
-	for _, col := range r.collections {
-		cursor, err := col.Find(ctx, bson.M{}, options.Find().SetBatchSize(1000))
+	for i := range r.shards {
+		streamed, err := r.StreamShard(ctx, i, callback)
+		totalStreamed += streamed
 		if err != nil {
-			return totalStreamed, fmt.Errorf("failed to open cursor on collection %s: %w", col.Name(), err)
+			return totalStreamed, err
 		}
-
-		for cursor.Next(ctx) {
-			var doc MediaDoc
-			if err := cursor.Decode(&doc); err != nil {
-				// Log or skip malformed document rather than failing entire synchronization
-				continue
-			}
-
-			if err := callback(doc); err != nil {
-				_ = cursor.Close(ctx)
-				return totalStreamed, err
-			}
-			totalStreamed++
-		}
-
-		if err := cursor.Err(); err != nil {
-			_ = cursor.Close(ctx)
-			return totalStreamed, fmt.Errorf("cursor error on collection %s: %w", col.Name(), err)
-		}
-		_ = cursor.Close(ctx)
 	}
 
 	return totalStreamed, nil
 }
 
-// GetFileDetails fetches details of a media document by file_id from authoritative MongoDB.
+// GetFileDetails fetches details of a media document by file_id from authoritative MongoDB across shards.
 func (r *MediaRepository) GetFileDetails(ctx context.Context, fileID string) (*MediaDoc, error) {
-	if r == nil || len(r.collections) == 0 || fileID == "" {
+	if r == nil || len(r.shards) == 0 || fileID == "" {
 		return nil, nil
 	}
 
-	for _, col := range r.collections {
+	for _, shard := range r.shards {
+		if shard.Col == nil {
+			continue
+		}
 		var doc MediaDoc
-		err := col.FindOne(ctx, bson.M{"_id": fileID}).Decode(&doc)
+		err := shard.Col.FindOne(ctx, bson.M{"_id": fileID}).Decode(&doc)
 		if err == nil {
 			return &doc, nil
 		}

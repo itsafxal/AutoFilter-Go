@@ -195,3 +195,55 @@ func TestSQLite_RollbackOnError(t *testing.T) {
 		t.Errorf("expected 0 rows after rollback, got %d", count)
 	}
 }
+
+func TestSQLite_IndexDropAndRestore(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_idx.sqlite3")
+
+	mgr := NewDBManager(dbPath, newTestLogger())
+	ctx := context.Background()
+
+	if err := mgr.Open(ctx); err != nil {
+		t.Fatalf("failed to open SQLite: %v", err)
+	}
+	defer mgr.Close()
+
+	syncer := NewSyncer(mgr, nil, newTestLogger(), 100)
+
+	// Verify indexes exist after Open
+	var idxCount int
+	err := mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_media_%';").Scan(&idxCount)
+	if err != nil || idxCount < 3 {
+		t.Fatalf("expected indexes to exist initially, got count %d (err: %v)", idxCount, err)
+	}
+
+	// Drop indexes
+	if err := syncer.dropSecondaryIndexes(ctx); err != nil {
+		t.Fatalf("failed to drop secondary indexes: %v", err)
+	}
+
+	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_media_%';").Scan(&idxCount)
+	if err != nil || idxCount != 0 {
+		t.Errorf("expected 0 secondary indexes after drop, got %d", idxCount)
+	}
+
+	// Bulk pragmas
+	if err := syncer.setBulkPragmas(ctx); err != nil {
+		t.Errorf("failed to set bulk pragmas: %v", err)
+	}
+
+	// Recreate indexes
+	if err := syncer.ensureIndexes(ctx); err != nil {
+		t.Fatalf("failed to restore indexes: %v", err)
+	}
+
+	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_media_%';").Scan(&idxCount)
+	if err != nil || idxCount < 3 {
+		t.Errorf("expected indexes restored, got %d", idxCount)
+	}
+
+	// Normal pragmas
+	if err := syncer.setNormalPragmas(ctx); err != nil {
+		t.Errorf("failed to restore normal pragmas: %v", err)
+	}
+}

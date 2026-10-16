@@ -103,3 +103,17 @@ func TestMediaDoc_BSONMapping(t *testing.T) {
 		t.Errorf("expected file_size %d, got %d", doc.FileSize, decoded.FileSize)
 	}
 }
+
+func TestShardedMediaRepository(t *testing.T) {
+	shards := []MediaShard{
+		{Label: "DB2", Col: nil},
+		{Label: "DB3", Col: nil},
+	}
+	repo := NewShardedMediaRepository(shards...)
+	if len(repo.Shards()) != 2 {
+		t.Fatalf("expected 2 shards, got %d", len(repo.Shards()))
+	}
+	if repo.Shards()[0].Label != "DB2" || repo.Shards()[1].Label != "DB3" {
+		t.Errorf("unexpected shard labels: %+v", repo.Shards())
+	}
+}

@@ -21,7 +21,7 @@ type Syncer struct {
 // NewSyncer constructs a new Syncer.
 func NewSyncer(dbManager *DBManager, mediaRepo *mongodb.MediaRepository, logger *slog.Logger, batchSize int) *Syncer {
 	if batchSize <= 0 {
-		batchSize = 10000
+		batchSize = 20000
 	}
 	return &Syncer{
 		dbManager: dbManager,
@@ -38,7 +38,7 @@ type SyncResult struct {
 	Duration      time.Duration
 }
 
-// Sync executes idempotent synchronization of media documents into SQLite.
+// Sync executes idempotent, high-performance synchronization of media documents into SQLite.
 func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 	start := time.Now()
 
@@ -65,16 +65,49 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		}, nil
 	}
 
-	s.logger.Info("starting runtime media synchronization from MongoDB to temporary SQLite...",
-		"batch_size", s.batchSize,
+	if s.mediaRepo == nil {
+		return &SyncResult{
+			Skipped:       true,
+			TotalInserted: 0,
+			Duration:      time.Since(start),
+		}, nil
+	}
+
+	// 2. Query upfront shard counts
+	shardCounts, totalExpected, err := s.mediaRepo.GetShardCounts(ctx)
+	if err != nil {
+		s.logger.Warn("could not determine shard counts upfront, proceeding with sync", "error", err)
+	}
+
+	s.logger.Info("MongoDB media cluster status detected",
+		"total_shards", len(shardCounts),
+		"total_expected_files", totalExpected,
 	)
+	for _, sc := range shardCounts {
+		s.logger.Info(fmt.Sprintf("  • Cluster [%s]: ~%d files available", sc.Label, sc.Count))
+	}
 
 	// Mark sync status as in-progress
 	if err := s.setSyncMetadata(ctx, "is_complete", "false"); err != nil {
 		s.logger.Warn("failed to set sync status in-progress", "error", err)
 	}
 
-	var batch []mongodb.MediaDoc
+	// 3. Performance optimizations: Drop secondary indexes and enable bulk pragmas
+	s.logger.Info("optimizing SQLite for high-speed bulk ingestion: disabling secondary indexes and tuning pragmas...")
+	if err := s.dropSecondaryIndexes(ctx); err != nil {
+		s.logger.Warn("failed to drop secondary indexes", "error", err)
+	}
+	if err := s.setBulkPragmas(ctx); err != nil {
+		s.logger.Warn("failed to set bulk pragmas", "error", err)
+	}
+
+	// Guarantee index restoration and pragma reset on exit (success or error)
+	defer func() {
+		_ = s.ensureIndexes(context.Background())
+		_ = s.setNormalPragmas(context.Background())
+	}()
+
+	shards := s.mediaRepo.Shards()
 	var totalSaved int64
 
 	insertStmt := `
@@ -84,40 +117,92 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 	`
 
-	// Stream from authoritative MongoDB
-	_, streamErr := s.mediaRepo.StreamAllDocuments(ctx, func(doc mongodb.MediaDoc) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	// 4. Stream each shard cluster sequentially with clear, readable progress
+	for i, shard := range shards {
+		shardStart := time.Now()
+		var shardExpected int64
+		if i < len(shardCounts) {
+			shardExpected = shardCounts[i].Count
 		}
 
-		batch = append(batch, doc)
-		if len(batch) >= s.batchSize {
-			if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
-				return fmt.Errorf("failed to commit batch of %d records: %w", len(batch), err)
+		s.logger.Info(fmt.Sprintf("🚀 Starting migration for cluster [%s] (approx. %d files)...", shard.Label, shardExpected),
+			"cluster", shard.Label,
+			"expected_files", shardExpected,
+		)
+
+		var batch []mongodb.MediaDoc
+		var shardSaved int64
+
+		_, streamErr := s.mediaRepo.StreamShard(ctx, i, func(doc mongodb.MediaDoc) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
 			}
+
+			batch = append(batch, doc)
+			if len(batch) >= s.batchSize {
+				if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
+					return fmt.Errorf("failed to commit batch to SQLite: %w", err)
+				}
+				shardSaved += int64(len(batch))
+				totalSaved += int64(len(batch))
+
+				var pct float64
+				if shardExpected > 0 {
+					pct = float64(shardSaved) / float64(shardExpected) * 100
+					if pct > 100 {
+						pct = 100
+					}
+				}
+				s.logger.Info(fmt.Sprintf("📦 [%s] Synced: %d / %d (%.1f%%) | Total saved: %d",
+					shard.Label, shardSaved, shardExpected, pct, totalSaved),
+					"cluster", shard.Label,
+					"shard_synced", shardSaved,
+					"total_saved", totalSaved,
+					"progress_pct", fmt.Sprintf("%.1f%%", pct),
+				)
+				batch = batch[:0]
+			}
+			return nil
+		})
+
+		if streamErr != nil {
+			s.logger.Error(fmt.Sprintf("synchronization failed for cluster [%s]", shard.Label), "error", streamErr)
+			return nil, fmt.Errorf("sync failed on cluster %s: %w", shard.Label, streamErr)
+		}
+
+		if len(batch) > 0 {
+			if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
+				return nil, fmt.Errorf("failed to commit final batch for cluster %s: %w", shard.Label, err)
+			}
+			shardSaved += int64(len(batch))
 			totalSaved += int64(len(batch))
-			s.logger.Info("synchronized batch to SQLite", "total_saved", totalSaved)
-			batch = batch[:0]
 		}
-		return nil
-	})
 
-	if streamErr != nil {
-		s.logger.Error("synchronization stream failed", "error", streamErr)
-		return nil, fmt.Errorf("synchronization failed: %w", streamErr)
+		shardDuration := time.Since(shardStart)
+		s.logger.Info(fmt.Sprintf("✅ Cluster [%s] migration complete: %d records in %s",
+			shard.Label, shardSaved, shardDuration.Round(time.Millisecond).String()),
+			"cluster", shard.Label,
+			"records", shardSaved,
+			"duration", shardDuration.String(),
+		)
 	}
 
-	// Commit any remaining records
-	if len(batch) > 0 {
-		if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
-			return nil, fmt.Errorf("failed to commit final batch of %d records: %w", len(batch), err)
-		}
-		totalSaved += int64(len(batch))
+	// 5. Rebuild search indexes
+	indexStart := time.Now()
+	s.logger.Info("⚡ Building SQLite search indexes for fast querying...")
+	if err := s.ensureIndexes(ctx); err != nil {
+		s.logger.Error("failed to create search indexes", "error", err)
+		return nil, fmt.Errorf("failed building indexes: %w", err)
 	}
+	indexDuration := time.Since(indexStart)
+	s.logger.Info("✨ Search indexes built successfully", "duration", indexDuration.Round(time.Millisecond).String())
 
-	// Mark sync status as complete
+	// 6. Restore normal runtime pragmas
+	_ = s.setNormalPragmas(ctx)
+
+	// 7. Update sync metadata
 	if err := s.setSyncMetadata(ctx, "is_complete", "true"); err != nil {
 		s.logger.Warn("failed to update sync metadata to complete", "error", err)
 	}
@@ -125,9 +210,9 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 	_ = s.setSyncMetadata(ctx, "last_sync_time", time.Now().UTC().Format(time.RFC3339))
 
 	duration := time.Since(start)
-	s.logger.Info("✨ synchronization completed successfully",
+	s.logger.Info("🎉 All media clusters synchronized successfully",
 		"total_records", totalSaved,
-		"duration", duration.String(),
+		"duration", duration.Round(time.Millisecond).String(),
 	)
 
 	return &SyncResult{
@@ -170,6 +255,63 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 		}
 		return nil
 	})
+}
+
+func (s *Syncer) dropSecondaryIndexes(ctx context.Context) error {
+	queries := []string{
+		"DROP INDEX IF EXISTS idx_media_file_name;",
+		"DROP INDEX IF EXISTS idx_media_caption;",
+		"DROP INDEX IF EXISTS idx_date_saved;",
+		"DROP INDEX IF EXISTS idx_media_date_name;",
+	}
+	for _, q := range queries {
+		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Syncer) ensureIndexes(ctx context.Context) error {
+	queries := []string{
+		"CREATE INDEX IF NOT EXISTS idx_media_file_name ON media (file_name);",
+		"CREATE INDEX IF NOT EXISTS idx_media_caption ON media (caption);",
+		"CREATE INDEX IF NOT EXISTS idx_date_saved ON media (date_saved);",
+		"CREATE INDEX IF NOT EXISTS idx_media_date_name ON media (date_saved DESC, file_name);",
+	}
+	for _, q := range queries {
+		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Syncer) setBulkPragmas(ctx context.Context) error {
+	queries := []string{
+		"PRAGMA synchronous = OFF;",
+		"PRAGMA cache_size = -131072;", // 128 MB cache during bulk ingestion
+		"PRAGMA temp_store = MEMORY;",
+	}
+	for _, q := range queries {
+		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Syncer) setNormalPragmas(ctx context.Context) error {
+	queries := []string{
+		"PRAGMA synchronous = NORMAL;",
+		"PRAGMA cache_size = -64000;",
+	}
+	for _, q := range queries {
+		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // IsSyncComplete checks the sync_metadata table to verify if the index is ready.

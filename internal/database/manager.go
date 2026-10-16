@@ -67,12 +67,37 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 		m.userRepo = mongodb.NewUserRepository(m.mongoManager.PrimaryDB())
 		m.groupRepo = mongodb.NewGroupRepository(m.mongoManager.PrimaryDB())
 
-		// Setup MediaRepository across primary, DB2, and DB3
-		m.mongoMediaRepo = mongodb.NewMediaRepository(
-			m.cfg.CollectionName,
-			m.mongoManager.PrimaryDB(),
-			m.mongoManager.DB2(),
-			m.mongoManager.DB3(),
+		// Setup sharded MediaRepository exclusively on media clusters (DB2, DB3)
+		// Primary DB is reserved for users, groups, and auth; it does not host media records.
+		var mediaShards []mongodb.MediaShard
+		if m.mongoManager.HasDB2() {
+			mediaShards = append(mediaShards, mongodb.MediaShard{
+				Label: "DB2",
+				Col:   m.mongoManager.DB2().Collection(m.cfg.CollectionName),
+			})
+		}
+		if m.mongoManager.HasDB3() {
+			mediaShards = append(mediaShards, mongodb.MediaShard{
+				Label: "DB3",
+				Col:   m.mongoManager.DB3().Collection(m.cfg.CollectionName),
+			})
+		}
+
+		// Fallback for single-database environments (e.g. testing or local dev)
+		if len(mediaShards) == 0 && m.mongoManager.PrimaryDB() != nil {
+			mediaShards = append(mediaShards, mongodb.MediaShard{
+				Label: "PrimaryDB",
+				Col:   m.mongoManager.PrimaryDB().Collection(m.cfg.CollectionName),
+			})
+		}
+
+		m.mongoMediaRepo = mongodb.NewShardedMediaRepository(mediaShards...)
+
+		m.logger.Info("MongoDB clusters connected successfully",
+			"primary_db", m.cfg.DatabaseName+" (Users & Groups)",
+			"db2_configured", m.mongoManager.HasDB2(),
+			"db3_configured", m.mongoManager.HasDB3(),
+			"media_shards", len(mediaShards),
 		)
 
 		// 3. Perform media synchronization from MongoDB to SQLite
