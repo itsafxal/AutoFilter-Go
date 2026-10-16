@@ -1,0 +1,42 @@
+# Version control
+.git/
+.gitignore
+
+# Environment and secrets (CRITICAL: never bake into image layers)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.session
+
+# Local binaries and build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+bot
+__debug_bin*
+
+# Test files and coverage reports
+tests/
+*_test.go
+coverage.out
+coverage.html
+.system_generated/
+
+# IDE and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Temporary scratch and documentation drafts
+scratch/
+docs/

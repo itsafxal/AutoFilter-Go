@@ -1,0 +1,159 @@
+package database
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
+	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
+)
+
+// DatabaseManager coordinates authoritative MongoDB connections and temporary SQLite runtime caches.
+type DatabaseManager struct {
+	cfg            *config.Config
+	logger         *slog.Logger
+	mongoManager   *mongodb.ClientManager
+	sqlManager     *sql.DBManager
+	userRepo       *mongodb.UserRepository
+	groupRepo      *mongodb.GroupRepository
+	mongoMediaRepo *mongodb.MediaRepository
+	sqlMediaRepo   *sql.MediaRepository
+	syncer         *sql.Syncer
+	ready          bool
+	mu             sync.RWMutex
+}
+
+// NewDatabaseManager constructs a new unified DatabaseManager.
+func NewDatabaseManager(cfg *config.Config, logger *slog.Logger) *DatabaseManager {
+	mongoMgr := mongodb.NewClientManager(cfg, logger)
+	sqlMgr := sql.NewDBManager(cfg.SQLiteDBPath, logger)
+
+	return &DatabaseManager{
+		cfg:          cfg,
+		logger:       logger,
+		mongoManager: mongoMgr,
+		sqlManager:   sqlMgr,
+	}
+}
+
+// Init initializes MongoDB, opens SQLite, and executes initial media synchronization.
+// The bot will not report database as ready until all required initialization and sync have succeeded.
+func (m *DatabaseManager) Init(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. Initialize temporary SQLite runtime
+	if err := m.sqlManager.Open(ctx); err != nil {
+		return fmt.Errorf("failed to initialize runtime SQLite database: %w", err)
+	}
+	m.sqlMediaRepo = sql.NewMediaRepository(m.sqlManager)
+
+	// 2. Initialize authoritative MongoDB if configured
+	if m.cfg.HasDatabase() {
+		m.logger.Info("initializing authoritative MongoDB connection...",
+			"database", m.cfg.DatabaseName,
+			"collection", m.cfg.CollectionName,
+		)
+
+		if err := m.mongoManager.Connect(ctx); err != nil {
+			_ = m.sqlManager.Close()
+			return fmt.Errorf("fatal MongoDB initialization failure: %w", err)
+		}
+
+		// Initialize repositories
+		m.userRepo = mongodb.NewUserRepository(m.mongoManager.PrimaryDB())
+		m.groupRepo = mongodb.NewGroupRepository(m.mongoManager.PrimaryDB())
+
+		// Setup MediaRepository across primary, DB2, and DB3
+		m.mongoMediaRepo = mongodb.NewMediaRepository(
+			m.cfg.CollectionName,
+			m.mongoManager.PrimaryDB(),
+			m.mongoManager.DB2(),
+			m.mongoManager.DB3(),
+		)
+
+		// 3. Perform media synchronization from MongoDB to SQLite
+		m.syncer = sql.NewSyncer(m.sqlManager, m.mongoMediaRepo, m.logger, m.cfg.SyncBatchSize)
+		syncRes, err := m.syncer.Sync(ctx)
+		if err != nil {
+			m.logger.Error("synchronization from MongoDB to SQLite failed", "error", err)
+			_ = m.Close()
+			return fmt.Errorf("runtime database synchronization failed: %w", err)
+		}
+
+		m.logger.Info("database initialization and synchronization verified",
+			"total_records", syncRes.TotalInserted,
+			"skipped", syncRes.Skipped,
+			"duration", syncRes.Duration.String(),
+		)
+	} else {
+		m.logger.Warn("DATABASE_URI not configured: running in standalone mode without authoritative MongoDB")
+	}
+
+	m.ready = true
+	return nil
+}
+
+// Close gracefully closes SQLite and disconnects MongoDB clients.
+func (m *DatabaseManager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.ready = false
+	var errs []error
+
+	if m.sqlManager != nil {
+		if err := m.sqlManager.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("error closing SQLite: %w", err))
+		}
+	}
+
+	if m.mongoManager != nil {
+		if err := m.mongoManager.Disconnect(context.Background()); err != nil {
+			errs = append(errs, fmt.Errorf("error disconnecting MongoDB: %w", err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors closing database manager: %v", errs)
+	}
+	return nil
+}
+
+// IsReady reports whether the databases have completed initialization and synchronization.
+func (m *DatabaseManager) IsReady() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.ready
+}
+
+// UserRepo returns the authoritative MongoDB UserRepository.
+func (m *DatabaseManager) UserRepo() *mongodb.UserRepository {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.userRepo
+}
+
+// GroupRepo returns the authoritative MongoDB GroupRepository.
+func (m *DatabaseManager) GroupRepo() *mongodb.GroupRepository {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.groupRepo
+}
+
+// MongoMediaRepo returns the authoritative MongoDB MediaRepository.
+func (m *DatabaseManager) MongoMediaRepo() *mongodb.MediaRepository {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.mongoMediaRepo
+}
+
+// SqlMediaRepo returns the fast runtime SQLite MediaRepository.
+func (m *DatabaseManager) SqlMediaRepo() *sql.MediaRepository {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sqlMediaRepo
+}

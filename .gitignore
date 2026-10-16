@@ -1,0 +1,40 @@
+# Environment and secrets (CRITICAL: never commit real secrets)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.session
+
+# Local binaries and compiled artifacts
+bin/
+dist/
+/bot
+/bot.exe
+*.exe
+
+*.dll
+*.so
+*.dylib
+__debug_bin*
+
+# Local runtime SQLite database files
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+
+# Test coverage and debug output
+*.out
+coverage.html
+.system_generated/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
