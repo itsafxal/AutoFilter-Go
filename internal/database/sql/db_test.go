@@ -247,3 +247,69 @@ func TestSQLite_IndexDropAndRestore(t *testing.T) {
 		t.Errorf("failed to restore normal pragmas: %v", err)
 	}
 }
+
+func TestSQLite_FTS5Support(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_fts5.sqlite3")
+
+	mgr := NewDBManager(dbPath, newTestLogger())
+	ctx := context.Background()
+
+	if err := mgr.Open(ctx); err != nil {
+		t.Fatalf("failed to open SQLite: %v", err)
+	}
+	defer mgr.Close()
+
+	// 1. Create external content FTS5 table
+	_, err := mgr.DB().ExecContext(ctx, `
+		CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+			file_name, caption, content='media', content_rowid='rowid', tokenize='trigram'
+		);
+	`)
+	if err != nil {
+		t.Fatalf("FTS5 trigram external content not supported: %v", err)
+	}
+
+	// 2. Insert test rows into media
+	_, err = mgr.DB().ExecContext(ctx, `
+		INSERT INTO media (file_id, file_name, caption) VALUES
+		('f1', 'K.G.F Chapter 2 (2022) Malayalam 1080p', 'KGF 2 Malayalam'),
+		('f2', 'Avatar 2 Way of Water 2022 English 720p', 'Avatar 2 movie'),
+		('f3', 'K.G.F Chapter 1 (2018) Tamil 720p', 'KGF 1 Tamil');
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert media: %v", err)
+	}
+
+	// 3. Rebuild FTS index
+	_, err = mgr.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');")
+	if err != nil {
+		t.Fatalf("failed to rebuild FTS5: %v", err)
+	}
+
+	// 4. Query FTS5 MATCH
+	rows, err := mgr.DB().QueryContext(ctx, `
+		SELECT m.file_id, m.file_name
+		FROM media_fts f
+		JOIN media m ON f.rowid = m.rowid
+		WHERE media_fts MATCH ?
+		LIMIT 10;
+	`, `"kgf"`)
+	if err != nil {
+		t.Fatalf("FTS5 MATCH query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var matches []string
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		matches = append(matches, id)
+	}
+
+	if len(matches) != 2 {
+		t.Errorf("expected 2 matches for 'kgf', got %d: %+v", len(matches), matches)
+	}
+}

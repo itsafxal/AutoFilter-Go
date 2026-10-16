@@ -215,6 +215,13 @@ func (p *Plugin) HandlePaginationCallback(b *gotgbot.Bot, ctx *ext.Context) erro
 	}
 
 	sess := p.getSession(searchKey)
+	if sess == nil && cb.Message != nil {
+		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
 	if sess == nil {
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
 			Text:      "🔁 Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ 😇",
@@ -252,11 +259,16 @@ func (p *Plugin) HandlePaginationCallback(b *gotgbot.Bot, ctx *ext.Context) erro
 	kb := p.buildResultKeyboard(result.Files, searchKey, offset, result.NextOffset)
 
 	if cb.Message != nil {
-		_, _, _ = cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
+		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
 			Text:        text,
 			ParseMode:   "HTML",
 			ReplyMarkup: kb,
 		})
+		if editErr != nil && isMessageNotModified(editErr) {
+			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
+				ReplyMarkup: kb,
+			})
+		}
 	}
 
 	_, _ = cb.Answer(b, nil)
@@ -319,11 +331,16 @@ func (p *Plugin) HandleSpellCheckCallback(b *gotgbot.Bot, ctx *ext.Context) erro
 	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
 	if cb.Message != nil {
-		_, _, _ = cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
+		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
 			Text:        text,
 			ParseMode:   "HTML",
 			ReplyMarkup: kb,
 		})
+		if editErr != nil && isMessageNotModified(editErr) {
+			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
+				ReplyMarkup: kb,
+			})
+		}
 	}
 
 	_, _ = cb.Answer(b, nil)
@@ -345,6 +362,13 @@ func (p *Plugin) HandleLanguagesCallback(b *gotgbot.Bot, ctx *ext.Context) error
 	searchKey := parts[1]
 
 	sess := p.getSession(searchKey)
+	if sess == nil && cb.Message != nil {
+		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
 	if sess == nil {
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
 		return nil
@@ -370,9 +394,9 @@ func (p *Plugin) HandleLanguagesCallback(b *gotgbot.Bot, ctx *ext.Context) error
 		}
 	}
 
-	// Back to results button
+	// Back to results button (matching TGxCyberBot)
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "◀️ Bᴀᴄᴋ ᴛᴏ Rᴇsᴜʟᴛs", CallbackData: fmt.Sprintf("next|%s|0", searchKey)},
+		{Text: "↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", CallbackData: fmt.Sprintf("next|%s|0", searchKey)},
 	})
 
 	if cb.Message != nil {
@@ -402,6 +426,13 @@ func (p *Plugin) HandleFilterLanguageCallback(b *gotgbot.Bot, ctx *ext.Context) 
 	searchKey := parts[2]
 
 	sess := p.getSession(searchKey)
+	if sess == nil && cb.Message != nil {
+		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
 	if sess == nil {
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
 		return nil
@@ -416,8 +447,23 @@ func (p *Plugin) HandleFilterLanguageCallback(b *gotgbot.Bot, ctx *ext.Context) 
 
 	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, filter)
 	if err != nil || len(result.Files) == 0 {
+		// Revert to original unfiltered results matching TGxCyberBot behavior
+		sess.Language = ""
+		origRes, _ := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{Quality: sess.Quality})
+		var origFiles []search.MediaFile
+		origNext := 0
+		if origRes != nil {
+			origFiles = origRes.Files
+			origNext = origRes.NextOffset
+		}
+		origKb := p.buildResultKeyboard(origFiles, searchKey, 0, origNext)
+		if cb.Message != nil {
+			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
+				ReplyMarkup: origKb,
+			})
+		}
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      fmt.Sprintf("🚫 Nᴏ files found in %s.", langCode),
+			Text:      fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Lᴀɴɢᴜᴀɢᴇ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(langCode)),
 			ShowAlert: true,
 		})
 		return nil
@@ -428,11 +474,16 @@ func (p *Plugin) HandleFilterLanguageCallback(b *gotgbot.Bot, ctx *ext.Context) 
 	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
 	if cb.Message != nil {
-		_, _, _ = cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
+		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
 			Text:        text,
 			ParseMode:   "HTML",
 			ReplyMarkup: kb,
 		})
+		if editErr != nil && isMessageNotModified(editErr) {
+			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
+				ReplyMarkup: kb,
+			})
+		}
 	}
 
 	_, _ = cb.Answer(b, nil)
@@ -454,6 +505,13 @@ func (p *Plugin) HandleQualitiesCallback(b *gotgbot.Bot, ctx *ext.Context) error
 	searchKey := parts[1]
 
 	sess := p.getSession(searchKey)
+	if sess == nil && cb.Message != nil {
+		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
 	if sess == nil {
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
 		return nil
@@ -479,9 +537,9 @@ func (p *Plugin) HandleQualitiesCallback(b *gotgbot.Bot, ctx *ext.Context) error
 		}
 	}
 
-	// Back button
+	// Back button (matching TGxCyberBot)
 	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "◀️ Bᴀᴄᴋ ᴛᴏ Rᴇsᴜʟᴛs", CallbackData: fmt.Sprintf("next|%s|0", searchKey)},
+		{Text: "↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", CallbackData: fmt.Sprintf("next|%s|0", searchKey)},
 	})
 
 	if cb.Message != nil {
@@ -511,6 +569,13 @@ func (p *Plugin) HandleFilterQualityCallback(b *gotgbot.Bot, ctx *ext.Context) e
 	searchKey := parts[2]
 
 	sess := p.getSession(searchKey)
+	if sess == nil && cb.Message != nil {
+		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
 	if sess == nil {
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
 		return nil
@@ -525,8 +590,23 @@ func (p *Plugin) HandleFilterQualityCallback(b *gotgbot.Bot, ctx *ext.Context) e
 
 	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, filter)
 	if err != nil || len(result.Files) == 0 {
+		// Revert to original unfiltered results matching TGxCyberBot behavior
+		sess.Quality = ""
+		origRes, _ := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{Language: sess.Language})
+		var origFiles []search.MediaFile
+		origNext := 0
+		if origRes != nil {
+			origFiles = origRes.Files
+			origNext = origRes.NextOffset
+		}
+		origKb := p.buildResultKeyboard(origFiles, searchKey, 0, origNext)
+		if cb.Message != nil {
+			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
+				ReplyMarkup: origKb,
+			})
+		}
 		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      fmt.Sprintf("🚫 Nᴏ files found in %s.", strings.ToUpper(quality)),
+			Text:      fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Qᴜᴀʟɪᴛʏ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(quality)),
 			ShowAlert: true,
 		})
 		return nil
@@ -537,11 +617,16 @@ func (p *Plugin) HandleFilterQualityCallback(b *gotgbot.Bot, ctx *ext.Context) e
 	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
 	if cb.Message != nil {
-		_, _, _ = cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
+		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
 			Text:        text,
 			ParseMode:   "HTML",
 			ReplyMarkup: kb,
 		})
+		if editErr != nil && isMessageNotModified(editErr) {
+			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
+				ReplyMarkup: kb,
+			})
+		}
 	}
 
 	_, _ = cb.Answer(b, nil)
@@ -698,4 +783,41 @@ func (p *Plugin) getSession(key string) *searchSession {
 	p.sessMu.RLock()
 	defer p.sessMu.RUnlock()
 	return p.sessions[key]
+}
+
+func (p *Plugin) recoverSessionFromMessage(maybeMsg gotgbot.MaybeInaccessibleMessage, userID int64) *searchSession {
+	if maybeMsg == nil {
+		return nil
+	}
+	msg, ok := maybeMsg.(*gotgbot.Message)
+	if !ok || msg == nil || msg.Text == "" {
+		return nil
+	}
+	lines := strings.Split(msg.Text, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "Query :") {
+			idx := strings.Index(line, "Query :")
+			queryPart := strings.TrimSpace(line[idx+len("Query :"):])
+			queryPart = strings.TrimPrefix(queryPart, "</b>")
+			queryPart = strings.TrimSpace(queryPart)
+			if queryPart != "" {
+				return &searchSession{
+					Query:     queryPart,
+					UserID:    userID,
+					ChatID:    msg.Chat.Id,
+					UpdatedAt: time.Now(),
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isMessageNotModified(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "message is not modified") || strings.Contains(msg, "message_not_modified")
 }
