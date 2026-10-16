@@ -38,7 +38,7 @@ func NewService(dbManager *database.DatabaseManager, logger *slog.Logger) *Servi
 	}
 }
 
-// Search executes a sub-millisecond query against the SQLite FTS5 trigram virtual table with LIKE fallback.
+// Search executes a fast indexed query against SQLite with no COUNT(*) table scan overhead.
 func (s *Service) Search(ctx context.Context, query string, limit, offset int, filter SearchFilter) (*SearchResult, error) {
 	norm := NormalizeText(query)
 	if norm == "" {
@@ -69,32 +69,14 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		return nil, fmt.Errorf("sqlite database is not initialized")
 	}
 
-	// 1. Primary High-Speed Search: FTS5 Trigram MATCH (Boolean AND)
-	var records []MediaFile
-	var hasNext bool
-	var ftsErr error
+	// 1. Primary fast query on file_name using index (date_saved DESC, file_name)
+	likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, false)
+	records, hasNext, err := s.queryRows(ctx, db, likeSQL, likeArgs, limit)
 
-	ftsExpr := s.buildFTS5Expression(tokens, filter)
-	if ftsExpr != "" {
-		ftsSQL := `
-			SELECT m.file_id, m.file_ref, m.file_name, m.file_size, m.size, m.file_type, m.mime_type, m.caption, m.date_saved
-			FROM media_fts f
-			JOIN media m ON f.rowid = m.rowid
-			WHERE media_fts MATCH ?
-			ORDER BY m.date_saved DESC
-			LIMIT ? OFFSET ?;
-		`
-		records, hasNext, ftsErr = s.queryRows(ctx, db, ftsSQL, []any{ftsExpr, limit + 1, offset}, limit)
-	}
-
-	// 2. Secondary Search Fallback: LIKE Query (only if FTS produced 0 records or had error)
-	if len(records) == 0 && (ftsExpr == "" || ftsErr != nil || len(tokens) > 0) {
-		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, limit+1, offset)
-		likeRecords, likeHasNext, likeErr := s.queryRows(ctx, db, likeSQL, likeArgs, limit)
-		if likeErr == nil && len(likeRecords) > 0 {
-			records = likeRecords
-			hasNext = likeHasNext
-		}
+	// 2. If 0 records found in file_name, check caption as fallback
+	if err == nil && len(records) == 0 {
+		capSQL, capArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, true)
+		records, hasNext, _ = s.queryRows(ctx, db, capSQL, capArgs, limit)
 	}
 
 	// If no records found
@@ -217,63 +199,26 @@ func (s *Service) queryRows(ctx context.Context, db *sql.DB, query string, args 
 	return records, hasNext, nil
 }
 
-func (s *Service) buildFTS5Expression(tokens []string, filter SearchFilter) string {
-	var ftsTerms []string
-	for _, tok := range tokens {
-		clean := cleanFTS5Token(tok)
-		if len(clean) >= 2 || (len(clean) == 1 && unicode.IsDigit(rune(clean[0]))) {
-			ftsTerms = append(ftsTerms, fmt.Sprintf(`"%s"`, clean))
-		}
-	}
-
-	if filter.Language != "" {
-		cleanLang := cleanFTS5Token(filter.Language)
-		if cleanLang != "" {
-			ftsTerms = append(ftsTerms, fmt.Sprintf(`"%s"`, cleanLang))
-		}
-	}
-
-	if filter.Quality != "" {
-		cleanQual := cleanFTS5Token(filter.Quality)
-		if cleanQual != "" {
-			ftsTerms = append(ftsTerms, fmt.Sprintf(`"%s"`, cleanQual))
-		}
-	}
-
-	if len(ftsTerms) == 0 {
-		return ""
-	}
-
-	return strings.Join(ftsTerms, " AND ")
-}
-
-func cleanFTS5Token(token string) string {
-	var sb strings.Builder
-	for _, r := range token {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			sb.WriteRune(unicode.ToLower(r))
-		}
-	}
-	return sb.String()
-}
-
-func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlusOne, offset int) (string, []any) {
+func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlusOne, offset int, searchCaption bool) (string, []any) {
 	var whereConditions []string
 	var args []any
 
+	col := "file_name"
+	if searchCaption {
+		col = "caption"
+	}
+
 	for _, token := range tokens {
 		if len(token) == 1 && unicode.IsDigit(rune(token[0])) {
-			whereConditions = append(whereConditions, "(file_name LIKE ? OR file_name LIKE ? OR file_name LIKE ? OR caption LIKE ?)")
+			whereConditions = append(whereConditions, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ?)", col, col, col))
 			args = append(args,
 				"%."+token+".%",
 				"% "+token+" %",
 				"%-"+token+"-%",
-				"% "+token+" %",
 			)
 		} else {
-			whereConditions = append(whereConditions, "(file_name LIKE ? OR caption LIKE ?)")
-			pattern := "%" + token + "%"
-			args = append(args, pattern, pattern)
+			whereConditions = append(whereConditions, fmt.Sprintf("%s LIKE ?", col))
+			args = append(args, "%"+token+"%")
 		}
 	}
 
@@ -335,79 +280,42 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 		return nil, nil
 	}
 
-	var rawFileNames []string
-
-	// 1. Try FTS5 OR search for fast candidate discovery
-	var ftsOrTerms []string
+	var orClauses []string
+	var candidateArgs []any
 	for _, tok := range tokens {
-		clean := cleanFTS5Token(tok)
-		if len(clean) >= 2 {
-			ftsOrTerms = append(ftsOrTerms, fmt.Sprintf(`"%s"`, clean))
-		}
-	}
-
-	if len(ftsOrTerms) > 0 {
-		ftsOrExpr := strings.Join(ftsOrTerms, " OR ")
-		ftsQuery := `
-			SELECT m.file_name
-			FROM media_fts f
-			JOIN media m ON f.rowid = m.rowid
-			WHERE media_fts MATCH ?
-			LIMIT 60;
-		`
-		rows, err := db.QueryContext(ctx, ftsQuery, ftsOrExpr)
-		if err == nil {
-			for rows.Next() {
-				var name string
-				if err := rows.Scan(&name); err == nil {
-					rawFileNames = append(rawFileNames, name)
-				}
-			}
-			_ = rows.Close()
-		}
-	}
-
-	// 2. Fallback to LIKE if FTS produced 0 candidates
-	if len(rawFileNames) == 0 {
-		var orClauses []string
-		var candidateArgs []any
-		for _, tok := range tokens {
-			if len(tok) >= 3 {
-				orClauses = append(orClauses, "file_name LIKE ?")
-				candidateArgs = append(candidateArgs, "%"+tok+"%")
-			}
-			if len(tok) >= 4 {
-				orClauses = append(orClauses, "file_name LIKE ?")
-				candidateArgs = append(candidateArgs, "%"+tok[:3]+"%")
-			}
-		}
-
-		if len(orClauses) == 0 && len(tokens) > 0 {
-			tok := tokens[0]
+		if len(tok) >= 3 {
 			orClauses = append(orClauses, "file_name LIKE ?")
-			candidateArgs = append(candidateArgs, tok+"%")
+			candidateArgs = append(candidateArgs, "%"+tok+"%")
 		}
-
-		if len(orClauses) > 0 {
-			likeQuery := fmt.Sprintf(`
-				SELECT DISTINCT file_name
-				FROM media
-				WHERE %s
-				ORDER BY date_saved DESC
-				LIMIT 60;
-			`, strings.Join(orClauses, " OR "))
-			rows, err := db.QueryContext(ctx, likeQuery, candidateArgs...)
-			if err == nil {
-				for rows.Next() {
-					var name string
-					if err := rows.Scan(&name); err == nil {
-						rawFileNames = append(rawFileNames, name)
-					}
-				}
-				_ = rows.Close()
-			}
+		if len(tok) >= 4 {
+			orClauses = append(orClauses, "file_name LIKE ?")
+			candidateArgs = append(candidateArgs, "%"+tok[:3]+"%")
 		}
 	}
+
+	if len(orClauses) == 0 && len(tokens) > 0 {
+		tok := tokens[0]
+		orClauses = append(orClauses, "file_name LIKE ?")
+		candidateArgs = append(candidateArgs, tok+"%")
+	}
+
+	if len(orClauses) == 0 {
+		return nil, nil
+	}
+
+	likeQuery := fmt.Sprintf(`
+		SELECT DISTINCT file_name
+		FROM media
+		WHERE %s
+		ORDER BY date_saved DESC
+		LIMIT 60;
+	`, strings.Join(orClauses, " OR "))
+
+	rows, err := db.QueryContext(ctx, likeQuery, candidateArgs...)
+	if err != nil {
+		return nil, nil
+	}
+	defer rows.Close()
 
 	type scoredSuggestion struct {
 		title string
@@ -417,7 +325,12 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 	seen := make(map[string]struct{})
 	var candidates []scoredSuggestion
 
-	for _, rawFileName := range rawFileNames {
+	for rows.Next() {
+		var rawFileName string
+		if err := rows.Scan(&rawFileName); err != nil {
+			continue
+		}
+
 		cleanTitle := CleanReleaseName(rawFileName)
 		if cleanTitle == "" || len(cleanTitle) < 2 {
 			cleanTitle = strings.TrimSpace(rawFileName)

@@ -212,7 +212,7 @@ func TestSQLite_IndexDropAndRestore(t *testing.T) {
 
 	// Verify indexes exist after Open
 	var idxCount int
-	err := mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_media_%';").Scan(&idxCount)
+	err := mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount)
 	if err != nil || idxCount < 3 {
 		t.Fatalf("expected indexes to exist initially, got count %d (err: %v)", idxCount, err)
 	}
@@ -222,7 +222,7 @@ func TestSQLite_IndexDropAndRestore(t *testing.T) {
 		t.Fatalf("failed to drop secondary indexes: %v", err)
 	}
 
-	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_media_%';").Scan(&idxCount)
+	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount)
 	if err != nil || idxCount != 0 {
 		t.Errorf("expected 0 secondary indexes after drop, got %d", idxCount)
 	}
@@ -237,7 +237,7 @@ func TestSQLite_IndexDropAndRestore(t *testing.T) {
 		t.Fatalf("failed to restore indexes: %v", err)
 	}
 
-	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_media_%';").Scan(&idxCount)
+	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount)
 	if err != nil || idxCount < 3 {
 		t.Errorf("expected indexes restored, got %d", idxCount)
 	}
