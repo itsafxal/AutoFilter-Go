@@ -397,27 +397,23 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	var sentMsgID int64
 	if sentMsg != nil {
 		sentMsgID = int64(sentMsg.ID)
+		StoreDeliveredMessage(rec.FileID, chatID, sentMsg.ID)
+		StoreDeliveredMessage(cleanID, chatID, sentMsg.ID)
 
-		// Persist fresh Telegram file reference returned by Telegram
-		if sentMsg.Message != nil && sentMsg.Message.Media != nil {
-			var freshRef []byte
-			switch m := sentMsg.Message.Media.(type) {
-			case *telegram.MessageMediaDocument:
-				if doc, ok := m.Document.(*telegram.DocumentObj); ok && len(doc.FileReference) > 0 {
-					freshRef = doc.FileReference
-				}
-			case *telegram.MessageMediaPhoto:
-				if photo, ok := m.Photo.(*telegram.PhotoObj); ok && len(photo.FileReference) > 0 {
-					freshRef = photo.FileReference
-				}
+		// Try extracting from sentMsg or fetch the full message directly from Telegram
+		freshRef := ExtractFileRefFromMessage(sentMsg)
+		if len(freshRef) == 0 && sender != nil {
+			if msgs, gErr := sender.GetMessages(chatID, &telegram.SearchOption{IDs: []int32{sentMsg.ID}}); gErr == nil && len(msgs) > 0 {
+				freshRef = ExtractFileRefFromMessage(&msgs[0])
 			}
+		}
 
-			if len(freshRef) > 0 {
-				StoreFreshFileRef(rec.FileID, freshRef)
-				if s.db != nil {
-					encodedRef := base64.RawURLEncoding.EncodeToString(freshRef)
-					_ = s.db.UpdateMediaFileRef(context.Background(), rec.FileID, encodedRef)
-				}
+		if len(freshRef) > 0 {
+			StoreFreshFileRef(rec.FileID, freshRef)
+			StoreFreshFileRef(cleanID, freshRef)
+			if s.db != nil {
+				encodedRef := base64.RawURLEncoding.EncodeToString(freshRef)
+				_ = s.db.UpdateMediaFileRef(context.Background(), rec.FileID, encodedRef)
 			}
 		}
 	}
@@ -518,7 +514,7 @@ func isBadMediaRequest(err error) bool {
 		strings.Contains(desc, "fileref_")
 }
 
-// RefreshFileRef re-fetches a fresh Telegram file reference by sending the media silently to the owner/admin chat and immediately deleting it.
+// RefreshFileRef re-fetches a fresh Telegram file reference by querying the delivered message or owner chat.
 func (s *Service) RefreshFileRef(ctx context.Context, fileID string) (any, error) {
 	rec, err := s.GetMedia(ctx, fileID)
 	if err != nil || rec == nil {
@@ -530,50 +526,54 @@ func (s *Service) RefreshFileRef(ctx context.Context, fileID string) (any, error
 		return nil, errors.New("sender not available")
 	}
 
-	var targetChat int64
-	if s.ownerID != 0 {
-		targetChat = s.ownerID
-	} else if len(s.admins) > 0 {
-		targetChat = s.admins[0]
-	}
-	if targetChat == 0 {
-		return nil, errors.New("no admin or owner chat configured for file reference refresh")
-	}
-
-	mediaToSend, err := ResolveInputMedia(rec.FileID, rec.FileRef)
-	if err != nil {
-		return nil, err
-	}
-
-	// Send silently to owner/admin
-	sentMsg, sErr := sender.SendMedia(targetChat, mediaToSend, &telegram.MediaOptions{
-		Silent: true,
-	})
-	if sErr != nil || sentMsg == nil {
-		return nil, sErr
-	}
-
-	// Immediately delete so admin is never disturbed
-	defer func() {
-		_, _ = sentMsg.Delete()
-	}()
-
 	var freshRef []byte
-	if sentMsg.Message != nil && sentMsg.Message.Media != nil {
-		switch m := sentMsg.Message.Media.(type) {
-		case *telegram.MessageMediaDocument:
-			if doc, ok := m.Document.(*telegram.DocumentObj); ok && len(doc.FileReference) > 0 {
-				freshRef = doc.FileReference
+
+	// 1. If this file was previously delivered, fetch that message directly to get the valid reference
+	if dm, ok := GetDeliveredMessage(rec.FileID); ok {
+		if msgs, gErr := sender.GetMessages(dm.ChatID, &telegram.SearchOption{IDs: []int32{dm.MsgID}}); gErr == nil && len(msgs) > 0 {
+			freshRef = ExtractFileRefFromMessage(&msgs[0])
+		}
+	}
+	if len(freshRef) == 0 {
+		if dm, ok := GetDeliveredMessage(fileID); ok {
+			if msgs, gErr := sender.GetMessages(dm.ChatID, &telegram.SearchOption{IDs: []int32{dm.MsgID}}); gErr == nil && len(msgs) > 0 {
+				freshRef = ExtractFileRefFromMessage(&msgs[0])
 			}
-		case *telegram.MessageMediaPhoto:
-			if photo, ok := m.Photo.(*telegram.PhotoObj); ok && len(photo.FileReference) > 0 {
-				freshRef = photo.FileReference
+		}
+	}
+
+	// 2. If not found or reference still empty, send to owner/admin to generate a fresh reference
+	if len(freshRef) == 0 {
+		var targetChat int64
+		if s.ownerID != 0 {
+			targetChat = s.ownerID
+		} else if len(s.admins) > 0 {
+			targetChat = s.admins[0]
+		}
+		if targetChat != 0 {
+			mediaToSend, rErr := ResolveInputMedia(rec.FileID, rec.FileRef)
+			if rErr == nil {
+				sentMsg, sErr := sender.SendMedia(targetChat, mediaToSend, &telegram.MediaOptions{Silent: true})
+				if sErr == nil && sentMsg != nil {
+					// Fetch full message to get DocumentObj
+					if msgs, gErr := sender.GetMessages(targetChat, &telegram.SearchOption{IDs: []int32{sentMsg.ID}}); gErr == nil && len(msgs) > 0 {
+						freshRef = ExtractFileRefFromMessage(&msgs[0])
+					}
+					if len(freshRef) == 0 {
+						freshRef = ExtractFileRefFromMessage(sentMsg)
+					}
+					// Keep message alive briefly before deleting so Telegram doesn't immediately revoke the reference
+					time.AfterFunc(10*time.Minute, func() {
+						_, _ = sentMsg.Delete()
+					})
+				}
 			}
 		}
 	}
 
 	if len(freshRef) > 0 {
 		StoreFreshFileRef(rec.FileID, freshRef)
+		StoreFreshFileRef(fileID, freshRef)
 		if s.db != nil {
 			encodedRef := base64.RawURLEncoding.EncodeToString(freshRef)
 			_ = s.db.UpdateMediaFileRef(ctx, rec.FileID, encodedRef)

@@ -8,4 +8,5 @@ import (
 // *telegram.Client natively implements this interface.
 type TelegramSender interface {
 	SendMedia(peerID any, media any, opts ...*telegram.MediaOptions) (*telegram.NewMessage, error)
+	GetMessages(PeerID any, Opts ...*telegram.SearchOption) ([]telegram.NewMessage, error)
 }

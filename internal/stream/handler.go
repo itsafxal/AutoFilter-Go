@@ -368,9 +368,12 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 			// Automatic on-demand refresh if Telegram file reference expired
 			if isFileRefExpired(err) && h.refresher != nil {
 				h.logger.Info("file reference expired, attempting on-demand refresh...", "file_id", fileID)
-				if refreshed, rErr := h.refresher.RefreshFileRef(ctx, fileID); rErr == nil && refreshed != nil {
+				refreshed, rErr := h.refresher.RefreshFileRef(ctx, fileID)
+				if rErr == nil && refreshed != nil {
 					mediaToDownload = refreshed
 					data, _, err = h.downloader.DownloadChunk(mediaToDownload, int(alignedOffset), int(alignedEnd), chunkSize)
+				} else if rErr != nil {
+					h.logger.Warn("file reference refresh failed", "file_id", fileID, "error", rErr)
 				}
 			}
 			if err != nil {

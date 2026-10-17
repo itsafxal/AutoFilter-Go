@@ -18,8 +18,6 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 	"github.com/itsafxal/MYTGBOTZ/internal/stream"
 	"github.com/itsafxal/MYTGBOTZ/internal/telegram"
-
-	gogram "github.com/amarnathcjd/gogram/telegram"
 )
 
 // App coordinates the lifecycle of configuration, plugins, logging, database, and Telegram services.
@@ -168,27 +166,10 @@ func (a *App) InitBot() error {
 			if a.DeliveryService != nil {
 				srv.SetRefresher(a.DeliveryService)
 			}
-			if a.Config != nil && a.Config.StreamBotToken != "" {
-				// Dedicated bot client for media download streaming
-				streamClient, sErr := gogram.NewClient(gogram.ClientConfig{
-					AppID:         a.Config.AppID,
-					AppHash:       a.Config.AppHash,
-					LogLevel:      gogram.LogError,
-					MemorySession: true,
-				})
-				if sErr == nil {
-					if lErr := streamClient.LoginBot(a.Config.StreamBotToken); lErr == nil {
-						srv.SetDownloader(streamClient)
-						a.Logger.Info("stream service initialized with dedicated stream bot token")
-					} else {
-						a.Logger.Warn("failed to login dedicated stream bot, falling back to primary bot client", "error", lErr)
-						srv.SetDownloader(a.BotService.Client())
-					}
-				} else {
-					srv.SetDownloader(a.BotService.Client())
-				}
-			} else if a.BotService != nil {
+			if a.BotService != nil && a.BotService.Client() != nil {
+				// Primary authenticated bot client matches the delivery session and file references
 				srv.SetDownloader(a.BotService.Client())
+				a.Logger.Info("stream service initialized with primary bot MTProto client")
 			}
 		}
 		if a.Config != nil && a.Config.StreamServerEnabled {

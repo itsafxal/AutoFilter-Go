@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -51,6 +52,10 @@ func (m *mockSender) SendMedia(peerID any, media any, opts ...*telegram.MediaOpt
 	return &telegram.NewMessage{
 		ID: m.returnMsgID,
 	}, nil
+}
+
+func (m *mockSender) GetMessages(PeerID any, Opts ...*telegram.SearchOption) ([]telegram.NewMessage, error) {
+	return []telegram.NewMessage{}, nil
 }
 
 // setupTestDB creates an isolated SQLite test database populated with a sample media record.
@@ -454,6 +459,7 @@ func TestUnpackRealFileID(t *testing.T) {
 	fileIDs := []string{
 		"BQADBQADUSMAAh2okFbVi5c8UqF9IhYE",
 		"BQADBQADUYMAAk5vkVaZsqm_4ZRrBRYE",
+		"BQADBAADmh8AAm192VH4gNHxsL7qdRYE",
 	}
 
 	for _, fid := range fileIDs {
@@ -515,6 +521,58 @@ func TestUnpackRealFileID(t *testing.T) {
 		if name != "test_movie.mkv" {
 			t.Errorf("expected filename 'test_movie.mkv', got %s", name)
 		}
+	}
+}
+
+func TestFileReference_OverrideStaleReference(t *testing.T) {
+	fid := "BQADBQADUSMAAh2okFbVi5c8UqF9IhYE"
+	freshRef := []byte("FRESH_TOKEN_OVERRIDE_12345")
+	encodedFreshRef := base64.RawURLEncoding.EncodeToString(freshRef)
+
+	// 1. Verify ResolveDownloadMedia overrides with fileRefStr
+	docMedia, err := ResolveDownloadMedia(fid, encodedFreshRef, "test.mkv", 1000, "video/mp4")
+	if err != nil {
+		t.Fatalf("ResolveDownloadMedia failed: %v", err)
+	}
+	docObj, ok := docMedia.(*telegram.DocumentObj)
+	if !ok {
+		t.Fatalf("expected *telegram.DocumentObj, got %T", docMedia)
+	}
+	if string(docObj.FileReference) != string(freshRef) {
+		t.Errorf("expected FileReference %q, got %q", freshRef, docObj.FileReference)
+	}
+
+	// 2. Verify ResolveDownloadMedia prioritizes in-memory fresh cache
+	cacheRef := []byte("CACHE_TOKEN_OVERRIDE_99999")
+	StoreFreshFileRef(fid, cacheRef)
+
+	docMediaCached, err := ResolveDownloadMedia(fid, "", "test.mkv", 1000, "video/mp4")
+	if err != nil {
+		t.Fatalf("ResolveDownloadMedia failed: %v", err)
+	}
+	docObjCached, ok := docMediaCached.(*telegram.DocumentObj)
+	if !ok {
+		t.Fatalf("expected *telegram.DocumentObj, got %T", docMediaCached)
+	}
+	if string(docObjCached.FileReference) != string(cacheRef) {
+		t.Errorf("expected cached FileReference %q, got %q", cacheRef, docObjCached.FileReference)
+	}
+
+	// 3. Verify ResolveInputMedia also respects fresh cache
+	inputMedia, err := ResolveInputMedia(fid, "")
+	if err != nil {
+		t.Fatalf("ResolveInputMedia failed: %v", err)
+	}
+	inputDoc, ok := inputMedia.(*telegram.InputMediaDocument)
+	if !ok {
+		t.Fatalf("expected *telegram.InputMediaDocument, got %T", inputMedia)
+	}
+	inObj, ok := inputDoc.ID.(*telegram.InputDocumentObj)
+	if !ok {
+		t.Fatalf("expected *telegram.InputDocumentObj, got %T", inputDoc.ID)
+	}
+	if string(inObj.FileReference) != string(cacheRef) {
+		t.Errorf("expected cached FileReference %q, got %q", cacheRef, inObj.FileReference)
 	}
 }
 

@@ -36,6 +36,55 @@ func GetFreshFileRef(fileID string) ([]byte, bool) {
 	return nil, false
 }
 
+// DeliveredMessage records the chat and message ID where a file was delivered.
+type DeliveredMessage struct {
+	ChatID int64
+	MsgID  int32
+}
+
+var (
+	// DeliveredMessages stores the last known delivered message for a file_id.
+	DeliveredMessages sync.Map
+)
+
+// StoreDeliveredMessage tracks where a file was sent so fresh references can be retrieved directly from Telegram.
+func StoreDeliveredMessage(fileID string, chatID int64, msgID int32) {
+	if fileID != "" && chatID != 0 && msgID != 0 {
+		DeliveredMessages.Store(fileID, &DeliveredMessage{ChatID: chatID, MsgID: msgID})
+	}
+}
+
+// GetDeliveredMessage retrieves the last known delivery location for a file.
+func GetDeliveredMessage(fileID string) (*DeliveredMessage, bool) {
+	if fileID == "" {
+		return nil, false
+	}
+	if val, ok := DeliveredMessages.Load(fileID); ok {
+		if dm, ok := val.(*DeliveredMessage); ok {
+			return dm, true
+		}
+	}
+	return nil, false
+}
+
+// ExtractFileRefFromMessage extracts the cryptographic file reference from a Telegram NewMessage.
+func ExtractFileRefFromMessage(msg *telegram.NewMessage) []byte {
+	if msg == nil || msg.Message == nil || msg.Message.Media == nil {
+		return nil
+	}
+	switch m := msg.Message.Media.(type) {
+	case *telegram.MessageMediaDocument:
+		if doc, ok := m.Document.(*telegram.DocumentObj); ok && len(doc.FileReference) > 0 {
+			return doc.FileReference
+		}
+	case *telegram.MessageMediaPhoto:
+		if photo, ok := m.Photo.(*telegram.PhotoObj); ok && len(photo.FileReference) > 0 {
+			return photo.FileReference
+		}
+	}
+	return nil
+}
+
 const (
 	webLocationFlag   = 1 << 24
 	fileReferenceFlag = 1 << 25
@@ -241,12 +290,17 @@ func ResolveInputMedia(fileID string, fileRefStr string) (telegram.InputMedia, e
 		return nil, err
 	}
 
-	// Determine file reference
-	fileRef := parsed.FileReference
-	if len(fileRef) == 0 && strings.TrimSpace(fileRefStr) != "" {
-		if refBytes, err := decodeBase64FileID(fileRefStr); err == nil {
+	// Determine file reference, prioritizing fresh in-memory cache and updated DB reference over static file_id
+	var fileRef []byte
+	if cachedRef, ok := GetFreshFileRef(fileID); ok && len(cachedRef) > 0 {
+		fileRef = cachedRef
+	} else if strings.TrimSpace(fileRefStr) != "" {
+		if refBytes, err := decodeBase64FileID(fileRefStr); err == nil && len(refBytes) > 0 {
 			fileRef = refBytes
 		}
+	}
+	if len(fileRef) == 0 {
+		fileRef = parsed.FileReference
 	}
 
 	// Photo type (FileType 2)
@@ -274,6 +328,16 @@ func ResolveInputMedia(fileID string, fileRefStr string) (telegram.InputMedia, e
 // (*telegram.DocumentObj or *telegram.PhotoObj) that is natively supported by Gogram's GetFileLocation
 // and DownloadChunk for streaming and direct HTTP downloads.
 func ResolveDownloadMedia(fileID string, fileRefStr string, fileName string, fileSize int64, mimeType string) (any, error) {
+	// Determine file reference, prioritizing fresh in-memory cache and updated DB reference
+	var fileRef []byte
+	if cachedRef, ok := GetFreshFileRef(fileID); ok && len(cachedRef) > 0 {
+		fileRef = cachedRef
+	} else if strings.TrimSpace(fileRefStr) != "" {
+		if refBytes, err := decodeBase64FileID(fileRefStr); err == nil && len(refBytes) > 0 {
+			fileRef = refBytes
+		}
+	}
+
 	parsed, err := UnpackFileID(fileID)
 	if err != nil {
 		// Try Gogram's built-in parser as fallback
@@ -281,6 +345,9 @@ func ResolveDownloadMedia(fileID string, fileRefStr string, fileName string, fil
 			switch m := res.(type) {
 			case *telegram.MessageMediaDocument:
 				if doc, ok := m.Document.(*telegram.DocumentObj); ok {
+					if len(fileRef) > 0 {
+						doc.FileReference = fileRef
+					}
 					if fileSize > 0 {
 						doc.Size = fileSize
 					}
@@ -296,6 +363,9 @@ func ResolveDownloadMedia(fileID string, fileRefStr string, fileName string, fil
 				}
 			case *telegram.MessageMediaPhoto:
 				if photo, ok := m.Photo.(*telegram.PhotoObj); ok {
+					if len(fileRef) > 0 {
+						photo.FileReference = fileRef
+					}
 					return photo, nil
 				}
 			}
@@ -304,17 +374,8 @@ func ResolveDownloadMedia(fileID string, fileRefStr string, fileName string, fil
 		return nil, err
 	}
 
-	// Determine file reference, prioritizing fresh in-memory cache
-	var fileRef []byte
-	if cachedRef, ok := GetFreshFileRef(fileID); ok && len(cachedRef) > 0 {
-		fileRef = cachedRef
-	} else {
+	if len(fileRef) == 0 {
 		fileRef = parsed.FileReference
-		if len(fileRef) == 0 && strings.TrimSpace(fileRefStr) != "" {
-			if refBytes, err := decodeBase64FileID(fileRefStr); err == nil {
-				fileRef = refBytes
-			}
-		}
 	}
 
 	// Photo type (FileType 2)

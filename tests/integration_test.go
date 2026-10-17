@@ -166,6 +166,10 @@ func (m *integrationMockSender) SendMedia(peerID any, media any, opts ...*telegr
 	return &telegram.NewMessage{ID: 777}, nil
 }
 
+func (m *integrationMockSender) GetMessages(PeerID any, Opts ...*telegram.SearchOption) ([]telegram.NewMessage, error) {
+	return []telegram.NewMessage{}, nil
+}
+
 func TestIntegration_MediaDeliveryWorkflow(t *testing.T) {
 	buf := &bytes.Buffer{}
 	logger := logging.NewLogger(config.LogLevelInfo, buf)
