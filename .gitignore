@@ -7,6 +7,8 @@
 *.cert
 *.crt
 *.session
+*.dat
+cache*.db
 
 # Local binaries and compiled artifacts
 bin/

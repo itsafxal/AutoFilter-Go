@@ -18,6 +18,8 @@ func TestApp_Lifecycle(t *testing.T) {
 	logger := logging.NewLogger(config.LogLevelDebug, buf)
 	cfg := &config.Config{
 		BotToken: "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+		AppID:    12345,
+		AppHash:  "0123456789abcdef0123456789abcdef",
 		OwnerID:  99887766,
 		Admins:   []int64{99887766},
 		LogLevel: config.LogLevelDebug,

@@ -6,8 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -42,7 +41,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 }
 
 // BuildBotInfoReport builds a safe bot overview without exposing secrets or fake stats.
-func BuildBotInfoReport(botUser *gotgbot.User, startTime time.Time) string {
+func BuildBotInfoReport(botUser *telegram.UserObj, startTime time.Time) string {
 	botName := "Bot"
 	botUsername := "N/A"
 	botID := int64(0)
@@ -51,7 +50,7 @@ func BuildBotInfoReport(botUser *gotgbot.User, startTime time.Time) string {
 		if botUser.Username != "" {
 			botUsername = "@" + commands.EscapeHTML(botUser.Username)
 		}
-		botID = botUser.Id
+		botID = botUser.ID
 	}
 
 	uptime := commands.FormatUptime(startTime)
@@ -63,7 +62,7 @@ func BuildBotInfoReport(botUser *gotgbot.User, startTime time.Time) string {
 			"📛 <b>Bot Name:</b> %s\n"+
 			"✨ <b>Username:</b> %s\n"+
 			"🆔 <b>Bot ID:</b> <code>%d</code>\n"+
-			"📚 <b>Library:</b> <code>gotgbot v2.0.0-rc.36</code>\n"+
+			"📚 <b>Library:</b> <code>Gogram v1.7.71</code>\n"+
 			"💻 <b>Language:</b> <code>%s</code>\n"+
 			"⏱️ <b>Uptime:</b> <code>%s</code>\n"+
 			"────────────────────",
@@ -76,7 +75,7 @@ func BuildBotInfoReport(botUser *gotgbot.User, startTime time.Time) string {
 }
 
 // BuildUserInfoReport builds safe user profile details.
-func BuildUserInfoReport(user *gotgbot.User) string {
+func BuildUserInfoReport(user *telegram.UserObj) string {
 	if user == nil {
 		return "⚠️ <b>User Profile Details:</b> <i>User information not available.</i>"
 	}
@@ -103,43 +102,46 @@ func BuildUserInfoReport(user *gotgbot.User) string {
 			"────────────────────",
 		firstName,
 		lastName,
-		user.Id,
+		user.ID,
 		username,
-		user.Id,
+		user.ID,
 	)
 }
 
 // HandleInfo handles the /info and /about command.
-func (p *Plugin) HandleInfo(b *gotgbot.Bot, ctx *ext.Context) error {
-	msg := ctx.EffectiveMessage
-
+func (p *Plugin) HandleInfo(m *telegram.NewMessage) error {
 	// If replying to a user's message, display target user info
-	if msg.ReplyToMessage != nil && msg.ReplyToMessage.From != nil {
-		userReport := BuildUserInfoReport(msg.ReplyToMessage.From)
-		_, err := msg.Reply(b, userReport, &gotgbot.SendMessageOpts{
-			ParseMode: "HTML",
-		})
-		return err
+	if m.IsReply() {
+		reply, err := m.GetReplyMessage()
+		if err == nil && reply != nil && reply.Sender != nil {
+			userReport := BuildUserInfoReport(reply.Sender)
+			_, err := m.Reply(userReport, &telegram.SendOptions{
+				ParseMode: "html",
+			})
+			return err
+		}
 	}
 
 	// Otherwise, display bot info
 	var startTime time.Time
+	var botUser *telegram.UserObj
 	if p.appCtx != nil {
 		startTime = p.appCtx.StartTime
+		botUser = p.appCtx.BotUser
 	}
 
-	botReport := BuildBotInfoReport(&b.User, startTime)
+	botReport := BuildBotInfoReport(botUser, startTime)
 	var sb strings.Builder
 	sb.WriteString(botReport)
 
 	// If in private chat, append requesting user details
-	if ctx.EffectiveChat.Type == "private" && ctx.EffectiveSender != nil && ctx.EffectiveSender.User != nil {
+	if m.IsPrivate() && m.Sender != nil {
 		sb.WriteString("\n\n")
-		sb.WriteString(BuildUserInfoReport(ctx.EffectiveSender.User))
+		sb.WriteString(BuildUserInfoReport(m.Sender))
 	}
 
-	_, err := msg.Reply(b, sb.String(), &gotgbot.SendMessageOpts{
-		ParseMode: "HTML",
+	_, err := m.Reply(sb.String(), &telegram.SendOptions{
+		ParseMode: "html",
 	})
 	return err
 }

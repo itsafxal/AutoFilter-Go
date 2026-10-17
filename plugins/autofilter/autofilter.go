@@ -9,9 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/message"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 )
@@ -81,12 +79,12 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
 	return []plugins.MessageDefinition{
 		{
-			Filter: func(m *gotgbot.Message) bool {
-				if m == nil || m.Text == "" {
+			Filter: func(m *telegram.NewMessage) bool {
+				if m == nil || m.Text() == "" {
 					return false
 				}
 				// Reject commands
-				if message.Command(m) {
+				if m.IsCommand() || strings.HasPrefix(m.Text(), "/") {
 					return false
 				}
 				return true
@@ -111,16 +109,13 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 }
 
 // HandleTextMessage intercepts user movie search queries in PM and group chats.
-func (p *Plugin) HandleTextMessage(b *gotgbot.Bot, ctx *ext.Context) error {
-	msg := ctx.EffectiveMessage
-	user := ctx.EffectiveSender.User
-	chat := ctx.EffectiveChat
-
-	if msg == nil || user == nil || chat == nil {
+func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
+	user := m.Sender
+	if m == nil || user == nil {
 		return nil
 	}
 
-	query := strings.TrimSpace(msg.Text)
+	query := strings.TrimSpace(m.Text())
 	if !search.IsValidSearchText(query) {
 		return nil
 	}
@@ -129,7 +124,7 @@ func (p *Plugin) HandleTextMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	searchKey := fmt.Sprintf("%d_%d", user.Id, msg.MessageId)
+	searchKey := fmt.Sprintf("%d_%d", user.ID, m.ID)
 
 	// Execute search
 	result, err := p.appCtx.Search.Search(context.Background(), query, maxFilesPerPage, 0, search.SearchFilter{})
@@ -146,16 +141,16 @@ func (p *Plugin) HandleTextMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 	if len(result.Files) > 0 {
 		p.saveSession(searchKey, &searchSession{
 			Query:     query,
-			UserID:    user.Id,
-			ChatID:    chat.Id,
+			UserID:    user.ID,
+			ChatID:    m.ChatID(),
 			UpdatedAt: time.Now(),
 		})
 
 		text := formatResultText(userMention, query, 1)
 		kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
-		_, replyErr := msg.Reply(b, text, &gotgbot.SendMessageOpts{
-			ParseMode:   "HTML",
+		_, replyErr := m.Reply(text, &telegram.SendOptions{
+			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
 		return replyErr
@@ -166,8 +161,8 @@ func (p *Plugin) HandleTextMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 	if sugErr == nil && len(suggestions) > 0 {
 		p.saveSession(searchKey, &searchSession{
 			Query:       query,
-			UserID:      user.Id,
-			ChatID:      chat.Id,
+			UserID:      user.ID,
+			ChatID:      m.ChatID(),
 			Suggestions: suggestions,
 			UpdatedAt:   time.Now(),
 		})
@@ -175,8 +170,8 @@ func (p *Plugin) HandleTextMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 		text := formatSpellCheckText(userMention, query)
 		kb := p.buildSpellCheckKeyboard(suggestions, searchKey)
 
-		_, replyErr := msg.Reply(b, text, &gotgbot.SendMessageOpts{
-			ParseMode:   "HTML",
+		_, replyErr := m.Reply(text, &telegram.SendOptions{
+			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
 		return replyErr
@@ -187,54 +182,52 @@ func (p *Plugin) HandleTextMessage(b *gotgbot.Bot, ctx *ext.Context) error {
 		"Hᴇʏ %s 💫,\nNᴏ Sᴇᴀʀᴄʜ Rᴇꜱᴜʟᴛ Fᴏᴜɴᴅ Fᴏʀ Yᴏᴜʀ Rᴇᴏ̨ᴜᴇsᴛᴇᴅ Mᴏᴠɪᴇ.\n\n➪ Sᴇɴᴅ Mᴇ A Cᴏʀʀᴇᴄᴛ Sᴘᴇʟʟɪɴɢ. Oʀ Pʟᴇᴀꜱᴇ Cʜᴇᴄᴋ Tʜᴀᴛ Mᴏᴠɪᴇ Oᴛᴛ Rᴇʟᴇᴇsᴇᴅ.✨",
 		userMention,
 	)
-	_, replyErr := msg.Reply(b, notFoundText, &gotgbot.SendMessageOpts{
-		ParseMode: "HTML",
+	_, replyErr := m.Reply(notFoundText, &telegram.SendOptions{
+		ParseMode: "html",
 	})
 	return replyErr
 }
 
 // HandlePaginationCallback processes next/back navigation buttons.
 // Format: next|<searchKey>|<offset>
-func (p *Plugin) HandlePaginationCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandlePaginationCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.Split(cb.Data, "|")
+	parts := strings.Split(cb.DataString(), "|")
 	if len(parts) != 3 {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Invalid pagination data", ShowAlert: true})
+		_, _ = cb.Answer("Invalid pagination data", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
 	searchKey := parts[1]
 	offset, err := strconv.Atoi(parts[2])
 	if err != nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Invalid offset", ShowAlert: true})
+		_, _ = cb.Answer("Invalid offset", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
+	msg, _ := cb.GetMessage()
 	sess := p.getSession(searchKey)
-	if sess == nil && cb.Message != nil {
-		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
 		if sess != nil {
 			p.saveSession(searchKey, sess)
 		}
 	}
 
 	if sess == nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "🔁 Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ 😇",
-			ShowAlert: true,
+		_, _ = cb.Answer("🔁 Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ 😇", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
 
 	// Check user authorization
-	if cb.From.Id != sess.UserID {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.",
-			ShowAlert: true,
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
@@ -246,69 +239,62 @@ func (p *Plugin) HandlePaginationCallback(b *gotgbot.Bot, ctx *ext.Context) erro
 
 	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, offset, filter)
 	if err != nil || len(result.Files) == 0 {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "🚫 Nᴏ ᴍᴏʀᴇ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ 🚫",
-			ShowAlert: true,
+		_, _ = cb.Answer("🚫 Nᴏ ᴍᴏʀᴇ ʀᴇsᴜʟᴛs ғᴏᴜɴᴅ 🚫", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
 
-	userMention := formatUserMention(&cb.From)
+	userMention := formatUserMention(cb.Sender)
 	currentPage := (offset / maxFilesPerPage) + 1
 	text := formatResultText(userMention, sess.Query, currentPage)
 	kb := p.buildResultKeyboard(result.Files, searchKey, offset, result.NextOffset)
 
-	if cb.Message != nil {
-		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
-			Text:        text,
-			ParseMode:   "HTML",
+	_, editErr := cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(text, &telegram.SendOptions{
 			ReplyMarkup: kb,
 		})
-		if editErr != nil && isMessageNotModified(editErr) {
-			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-				ReplyMarkup: kb,
-			})
-		}
 	}
 
-	_, _ = cb.Answer(b, nil)
+	_, _ = cb.Answer("")
 	return nil
 }
 
 // HandleSpellCheckCallback processes clicks on spelling suggestions.
 // Format: sp#<searchKey>#<index>
-func (p *Plugin) HandleSpellCheckCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleSpellCheckCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.Split(cb.Data, "#")
+	parts := strings.Split(cb.DataString(), "#")
 	if len(parts) != 3 {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Invalid suggestion data", ShowAlert: true})
+		_, _ = cb.Answer("Invalid suggestion data", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
 	searchKey := parts[1]
 	idx, err := strconv.Atoi(parts[2])
 	if err != nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Invalid index", ShowAlert: true})
+		_, _ = cb.Answer("Invalid index", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
 	sess := p.getSession(searchKey)
 	if sess == nil || idx >= len(sess.Suggestions) {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ. 🔰",
-			ShowAlert: true,
+		_, _ = cb.Answer("Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ. 🔰", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
 
-	if cb.From.Id != sess.UserID {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.",
-			ShowAlert: true,
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
@@ -319,105 +305,99 @@ func (p *Plugin) HandleSpellCheckCallback(b *gotgbot.Bot, ctx *ext.Context) erro
 
 	result, err := p.appCtx.Search.Search(context.Background(), selectedQuery, maxFilesPerPage, 0, search.SearchFilter{})
 	if err != nil || len(result.Files) == 0 {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "🚫 Nᴏ ғɪʟᴇs ғᴏᴜɴᴅ.",
-			ShowAlert: true,
+		_, _ = cb.Answer("🚫 Nᴏ ғɪʟᴇs ғᴏᴜɴᴅ.", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
 
-	userMention := formatUserMention(&cb.From)
+	userMention := formatUserMention(cb.Sender)
 	text := formatResultText(userMention, selectedQuery, 1)
 	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
-	if cb.Message != nil {
-		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
-			Text:        text,
-			ParseMode:   "HTML",
+	_, editErr := cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(text, &telegram.SendOptions{
 			ReplyMarkup: kb,
 		})
-		if editErr != nil && isMessageNotModified(editErr) {
-			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-				ReplyMarkup: kb,
-			})
-		}
 	}
 
-	_, _ = cb.Answer(b, nil)
+	_, _ = cb.Answer("")
 	return nil
 }
 
 // HandleLanguagesCallback renders language filter selection buttons.
 // Format: languages#<searchKey>
-func (p *Plugin) HandleLanguagesCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.SplitN(cb.Data, "#", 2)
+	parts := strings.SplitN(cb.DataString(), "#", 2)
 	if len(parts) != 2 {
 		return nil
 	}
 	searchKey := parts[1]
 
+	msg, _ := cb.GetMessage()
 	sess := p.getSession(searchKey)
-	if sess == nil && cb.Message != nil {
-		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
 		if sess != nil {
 			p.saveSession(searchKey, sess)
 		}
 	}
 
 	if sess == nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
+		_, _ = cb.Answer("Search expired.", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
-	if cb.From.Id != sess.UserID {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "✋ This is not your search.", ShowAlert: true})
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ This is not your search.", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
-	var rows [][]gotgbot.InlineKeyboardButton
-	var currentRow []gotgbot.InlineKeyboardButton
+	kb := telegram.NewKeyboard()
+	var currentRow []telegram.KeyboardButton
 
 	for i, lang := range languages {
-		btn := gotgbot.InlineKeyboardButton{
-			Text:         lang.Label,
-			CallbackData: fmt.Sprintf("fl#%s#%s", lang.Code, searchKey),
-		}
+		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
 		currentRow = append(currentRow, btn)
 		if (i+1)%2 == 0 || i == len(languages)-1 {
-			rows = append(rows, currentRow)
+			kb.AddRow(currentRow...)
 			currentRow = nil
 		}
 	}
 
 	// Back to results button (matching TGxCyberBot)
-	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", CallbackData: fmt.Sprintf("next|%s|0", searchKey)},
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("next|%s|0", searchKey)))
+	markup := kb.Build()
+
+	currentText := ""
+	if msg != nil {
+		currentText = msg.Text()
+	}
+	_, _ = cb.Edit(currentText, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: markup,
 	})
 
-	if cb.Message != nil {
-		_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows},
-		})
-	}
-
-	_, _ = cb.Answer(b, nil)
+	_, _ = cb.Answer("")
 	return nil
 }
 
 // HandleFilterLanguageCallback filters current search by selected language.
 // Format: fl#<langCode>#<searchKey>
-func (p *Plugin) HandleFilterLanguageCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.Split(cb.Data, "#")
+	parts := strings.Split(cb.DataString(), "#")
 	if len(parts) != 3 {
 		return nil
 	}
@@ -425,16 +405,17 @@ func (p *Plugin) HandleFilterLanguageCallback(b *gotgbot.Bot, ctx *ext.Context) 
 	langCode := parts[1]
 	searchKey := parts[2]
 
+	msg, _ := cb.GetMessage()
 	sess := p.getSession(searchKey)
-	if sess == nil && cb.Message != nil {
-		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
 		if sess != nil {
 			p.saveSession(searchKey, sess)
 		}
 	}
 
 	if sess == nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
+		_, _ = cb.Answer("Search expired.", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
@@ -457,110 +438,107 @@ func (p *Plugin) HandleFilterLanguageCallback(b *gotgbot.Bot, ctx *ext.Context) 
 			origNext = origRes.NextOffset
 		}
 		origKb := p.buildResultKeyboard(origFiles, searchKey, 0, origNext)
-		if cb.Message != nil {
-			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-				ReplyMarkup: origKb,
-			})
+		currentText := ""
+		if msg != nil {
+			currentText = msg.Text()
 		}
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Lᴀɴɢᴜᴀɢᴇ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(langCode)),
-			ShowAlert: true,
+		_, _ = cb.Edit(currentText, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: origKb,
+		})
+		_, _ = cb.Answer(fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Lᴀɴɢᴜᴀɢᴇ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(langCode)), &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
 
-	userMention := formatUserMention(&cb.From)
+	userMention := formatUserMention(cb.Sender)
 	text := formatResultText(userMention, fmt.Sprintf("%s (%s)", sess.Query, strings.ToUpper(langCode)), 1)
 	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
-	if cb.Message != nil {
-		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
-			Text:        text,
-			ParseMode:   "HTML",
+	_, editErr := cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(text, &telegram.SendOptions{
 			ReplyMarkup: kb,
 		})
-		if editErr != nil && isMessageNotModified(editErr) {
-			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-				ReplyMarkup: kb,
-			})
-		}
 	}
 
-	_, _ = cb.Answer(b, nil)
+	_, _ = cb.Answer("")
 	return nil
 }
 
 // HandleQualitiesCallback renders quality filter selection buttons.
 // Format: qualities#<searchKey>
-func (p *Plugin) HandleQualitiesCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.SplitN(cb.Data, "#", 2)
+	parts := strings.SplitN(cb.DataString(), "#", 2)
 	if len(parts) != 2 {
 		return nil
 	}
 	searchKey := parts[1]
 
+	msg, _ := cb.GetMessage()
 	sess := p.getSession(searchKey)
-	if sess == nil && cb.Message != nil {
-		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
 		if sess != nil {
 			p.saveSession(searchKey, sess)
 		}
 	}
 
 	if sess == nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
+		_, _ = cb.Answer("Search expired.", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
-	if cb.From.Id != sess.UserID {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "✋ This is not your search.", ShowAlert: true})
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ This is not your search.", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
-	var rows [][]gotgbot.InlineKeyboardButton
-	var currentRow []gotgbot.InlineKeyboardButton
+	kb := telegram.NewKeyboard()
+	var currentRow []telegram.KeyboardButton
 
 	for i, q := range qualities {
-		btn := gotgbot.InlineKeyboardButton{
-			Text:         q,
-			CallbackData: fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey),
-		}
+		btn := telegram.Button.Data(q, fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey))
 		currentRow = append(currentRow, btn)
 		if (i+1)%3 == 0 || i == len(qualities)-1 {
-			rows = append(rows, currentRow)
+			kb.AddRow(currentRow...)
 			currentRow = nil
 		}
 	}
 
 	// Back button (matching TGxCyberBot)
-	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", CallbackData: fmt.Sprintf("next|%s|0", searchKey)},
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("next|%s|0", searchKey)))
+	markup := kb.Build()
+
+	currentText := ""
+	if msg != nil {
+		currentText = msg.Text()
+	}
+	_, _ = cb.Edit(currentText, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: markup,
 	})
 
-	if cb.Message != nil {
-		_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-			ReplyMarkup: gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows},
-		})
-	}
-
-	_, _ = cb.Answer(b, nil)
+	_, _ = cb.Answer("")
 	return nil
 }
 
 // HandleFilterQualityCallback filters current search by selected quality.
 // Format: fq#<quality>#<searchKey>
-func (p *Plugin) HandleFilterQualityCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.Split(cb.Data, "#")
+	parts := strings.Split(cb.DataString(), "#")
 	if len(parts) != 3 {
 		return nil
 	}
@@ -568,16 +546,17 @@ func (p *Plugin) HandleFilterQualityCallback(b *gotgbot.Bot, ctx *ext.Context) e
 	quality := parts[1]
 	searchKey := parts[2]
 
+	msg, _ := cb.GetMessage()
 	sess := p.getSession(searchKey)
-	if sess == nil && cb.Message != nil {
-		sess = p.recoverSessionFromMessage(cb.Message, cb.From.Id)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
 		if sess != nil {
 			p.saveSession(searchKey, sess)
 		}
 	}
 
 	if sess == nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{Text: "Search expired.", ShowAlert: true})
+		_, _ = cb.Answer("Search expired.", &telegram.CallbackOptions{Alert: true})
 		return nil
 	}
 
@@ -600,56 +579,52 @@ func (p *Plugin) HandleFilterQualityCallback(b *gotgbot.Bot, ctx *ext.Context) e
 			origNext = origRes.NextOffset
 		}
 		origKb := p.buildResultKeyboard(origFiles, searchKey, 0, origNext)
-		if cb.Message != nil {
-			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-				ReplyMarkup: origKb,
-			})
+		currentText := ""
+		if msg != nil {
+			currentText = msg.Text()
 		}
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Qᴜᴀʟɪᴛʏ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(quality)),
-			ShowAlert: true,
+		_, _ = cb.Edit(currentText, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: origKb,
+		})
+		_, _ = cb.Answer(fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Qᴜᴀʟɪᴛʏ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(quality)), &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return nil
 	}
 
-	userMention := formatUserMention(&cb.From)
+	userMention := formatUserMention(cb.Sender)
 	text := formatResultText(userMention, fmt.Sprintf("%s (%s)", sess.Query, strings.ToUpper(quality)), 1)
 	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
-	if cb.Message != nil {
-		_, _, editErr := cb.Message.EditText(b, &gotgbot.EditMessageTextOpts{
-			Text:        text,
-			ParseMode:   "HTML",
+	_, editErr := cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(text, &telegram.SendOptions{
 			ReplyMarkup: kb,
 		})
-		if editErr != nil && isMessageNotModified(editErr) {
-			_, _, _ = cb.Message.EditReplyMarkup(b, &gotgbot.EditMessageReplyMarkupOpts{
-				ReplyMarkup: kb,
-			})
-		}
 	}
 
-	_, _ = cb.Answer(b, nil)
+	_, _ = cb.Answer("")
 	return nil
 }
 
 // HandleCloseCallback deletes the search message.
-func (p *Plugin) HandleCloseCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
-	if cb != nil && cb.Message != nil {
-		_, _ = cb.Message.Delete(b, nil)
-		_, _ = cb.Answer(b, nil)
+func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
+	if cb != nil {
+		_, _ = cb.Delete()
+		_, _ = cb.Answer("")
 	}
 	return nil
 }
 
 // HandlePagesCallback answers non-clickable page indicator button.
-func (p *Plugin) HandlePagesCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandlePagesCallback(cb *telegram.CallbackQuery) error {
 	if cb != nil {
-		_, _ = cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭",
-			ShowAlert: false,
+		_, _ = cb.Answer("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", &telegram.CallbackOptions{
+			Alert: false,
 		})
 	}
 	return nil
@@ -657,81 +632,63 @@ func (p *Plugin) HandlePagesCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 
 // --- Keyboards and Formatting ---
 
-func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, offset, nextOffset int) gotgbot.InlineKeyboardMarkup {
-	var rows [][]gotgbot.InlineKeyboardButton
+func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, offset, nextOffset int) *telegram.ReplyInlineMarkup {
+	kb := telegram.NewKeyboard()
 
 	// 1. Languages and Quality header row
-	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "Lᴀɴɢᴜᴀɢᴇs", CallbackData: fmt.Sprintf("languages#%s", searchKey)},
-		{Text: "Qᴜᴀʟɪᴛʏ", CallbackData: fmt.Sprintf("qualities#%s", searchKey)},
-	})
+	kb.AddRow(
+		telegram.Button.Data("Lᴀɴɢᴜᴀɢᴇs", fmt.Sprintf("languages#%s", searchKey)),
+		telegram.Button.Data("Qᴜᴀʟɪᴛʏ", fmt.Sprintf("qualities#%s", searchKey)),
+	)
 
 	// 2. File list rows (1 button per file)
 	for _, f := range files {
 		fileLabel := fmt.Sprintf("%s 🌷 %s", f.Size, f.FileName)
-		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{
-				Text:         fileLabel,
-				CallbackData: fmt.Sprintf("file#%s", f.FileID),
-			},
-		})
+		kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)))
 	}
 
 	// 3. Navigation row
-	var navRow []gotgbot.InlineKeyboardButton
+	var navButtons []telegram.KeyboardButton
 	if offset > 0 {
 		prevOffset := offset - maxFilesPerPage
 		if prevOffset < 0 {
 			prevOffset = 0
 		}
-		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "◀️ 𝗕𝗮𝗰𝗸",
-			CallbackData: fmt.Sprintf("next|%s|%d", searchKey, prevOffset),
-		})
+		navButtons = append(navButtons, telegram.Button.Data("◀️ 𝗕𝗮𝗰𝗸", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)))
 	}
 
 	if nextOffset > 0 {
-		navRow = append(navRow, gotgbot.InlineKeyboardButton{
-			Text:         "𝗡𝗲𝘅𝘁 ▶️",
-			CallbackData: fmt.Sprintf("next|%s|%d", searchKey, nextOffset),
-		})
+		navButtons = append(navButtons, telegram.Button.Data("𝗡𝗲𝘅𝘁 ▶️", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)))
 	}
 
-	if len(navRow) > 0 {
-		rows = append(rows, navRow)
+	if len(navButtons) > 0 {
+		kb.AddRow(navButtons...)
 	} else {
-		rows = append(rows, []gotgbot.InlineKeyboardButton{
-			{Text: "↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", CallbackData: "pages"},
-		})
+		kb.AddRow(telegram.Button.Data("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", "pages"))
 	}
 
-	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return kb.Build()
 }
 
-func (p *Plugin) buildSpellCheckKeyboard(suggestions []string, searchKey string) gotgbot.InlineKeyboardMarkup {
-	var rows [][]gotgbot.InlineKeyboardButton
-	var currentRow []gotgbot.InlineKeyboardButton
+func (p *Plugin) buildSpellCheckKeyboard(suggestions []string, searchKey string) *telegram.ReplyInlineMarkup {
+	kb := telegram.NewKeyboard()
 
+	var currentRow []telegram.KeyboardButton
 	for i, s := range suggestions {
-		btn := gotgbot.InlineKeyboardButton{
-			Text:         fmt.Sprintf("🎬 %s", s),
-			CallbackData: fmt.Sprintf("sp#%s#%d", searchKey, i),
-		}
+		btn := telegram.Button.Data(fmt.Sprintf("🎬 %s", s), fmt.Sprintf("sp#%s#%d", searchKey, i))
 		currentRow = append(currentRow, btn)
 
 		// 2 per row unless text is long
 		if len(s) > 22 || len(currentRow) == 2 || i == len(suggestions)-1 {
-			rows = append(rows, currentRow)
+			kb.AddRow(currentRow...)
 			currentRow = nil
 		}
 	}
 
 	// Close button
-	rows = append(rows, []gotgbot.InlineKeyboardButton{
-		{Text: "❌ Cʟᴏsᴇ", CallbackData: "close_data"},
-	})
+	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"))
 
-	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return kb.Build()
 }
 
 func formatResultText(userMention, search string, page int) string {
@@ -751,7 +708,7 @@ func formatSpellCheckText(userMention, search string) string {
 	)
 }
 
-func formatUserMention(user *gotgbot.User) string {
+func formatUserMention(user *telegram.UserObj) string {
 	if user == nil {
 		return "User"
 	}
@@ -762,7 +719,7 @@ func formatUserMention(user *gotgbot.User) string {
 	if name == "" {
 		name = "User"
 	}
-	return fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, user.Id, html.EscapeString(name))
+	return fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, user.ID, html.EscapeString(name))
 }
 
 // Session helpers
@@ -785,15 +742,19 @@ func (p *Plugin) getSession(key string) *searchSession {
 	return p.sessions[key]
 }
 
-func (p *Plugin) recoverSessionFromMessage(maybeMsg gotgbot.MaybeInaccessibleMessage, userID int64) *searchSession {
-	if maybeMsg == nil {
+func (p *Plugin) recoverSessionFromMessage(msg *telegram.NewMessage, userID int64) *searchSession {
+	if msg == nil || msg.Text() == "" {
 		return nil
 	}
-	msg, ok := maybeMsg.(*gotgbot.Message)
-	if !ok || msg == nil || msg.Text == "" {
-		return nil
+	chatID := msg.ChatID()
+	if chatID == 0 {
+		if msg.Chat != nil && msg.Chat.ID != 0 {
+			chatID = msg.Chat.ID
+		} else if msg.Channel != nil && msg.Channel.ID != 0 {
+			chatID = msg.Channel.ID
+		}
 	}
-	lines := strings.Split(msg.Text, "\n")
+	lines := strings.Split(msg.Text(), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "Query :") {
@@ -805,7 +766,7 @@ func (p *Plugin) recoverSessionFromMessage(maybeMsg gotgbot.MaybeInaccessibleMes
 				return &searchSession{
 					Query:     queryPart,
 					UserID:    userID,
-					ChatID:    msg.Chat.Id,
+					ChatID:    chatID,
 					UpdatedAt: time.Now(),
 				}
 			}

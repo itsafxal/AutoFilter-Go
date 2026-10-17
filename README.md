@@ -1,6 +1,6 @@
 # MYTGBOTZ — Telegram Bot Foundation & Database Architecture
 
-A modern, high-performance Telegram bot written in Go, powered by [`gotgbot/v2`](https://github.com/PaulSonOfLars/gotgbot/v2), featuring an authoritative MongoDB persistence layer, temporary high-speed SQLite runtime indexing, a compile-time plugin registry, structured logging (`slog`), non-root multi-stage Docker deployment, and strict startup configuration validation.
+A modern, high-performance Telegram bot written in Go, powered by [Gogram MTProto](https://github.com/AmarnathCJD/gogram) (`github.com/amarnathcjd/gogram/telegram` v1.7.71), featuring an authoritative MongoDB persistence layer, temporary high-speed SQLite runtime indexing, a compile-time plugin registry, structured logging (`slog`), non-root multi-stage Docker deployment, and strict startup configuration validation.
 
 ---
 
@@ -19,11 +19,15 @@ MYTGBOTZ/
 │   │   ├── manager.go           # Unified MongoDB & SQLite coordinator
 │   │   ├── mongodb/             # Authoritative MongoDB models & repositories
 │   │   └── sql/                 # Temporary SQLite runtime schema & sync engine
+│   ├── delivery/                # Unified Gogram media delivery & error handling
 │   ├── logging/                 # Structured logging & credential redaction
 │   ├── plugins/                 # Extensible plugin registry & validation
-│   └── telegram/                # Telegram bot client & updater service
+│   ├── search/                  # SQLite-backed search and suggestion service
+│   └── telegram/                # Gogram MTProto bot client lifecycle & services
 ├── plugins/
+│   ├── autofilter/              # Ambient movie search & interactive pagination
 │   ├── cmds/                    # /cmds (and /help) dynamic command guide
+│   ├── delivery/                # /getfile & media callback handlers
 │   ├── id/                      # /id personal & group chat ID inspector
 │   ├── info/                    # /info (and /about) safe system overview
 │   ├── ping/                    # /ping response speed & latency measurement
@@ -31,12 +35,14 @@ MYTGBOTZ/
 ├── tests/                       # Integrated end-to-end unit tests
 ├── docs/                        # Architecture & verification reports
 │   ├── STEP_01_REPORT.md        # Step 1 foundation verification report
-│   └── STEP_02_REPORT.md        # Step 2 database & sync verification report
+│   ├── STEP_02_REPORT.md        # Step 2 database & sync verification report
+│   ├── STEP_03_REPORT.md        # Step 3 media delivery report
+│   └── GOGRAM_MIGRATION_REPORT.md # Complete Gogram migration report
 ├── .dockerignore                # Build context exclusion rules
 ├── .env.example                 # Environment configuration template
 ├── Dockerfile                   # Multi-stage production build (non-root)
 ├── docker-compose.yml           # Optional local testing composition
-├── go.mod                       # Go module dependencies
+├── go.mod                       # Go module dependencies (pinned to Gogram v1.7.71)
 └── go.sum                       # Cryptographic dependency checksums
 ```
 
@@ -49,7 +55,7 @@ MYTGBOTZ/
   - `users`: Tracks registered users, names, and ban status.
   - `groups`: Tracks connected groups and chat enabled/disabled status.
   - `COLLECTION_NAME` (Default: `Telegram-Document`): Authoritative repository of media documents, file references, file IDs, sizes, and captions.
-- **Data Protection**: Read operations on existing media are non-destructive. No collections are dropped and no schemas are migrated destructively.
+- **Data Protection**: Read operations on existing media are strictly non-destructive. No collections are dropped and no schemas are migrated destructively.
 
 ### 2. Runtime Temporary Database: SQLite
 - **Engine**: Pure-Go SQLite (`modernc.org/sqlite`, 100% CGO-free).
@@ -65,27 +71,27 @@ MYTGBOTZ/
 | :--- | :--- | :--- | :--- |
 | `/start` | — | Welcome greeting, inline buttons, user/group persistence, safe deep-link validation | Private, Group, Supergroup |
 | `/cmds` | `/help` | Dynamically generated usage guide reflecting only compiled commands | All Chats |
-| `/ping` | — | Response timing report distinguishing local processing from Telegram API round-trip | All Chats |
+| `/ping` | — | Response timing report distinguishing local processing from Telegram MTProto round-trip | All Chats |
 | `/id` | — | Telegram user ID, chat ID, and replied message metadata | Private, Group, Supergroup |
-| `/info` | `/about` | Bot information, runtime diagnostics, and replied user profile details | Private, Group, Supergroup |
+| `/info` | `/about` | Bot information, Gogram runtime diagnostics, and user profile details | Private, Group, Supergroup |
 | `/getfile` | `/file` | Retrieve and deliver a media file by its unique identifier | Private, Group, Supergroup |
 
 ---
 
 ## Media Delivery System
 
-The application incorporates a production-grade, modular **Media Delivery Service** (`internal/delivery`) designed to securely resolve and transmit stored media without modifying existing database collections:
+The application incorporates a production-grade, modular **Media Delivery Service** (`internal/delivery`) designed to securely resolve and transmit stored media via Gogram MTProto:
 
 ### 1. Delivery Architecture
 - **Two-Tier Resolution**: Queries the high-speed local SQLite cache (`SqlMediaRepository`) first for sub-millisecond retrieval. If missing or cache is cold, it seamlessly falls back to authoritative MongoDB collections (`MongoMediaRepository`).
-- **Telegram Bot API Method Dispatching**: Automatically inspects `file_type` and routes to the appropriate native `gotgbot/v2` send method:
-  - `video` → `SendVideo` (with automatic fallback to `SendDocument` for video container incompatibilities such as MKV)
-  - `audio` → `SendAudio`
-  - `photo` → `SendPhoto`
-  - `animation` → `SendAnimation`
-  - `voice` → `SendVoice`
-  - `document` (or unspecified) → `SendDocument`
-- **Protected Content**: Supports `protect_content` flags to prevent saving or forwarding of delivered media when requested via `filep_<id>`.
+- **Gogram MTProto Dispatching**: Resolves Bot API `file_id` references using `telegram.ResolveBotFileID` into MTProto media structures and dispatches via Gogram's unified `SendMedia`:
+  - `video` → Dispatched with video attributes (with automatic fallback to `ForceDocument: true` on format constraint errors)
+  - `audio` → Dispatched with audio attributes
+  - `photo` → Dispatched as photo
+  - `animation` → Dispatched with animation attributes
+  - `voice` → Dispatched as voice note
+  - `document` (or unspecified) → Dispatched with `ForceDocument: true`
+- **Protected Content**: Supports `NoForwards: true` options to prevent saving or forwarding of delivered media when requested via `filep_<id>`.
 
 ### 2. Access Control & Moderation
 - **User Ban Enforcement**: Checks the authoritative MongoDB `users` collection. Banned users (`ban_status.is_banned = true`) are immediately rejected.
@@ -97,6 +103,7 @@ The application incorporates a production-grade, modular **Media Delivery Servic
 - **Direct Command**: Admins and users can request files via `/getfile <file_id>`.
 - **Inline Callback Buttons**: Handles `file#<id>` (redirecting group users to private chat deep-links) and `checksub#<id>` (delivering files directly in private chats).
 
+---
 
 ## Environment Configuration
 
@@ -104,9 +111,13 @@ Configuration is loaded strictly from environment variables at startup. Missing 
 
 | Variable | Required | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `BOT_TOKEN` | **Yes** | — | Telegram Bot API token obtained from [@BotFather](https://t.me/BotFather) |
+| `API_ID` | **Yes** | — | Telegram API ID from [my.telegram.org](https://my.telegram.org) |
+| `API_HASH` | **Yes** | — | Telegram API Hash from [my.telegram.org](https://my.telegram.org) |
+| `BOT_TOKEN` | **Yes** | — | Telegram Bot Token obtained from [@BotFather](https://t.me/BotFather) |
 | `OWNER_ID` | **Yes** | — | Numeric Telegram User ID of the primary owner |
 | `ADMINS` | No | `${OWNER_ID}` | Comma- or space-separated list of additional admin User IDs |
+| `SESSION_PATH` | No | `session.dat` | Path to store MTProto persistent session data |
+| `MEMORY_SESSION`| No | `false` | When true, session is kept purely in-memory |
 | `LOG_LEVEL` | No | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 | `DATABASE_URI` | No | — | Authoritative MongoDB connection URI |
 | `DATABASE_NAME` | No | `CyberTG` | Authoritative MongoDB database name |
@@ -141,10 +152,10 @@ go build -o ./bin/bot ./cmd/bot
 ## Docker Deployment
 
 The application features a hardened, multi-stage `Dockerfile`:
-- **Builder Stage**: `golang:1.24-alpine3.21` compiles a statically linked, stripped executable (`CGO_ENABLED=0`).
+- **Builder Stage**: `golang:alpine` compiles a statically linked, stripped executable (`CGO_ENABLED=0`).
 - **Runtime Stage**: `alpine:3.21` with `ca-certificates` and `tzdata`.
 - **Security**: Runs under an unprivileged user `botuser` (UID `10001`).
-- **No baked secrets**: All configuration is injected via environment variables at runtime.
+- **No baked secrets or sessions**: `.dockerignore` excludes `.env`, `*.session`, `*.dat`, and `cache*.db`. All configuration is injected via environment variables at runtime.
 
 ```bash
 docker build -t mytgbotz:latest .

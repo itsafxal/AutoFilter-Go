@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 	deliveryCore "github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -56,15 +55,13 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 }
 
 // HandleGetFile processes the /getfile command.
-func (p *Plugin) HandleGetFile(b *gotgbot.Bot, ctx *ext.Context) error {
-	msg := ctx.EffectiveMessage
-	chat := ctx.EffectiveChat
-	user := ctx.EffectiveSender.User
+func (p *Plugin) HandleGetFile(m *telegram.NewMessage) error {
+	user := m.Sender
 
-	args := strings.Fields(msg.Text)
+	args := strings.Fields(m.Text())
 	if len(args) < 2 {
-		_, err := msg.Reply(b, "ℹ️ <b>Usage:</b> <code>/getfile &lt;file_id&gt;</code>\n\nPlease provide a valid media identifier.", &gotgbot.SendMessageOpts{
-			ParseMode: "HTML",
+		_, err := m.Reply("ℹ️ <b>Usage:</b> <code>/getfile &lt;file_id&gt;</code>\n\nPlease provide a valid media identifier.", &telegram.SendOptions{
+			ParseMode: "html",
 		})
 		return err
 	}
@@ -84,75 +81,76 @@ func (p *Plugin) HandleGetFile(b *gotgbot.Bot, ctx *ext.Context) error {
 	}
 
 	if p.appCtx == nil || p.appCtx.Delivery == nil {
-		_, err := msg.Reply(b, "⚠️ <b>Service Unavailable:</b> Media delivery service is not ready.", &gotgbot.SendMessageOpts{
-			ParseMode: "HTML",
+		_, err := m.Reply("⚠️ <b>Service Unavailable:</b> Media delivery service is not ready.", &telegram.SendOptions{
+			ParseMode: "html",
 		})
 		return err
 	}
 
 	var userID int64
 	if user != nil {
-		userID = user.Id
+		userID = user.ID
+	} else {
+		userID = m.SenderID()
 	}
 
 	opts := deliveryCore.DeliveryOptions{
 		UserID:           userID,
 		ProtectContent:   protectContent,
-		ReplyToMessageID: msg.MessageId,
+		ReplyToMessageID: int64(m.ID),
 	}
 
-	_, err := p.appCtx.Delivery.Deliver(context.Background(), chat.Id, fileID, opts)
+	_, err := p.appCtx.Delivery.Deliver(context.Background(), m.ChatID(), fileID, opts)
 	if err == nil {
 		return nil
 	}
 
 	// Safe user-friendly error replies
 	if errors.Is(err, deliveryCore.ErrMediaNotFound) {
-		_, replyErr := msg.Reply(b, "⚠️ <b>File not found or has been removed.</b>", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		_, replyErr := m.Reply("⚠️ <b>File not found or has been removed.</b>", &telegram.SendOptions{ParseMode: "html"})
 		return replyErr
 	}
 	if errors.Is(err, deliveryCore.ErrUserBanned) {
-		_, replyErr := msg.Reply(b, "⛔ <b>Access Denied:</b> You are suspended from receiving files.", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		_, replyErr := m.Reply("⛔ <b>Access Denied:</b> You are suspended from receiving files.", &telegram.SendOptions{ParseMode: "html"})
 		return replyErr
 	}
 	if errors.Is(err, deliveryCore.ErrChatDisabled) {
-		_, replyErr := msg.Reply(b, "⛔ <b>Access Denied:</b> This chat is disabled for media delivery.", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		_, replyErr := m.Reply("⛔ <b>Access Denied:</b> This chat is disabled for media delivery.", &telegram.SendOptions{ParseMode: "html"})
 		return replyErr
 	}
 	if errors.Is(err, deliveryCore.ErrDuplicateRequest) {
-		_, replyErr := msg.Reply(b, "⏳ <b>Please wait:</b> A delivery request for this file is already in progress.", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		_, replyErr := m.Reply("⏳ <b>Please wait:</b> A delivery request for this file is already in progress.", &telegram.SendOptions{ParseMode: "html"})
 		return replyErr
 	}
 	if errors.Is(err, deliveryCore.ErrRateLimited) {
-		_, replyErr := msg.Reply(b, "⚠️ <b>Flood Control:</b> Telegram rate limit reached. Please wait a moment before trying again.", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+		_, replyErr := m.Reply("⚠️ <b>Flood Control:</b> Telegram rate limit reached. Please wait a moment before trying again.", &telegram.SendOptions{ParseMode: "html"})
 		return replyErr
 	}
 	if errors.Is(err, deliveryCore.ErrBlockedByUser) {
 		return nil
 	}
 
-	_, replyErr := msg.Reply(b, "❌ <b>Delivery Error:</b> Failed to deliver requested file. Please check the ID and try again.", &gotgbot.SendMessageOpts{ParseMode: "HTML"})
+	_, replyErr := m.Reply("❌ <b>Delivery Error:</b> Failed to deliver requested file. Please check the ID and try again.", &telegram.SendOptions{ParseMode: "html"})
 	return replyErr
 }
 
 // HandleFileCallback redirects users clicking a file button in a group/channel to private chat.
 // Format: file#<file_id>
-func (p *Plugin) HandleFileCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleFileCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	botUsername := b.User.Username
-	if botUsername == "" {
-		botUsername = "bot"
+	botUsername := "bot"
+	if p.appCtx != nil && p.appCtx.BotUser != nil && p.appCtx.BotUser.Username != "" {
+		botUsername = p.appCtx.BotUser.Username
 	}
 
-	parts := strings.SplitN(cb.Data, "#", 2)
+	data := cb.DataString()
+	parts := strings.SplitN(data, "#", 2)
 	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-		_, err := cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "⚠️ Invalid file reference",
-			ShowAlert: true,
+		_, err := cb.Answer("⚠️ Invalid file reference", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return err
 	}
@@ -160,25 +158,24 @@ func (p *Plugin) HandleFileCallback(b *gotgbot.Bot, ctx *ext.Context) error {
 	fileID := strings.TrimSpace(parts[1])
 	startURL := fmt.Sprintf("https://t.me/%s?start=file_%s", botUsername, fileID)
 
-	_, err := cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-		Url: startURL,
+	_, err := cb.Answer("", &telegram.CallbackOptions{
+		URL: startURL,
 	})
 	return err
 }
 
 // HandleCheckSubCallback processes direct delivery requests from callback buttons.
 // Format: checksub#<file_id> or checksubp#<file_id>
-func (p *Plugin) HandleCheckSubCallback(b *gotgbot.Bot, ctx *ext.Context) error {
-	cb := ctx.Update.CallbackQuery
+func (p *Plugin) HandleCheckSubCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	parts := strings.SplitN(cb.Data, "#", 2)
+	data := cb.DataString()
+	parts := strings.SplitN(data, "#", 2)
 	if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
-		_, err := cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "⚠️ Invalid file reference",
-			ShowAlert: true,
+		_, err := cb.Answer("⚠️ Invalid file reference", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return err
 	}
@@ -187,23 +184,25 @@ func (p *Plugin) HandleCheckSubCallback(b *gotgbot.Bot, ctx *ext.Context) error 
 	protectContent := strings.HasPrefix(parts[0], "checksubp")
 
 	if p.appCtx == nil || p.appCtx.Delivery == nil {
-		_, err := cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text:      "⚠️ Delivery service unavailable",
-			ShowAlert: true,
+		_, err := cb.Answer("⚠️ Delivery service unavailable", &telegram.CallbackOptions{
+			Alert: true,
 		})
 		return err
 	}
 
+	userID := cb.SenderID
+	if userID == 0 && cb.Sender != nil {
+		userID = cb.Sender.ID
+	}
+
 	opts := deliveryCore.DeliveryOptions{
-		UserID:         cb.From.Id,
+		UserID:         userID,
 		ProtectContent: protectContent,
 	}
 
-	_, err := p.appCtx.Delivery.Deliver(context.Background(), cb.From.Id, fileID, opts)
+	_, err := p.appCtx.Delivery.Deliver(context.Background(), userID, fileID, opts)
 	if err == nil {
-		_, answerErr := cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-			Text: "✅ Sending file...",
-		})
+		_, answerErr := cb.Answer("✅ Sending file...")
 		return answerErr
 	}
 
@@ -218,9 +217,8 @@ func (p *Plugin) HandleCheckSubCallback(b *gotgbot.Bot, ctx *ext.Context) error 
 		alertText = "⚠️ Rate limited. Please try again shortly."
 	}
 
-	_, answerErr := cb.Answer(b, &gotgbot.AnswerCallbackQueryOpts{
-		Text:      alertText,
-		ShowAlert: true,
+	_, answerErr := cb.Answer(alertText, &telegram.CallbackOptions{
+		Alert: true,
 	})
 	return answerErr
 }

@@ -5,25 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"time"
+	"sync"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
-// BotService manages the lifecycle of the Telegram bot instance, dispatcher, and updater.
+// BotService manages the lifecycle of the unified Gogram MTProto Telegram client.
 type BotService struct {
-	cfg        *config.Config
-	logger     *slog.Logger
-	registry   *plugins.Registry
-	appCtx     *plugins.AppContext
-	bot        *gotgbot.Bot
-	dispatcher *ext.Dispatcher
-	updater    *ext.Updater
-	running    bool
+	cfg      *config.Config
+	logger   *slog.Logger
+	registry *plugins.Registry
+	appCtx   *plugins.AppContext
+	client   *telegram.Client
+	running  bool
+	mu       sync.Mutex
 }
 
 // NewBotService constructs a new Telegram bot service.
@@ -36,113 +33,133 @@ func NewBotService(cfg *config.Config, logger *slog.Logger, reg *plugins.Registr
 	}
 }
 
-// Init creates the gotgbot Bot instance, Dispatcher, and Updater.
+// Init creates and initializes the unified Gogram client and attaches all validated plugin handlers.
 func (s *BotService) Init() error {
 	if s.cfg == nil || s.cfg.BotToken == "" {
 		return errors.New("cannot initialize bot service: configuration or BOT_TOKEN is missing")
 	}
-
-	bot, err := gotgbot.NewBot(s.cfg.BotToken, &gotgbot.BotOpts{
-		BotClient: &gotgbot.BaseBotClient{
-			Client: http.Client{
-				Timeout: 30 * time.Second,
-			},
-			DefaultRequestOpts: &gotgbot.RequestOpts{
-				Timeout: 20 * time.Second,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to initialize Telegram bot client: %w", err)
+	if s.cfg.AppID <= 0 || s.cfg.AppHash == "" {
+		return errors.New("cannot initialize bot service: API_ID and API_HASH are required for Gogram MTProto client")
 	}
-	s.bot = bot
+
+	var gogramLogLevel telegram.LogLevel
+	switch s.cfg.LogLevel {
+	case config.LogLevelDebug:
+		gogramLogLevel = telegram.LogDebug
+	case config.LogLevelWarn:
+		gogramLogLevel = telegram.LogWarn
+	case config.LogLevelError:
+		gogramLogLevel = telegram.LogError
+	default:
+		gogramLogLevel = telegram.LogInfo
+	}
+
+	clientConfig := telegram.ClientConfig{
+		AppID:         s.cfg.AppID,
+		AppHash:       s.cfg.AppHash,
+		Session:       s.cfg.SessionPath,
+		MemorySession: s.cfg.MemorySession,
+		LogLevel:      gogramLogLevel,
+		ParseMode:     "html",
+	}
+
+	client, err := telegram.NewClient(clientConfig)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Gogram client: %w", err)
+	}
+	s.client = client
 
 	if s.appCtx != nil {
-		s.appCtx.BotUser = &bot.User
+		s.appCtx.Client = client
 	}
 
-	// Create dispatcher
-	dispatcher := ext.NewDispatcher(&ext.DispatcherOpts{
-		Error: func(b *gotgbot.Bot, ctx *ext.Context, err error) ext.DispatcherAction {
-			s.logger.Error("telegram dispatcher error handling update", "error", err)
-			return ext.DispatcherActionNoop
-		},
-		MaxRoutines: ext.DefaultMaxRoutines,
-		Logger:      s.logger,
-	})
-	s.dispatcher = dispatcher
-
-	// Attach plugins to dispatcher
-	if err := s.registry.AttachToDispatcher(dispatcher); err != nil {
-		return fmt.Errorf("failed to attach plugin handlers to dispatcher: %w", err)
+	// Attach plugins to Gogram client
+	if s.registry != nil {
+		if err := s.registry.AttachToClient(client); err != nil {
+			return fmt.Errorf("failed to attach plugin handlers to Gogram client: %w", err)
+		}
 	}
-
-	// Create updater
-	updater := ext.NewUpdater(dispatcher, &ext.UpdaterOpts{
-		UnhandledErrFunc: func(err error) {
-			s.logger.Error("unhandled telegram updater polling error", "error", err)
-		},
-		Logger: s.logger,
-	})
-	s.updater = updater
 
 	return nil
 }
 
-// Start begins receiving Telegram updates via long polling until ctx is cancelled.
+// Start begins receiving Telegram updates via MTProto until ctx is cancelled.
 func (s *BotService) Start(ctx context.Context) error {
-	if s.bot == nil || s.updater == nil {
+	if s.client == nil {
 		return errors.New("bot service not initialized; call Init() first")
 	}
 
-	s.logger.Info("starting telegram long polling",
-		"bot_username", s.bot.User.Username,
-		"bot_id", s.bot.User.Id,
-	)
-
-	err := s.updater.StartPolling(s.bot, &ext.PollingOpts{
-		DropPendingUpdates: true,
-		GetUpdatesOpts: &gotgbot.GetUpdatesOpts{
-			Timeout: 10,
-			RequestOpts: &gotgbot.RequestOpts{
-				Timeout: 15 * time.Second,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to start Telegram polling: %w", err)
+	s.logger.Info("connecting to Telegram MTProto servers via Gogram...")
+	if err := s.client.Connect(); err != nil {
+		return fmt.Errorf("failed to connect to Telegram MTProto servers: %w", err)
 	}
 
+	s.logger.Info("authenticating bot identity with Telegram...")
+	if err := s.client.LoginBot(s.cfg.BotToken); err != nil {
+		return fmt.Errorf("failed to authenticate Telegram bot token: %w", err)
+	}
+
+	botUser, err := s.client.GetMe()
+	if err != nil {
+		return fmt.Errorf("failed to get Telegram bot user info: %w", err)
+	}
+
+	if s.appCtx != nil {
+		s.appCtx.BotUser = botUser
+	}
+
+	s.logger.Info("gogram telegram bot client authenticated successfully",
+		"bot_username", botUser.Username,
+		"bot_id", botUser.ID,
+		"app_id", s.cfg.AppID,
+	)
+
+	s.mu.Lock()
 	s.running = true
+	s.mu.Unlock()
 
 	// Watch for context cancellation for graceful shutdown
 	go func() {
 		<-ctx.Done()
-		if s.running {
-			s.logger.Info("context cancelled, stopping telegram updater")
+		s.mu.Lock()
+		running := s.running
+		s.mu.Unlock()
+		if running {
+			s.logger.Info("context cancelled, stopping Gogram telegram client")
 			_ = s.Stop()
 		}
 	}()
 
-	s.updater.Idle()
+	s.client.Idle()
 	return nil
 }
 
-// Stop gracefully terminates polling and stops dispatcher routines.
+// Stop gracefully terminates the MTProto connection and stops background routines.
 func (s *BotService) Stop() error {
+	s.mu.Lock()
 	if !s.running {
+		s.mu.Unlock()
 		return nil
 	}
 	s.running = false
-	s.logger.Info("shutting down telegram bot service...")
+	s.mu.Unlock()
 
-	if s.updater != nil {
-		return s.updater.Stop()
+	s.logger.Info("shutting down Gogram bot service...")
+	if s.client != nil {
+		return s.client.Stop()
 	}
 	return nil
 }
 
-// Bot returns the underlying gotgbot.Bot instance.
-func (s *BotService) Bot() *gotgbot.Bot {
-	return s.bot
+// Client returns the underlying *telegram.Client instance.
+func (s *BotService) Client() *telegram.Client {
+	return s.client
+}
+
+// HistoryReader defines clean contracts for future Telegram channel history access.
+// Note: Bot accounts can only access message history in channels/supergroups where they have
+// been granted administrative read permissions. Arbitrary historical media scraping for public
+// or private channels where the bot is not an admin requires a separately authorized user session.
+type HistoryReader interface {
+	GetChannelHistory(ctx context.Context, channelID any, offsetID int32, limit int32) ([]*telegram.NewMessage, error)
 }

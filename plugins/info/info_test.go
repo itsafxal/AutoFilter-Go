@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -25,8 +25,8 @@ func TestInfoPlugin_Metadata(t *testing.T) {
 }
 
 func TestBuildBotInfoReport(t *testing.T) {
-	botUser := &gotgbot.User{
-		Id:        987654321,
+	botUser := &telegram.UserObj{
+		ID:        987654321,
 		FirstName: "FilmBot",
 		Username:  "FilmBot",
 	}
@@ -42,7 +42,7 @@ func TestBuildBotInfoReport(t *testing.T) {
 	if !strings.Contains(report, "987654321") {
 		t.Errorf("expected bot ID in report, got:\n%s", report)
 	}
-	if !strings.Contains(report, "gotgbot") {
+	if !strings.Contains(report, "Gogram") {
 		t.Errorf("expected library name in report, got:\n%s", report)
 	}
 	// Verify no secrets or credentials leaked
@@ -52,8 +52,8 @@ func TestBuildBotInfoReport(t *testing.T) {
 }
 
 func TestBuildUserInfoReport(t *testing.T) {
-	user := &gotgbot.User{
-		Id:        12345,
+	user := &telegram.UserObj{
+		ID:        12345,
 		FirstName: "Alice",
 		LastName:  "Smith",
 		Username:  "alicesmith",

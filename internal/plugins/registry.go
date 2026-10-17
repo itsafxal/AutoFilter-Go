@@ -3,14 +3,12 @@ package plugins
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/callbackquery"
+	"github.com/amarnathcjd/gogram/telegram"
 )
 
 // Registry manages plugin discovery, validation, command conflict detection,
@@ -135,13 +133,16 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
-// AttachToDispatcher registers all validated command and alias handlers onto the gotgbot Dispatcher.
-func (r *Registry) AttachToDispatcher(dispatcher *ext.Dispatcher) error {
+// AttachToClient registers all validated command, callback, and message handlers onto the Gogram Client.
+func (r *Registry) AttachToClient(client *telegram.Client) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if !r.validated {
-		return errors.New("cannot attach handlers to dispatcher before registry validation")
+		return errors.New("cannot attach handlers to client before registry validation")
+	}
+	if client == nil {
+		return errors.New("cannot attach handlers to nil client")
 	}
 
 	for _, p := range r.plugins {
@@ -152,12 +153,12 @@ func (r *Registry) AttachToDispatcher(dispatcher *ext.Dispatcher) error {
 			wrappedHandler := r.wrapHandler(cmdCopy)
 
 			// Register primary command handler
-			dispatcher.AddHandler(handlers.NewCommand(cmdName, wrappedHandler))
+			client.AddCommandHandler(cmdName, wrappedHandler)
 
 			// Register alias handlers
 			for _, alias := range cmdCopy.Aliases {
 				aliasName := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(alias), "/"))
-				dispatcher.AddHandler(handlers.NewCommand(aliasName, wrappedHandler))
+				client.AddCommandHandler(aliasName, wrappedHandler)
 			}
 		}
 
@@ -166,7 +167,8 @@ func (r *Registry) AttachToDispatcher(dispatcher *ext.Dispatcher) error {
 			for _, cb := range cbPlugin.CallbackHandlers() {
 				cbCopy := cb
 				wrappedCb := r.wrapCallbackHandler(cbCopy)
-				dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbCopy.Prefix), wrappedCb))
+				prefixPattern := regexp.MustCompile("^" + regexp.QuoteMeta(cbCopy.Prefix))
+				client.AddCallbackHandler(prefixPattern, wrappedCb)
 			}
 		}
 
@@ -175,7 +177,11 @@ func (r *Registry) AttachToDispatcher(dispatcher *ext.Dispatcher) error {
 			for _, mh := range msgPlugin.MessageHandlers() {
 				mhCopy := mh
 				wrappedMh := r.wrapMessageHandler(mhCopy)
-				dispatcher.AddHandler(handlers.NewMessage(mhCopy.Filter, wrappedMh))
+				if mhCopy.Filter != nil {
+					client.AddMessageHandler(telegram.OnMessage, wrappedMh, telegram.CustomFilter(mhCopy.Filter))
+				} else {
+					client.AddMessageHandler(telegram.OnMessage, wrappedMh)
+				}
 			}
 		}
 	}
@@ -185,7 +191,7 @@ func (r *Registry) AttachToDispatcher(dispatcher *ext.Dispatcher) error {
 
 // wrapMessageHandler wraps a message handler with panic recovery and structured logging.
 func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
-	return func(b *gotgbot.Bot, ctx *ext.Context) (err error) {
+	return func(m *telegram.NewMessage) (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in message handler: %v", rec)
@@ -196,13 +202,13 @@ func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 				}
 			}
 		}()
-		return mh.Handler(b, ctx)
+		return mh.Handler(m)
 	}
 }
 
 // wrapCallbackHandler wraps a callback handler with panic recovery and structured logging.
-func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) HandlerFunc {
-	return func(b *gotgbot.Bot, ctx *ext.Context) (err error) {
+func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) CallbackHandlerFunc {
+	return func(query *telegram.CallbackQuery) (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in callback prefix %q: %v", cb.Prefix, rec)
@@ -214,13 +220,13 @@ func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) HandlerFunc {
 				}
 			}
 		}()
-		return cb.Handler(b, ctx)
+		return cb.Handler(query)
 	}
 }
 
 // wrapHandler wraps a command handler with admin protection and panic recovery.
 func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
-	return func(b *gotgbot.Bot, ctx *ext.Context) (err error) {
+	return func(m *telegram.NewMessage) (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in command /%s: %v", cmd.Name, rec)
@@ -236,8 +242,8 @@ func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 		// Enforce AdminOnly if configured
 		if cmd.AdminOnly && r.appCtx != nil && r.appCtx.Config != nil {
 			var userID int64
-			if ctx.EffectiveSender != nil && ctx.EffectiveSender.User != nil {
-				userID = ctx.EffectiveSender.User.Id
+			if m != nil {
+				userID = m.SenderID()
 			}
 			if !r.appCtx.Config.IsAdmin(userID) {
 				if r.appCtx.Logger != nil {
@@ -246,14 +252,16 @@ func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 						"user_id", userID,
 					)
 				}
-				_, _ = ctx.EffectiveMessage.Reply(b, "⛔ <b>Access Denied:</b> This command is restricted to bot administrators.", &gotgbot.SendMessageOpts{
-					ParseMode: "HTML",
-				})
+				if m != nil {
+					_, _ = m.Reply("⛔ <b>Access Denied:</b> This command is restricted to bot administrators.", &telegram.SendOptions{
+						ParseMode: "html",
+					})
+				}
 				return nil
 			}
 		}
 
-		return cmd.Handler(b, ctx)
+		return cmd.Handler(m)
 	}
 }
 

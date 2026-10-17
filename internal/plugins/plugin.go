@@ -4,9 +4,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
@@ -18,15 +16,22 @@ type AppContext struct {
 	Config    *config.Config
 	Logger    *slog.Logger
 	StartTime time.Time
-	BotUser   *gotgbot.User
+	BotUser   *telegram.UserObj
 	Registry  *Registry
 	DB        *database.DatabaseManager
 	Delivery  delivery.MediaDeliveryService
 	Search    search.SearchService
+	Client    *telegram.Client
 }
 
-// HandlerFunc is the gotgbot command handler function signature.
-type HandlerFunc = handlers.Response
+// HandlerFunc is the Gogram message/command handler function signature.
+type HandlerFunc = telegram.MessageHandler
+
+// CallbackHandlerFunc is the Gogram callback query handler function signature.
+type CallbackHandlerFunc = telegram.CallbackHandler
+
+// MessageFilterFunc is a predicate function for filtering messages.
+type MessageFilterFunc func(m *telegram.NewMessage) bool
 
 // CommandDefinition defines a single command exposed by a plugin.
 type CommandDefinition struct {
@@ -58,7 +63,7 @@ type CallbackDefinition struct {
 	Prefix string
 
 	// Handler is the function executed when the callback query matches the prefix.
-	Handler HandlerFunc
+	Handler CallbackHandlerFunc
 }
 
 // Plugin is the contract that every modular plugin must satisfy.
@@ -78,7 +83,7 @@ type CallbackPlugin interface {
 
 // MessageDefinition defines a message handler with a filter.
 type MessageDefinition struct {
-	Filter  filters.Message
+	Filter  MessageFilterFunc
 	Handler HandlerFunc
 }
 

@@ -2,15 +2,15 @@ package delivery
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 )
 
@@ -28,7 +28,7 @@ type MediaDeliveryService interface {
 	// Deliver sends the requested media to the destination chat using the appropriate Telegram send method.
 	Deliver(ctx context.Context, chatID int64, identifier string, opts DeliveryOptions) (*DeliveryResult, error)
 
-	// SetSender assigns the Telegram sender client (typically *gotgbot.Bot).
+	// SetSender assigns the Telegram sender client (typically *telegram.Client).
 	SetSender(sender TelegramSender)
 }
 
@@ -229,15 +229,18 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		caption = rec.FileName
 	}
 
-	var replyParams *gotgbot.ReplyParameters
+	var replyID int32
 	if opts.ReplyToMessageID > 0 {
-		replyParams = &gotgbot.ReplyParameters{
-			MessageId: opts.ReplyToMessageID,
-		}
+		replyID = int32(opts.ReplyToMessageID)
 	}
 
-	fileInput := gotgbot.InputFileByID(rec.FileID)
 	mediaType := strings.ToLower(strings.TrimSpace(rec.FileType))
+
+	// Resolve the media reference via Gogram's ResolveBotFileID if possible
+	var mediaToSend any = rec.FileID
+	if resolved, err := telegram.ResolveBotFileID(rec.FileID); err == nil && resolved != nil {
+		mediaToSend = resolved
+	}
 
 	s.logger.Info("attempting telegram media delivery",
 		"chat_id", chatID,
@@ -246,68 +249,51 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		"protect_content", opts.ProtectContent,
 	)
 
-	var sentMsg *gotgbot.Message
+	var sentMsg *telegram.NewMessage
 	var methodUsed string
+
+	mediaOpts := &telegram.MediaOptions{
+		Caption:    caption,
+		ParseMode:  "html",
+		NoForwards: opts.ProtectContent,
+		ReplyID:    replyID,
+	}
 
 	// 8. Dispatch to appropriate Telegram send method with video fallback
 	switch mediaType {
 	case "video":
 		methodUsed = "SendVideo"
-		sentMsg, err = sender.SendVideo(chatID, fileInput, &gotgbot.SendVideoOpts{
-			Caption:         caption,
-			ProtectContent:  opts.ProtectContent,
-			ReplyParameters: replyParams,
-		})
-		// If SendVideo failed due to video container format incompatibility (e.g. MKV uploaded as document), fallback to SendDocument
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
+		// If SendVideo failed due to video container format incompatibility, fallback to SendDocument
 		if err != nil && isBadMediaRequest(err) {
 			s.logger.Warn("sendVideo failed with format constraint, falling back to sendDocument", "error", err)
 			methodUsed = "SendDocument"
-			sentMsg, err = sender.SendDocument(chatID, fileInput, &gotgbot.SendDocumentOpts{
-				Caption:         caption,
-				ProtectContent:  opts.ProtectContent,
-				ReplyParameters: replyParams,
-			})
+			fallbackOpts := *mediaOpts
+			fallbackOpts.ForceDocument = true
+			sentMsg, err = sender.SendMedia(chatID, mediaToSend, &fallbackOpts)
 		}
 
 	case "audio":
 		methodUsed = "SendAudio"
-		sentMsg, err = sender.SendAudio(chatID, fileInput, &gotgbot.SendAudioOpts{
-			Caption:         caption,
-			ProtectContent:  opts.ProtectContent,
-			ReplyParameters: replyParams,
-		})
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
 
 	case "photo":
 		methodUsed = "SendPhoto"
-		sentMsg, err = sender.SendPhoto(chatID, fileInput, &gotgbot.SendPhotoOpts{
-			Caption:         caption,
-			ProtectContent:  opts.ProtectContent,
-			ReplyParameters: replyParams,
-		})
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
 
 	case "animation":
 		methodUsed = "SendAnimation"
-		sentMsg, err = sender.SendAnimation(chatID, fileInput, &gotgbot.SendAnimationOpts{
-			Caption:         caption,
-			ProtectContent:  opts.ProtectContent,
-			ReplyParameters: replyParams,
-		})
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
 
 	case "voice":
 		methodUsed = "SendVoice"
-		sentMsg, err = sender.SendVoice(chatID, fileInput, &gotgbot.SendVoiceOpts{
-			Caption:         caption,
-			ProtectContent:  opts.ProtectContent,
-			ReplyParameters: replyParams,
-		})
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
 
 	default: // "document" or unspecified
 		methodUsed = "SendDocument"
-		sentMsg, err = sender.SendDocument(chatID, fileInput, &gotgbot.SendDocumentOpts{
-			Caption:         caption,
-			ProtectContent:  opts.ProtectContent,
-			ReplyParameters: replyParams,
-		})
+		docOpts := *mediaOpts
+		docOpts.ForceDocument = true
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, &docOpts)
 	}
 
 	// 9. Handle Telegram errors
@@ -316,16 +302,20 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	}
 
 	duration := time.Since(startTime)
+	var sentMsgID int64
+	if sentMsg != nil {
+		sentMsgID = int64(sentMsg.ID)
+	}
 	s.logger.Info("telegram media delivery succeeded",
 		"chat_id", chatID,
-		"message_id", sentMsg.MessageId,
+		"message_id", sentMsgID,
 		"delivery_method", methodUsed,
 		"duration_ms", duration.Milliseconds(),
 	)
 
 	return &DeliveryResult{
 		Success:          true,
-		MessageID:        sentMsg.MessageId,
+		MessageID:        sentMsgID,
 		ChatID:           chatID,
 		FileID:           rec.FileID,
 		FileName:         rec.FileName,
@@ -339,45 +329,55 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 
 // handleTelegramError parses and sanitizes Telegram API errors.
 func (s *Service) handleTelegramError(chatID int64, identifier string, err error) error {
-	var tgErr *gotgbot.TelegramError
-	if errors.As(err, &tgErr) {
-		// Rate limit / Flood Control
-		if tgErr.Code == 429 || (tgErr.ResponseParams != nil && tgErr.ResponseParams.RetryAfter > 0) {
-			var retryAfter int64 = 1
-			if tgErr.ResponseParams != nil && tgErr.ResponseParams.RetryAfter > 0 {
-				retryAfter = tgErr.ResponseParams.RetryAfter
-			}
-			s.logger.Warn("telegram rate limit encountered (flood wait)",
-				"chat_id", chatID,
-				"retry_after_seconds", retryAfter,
-			)
-			return fmt.Errorf("%w: wait %d seconds", ErrRateLimited, retryAfter)
-		}
-
-		// User blocked bot or account deactivated
-		if tgErr.Code == 403 {
-			s.logger.Warn("delivery failed: user blocked bot or chat inaccessible",
-				"chat_id", chatID,
-				"description", tgErr.Description,
-			)
-			return ErrBlockedByUser
-		}
-
-		// Bad Request / Invalid reference
-		s.logger.Error("telegram api error during media delivery",
-			"chat_id", chatID,
-			"code", tgErr.Code,
-			"description", tgErr.Description,
-		)
-		return fmt.Errorf("%w: %s", ErrTelegramAPI, tgErr.Description)
+	if err == nil {
+		return nil
 	}
 
-	// Generic/network failure
-	s.logger.Error("unexpected delivery error",
+	errMsg := err.Error()
+
+	// Rate limit / Flood Control: FLOOD_WAIT_X or 429
+	if strings.Contains(errMsg, "FLOOD_WAIT_") || strings.Contains(errMsg, "FLOOD_PREMIUM_WAIT_") || strings.Contains(errMsg, "429") {
+		var retryAfter int64 = 1
+		re := regexp.MustCompile(`FLOOD(?:_PREMIUM)?_WAIT_(\d+)`)
+		if matches := re.FindStringSubmatch(errMsg); len(matches) > 1 {
+			if parsed, pErr := strconv.ParseInt(matches[1], 10, 64); pErr == nil && parsed > 0 {
+				retryAfter = parsed
+			}
+		} else if strings.Contains(errMsg, "wait ") {
+			reSec := regexp.MustCompile(`wait (\d+) seconds`)
+			if matchesSec := reSec.FindStringSubmatch(errMsg); len(matchesSec) > 1 {
+				if parsed, pErr := strconv.ParseInt(matchesSec[1], 10, 64); pErr == nil && parsed > 0 {
+					retryAfter = parsed
+				}
+			}
+		}
+
+		s.logger.Warn("telegram rate limit encountered (flood wait)",
+			"chat_id", chatID,
+			"retry_after_seconds", retryAfter,
+		)
+		return fmt.Errorf("%w: wait %d seconds", ErrRateLimited, retryAfter)
+	}
+
+	// User blocked bot or account deactivated / inaccessible
+	if strings.Contains(errMsg, "USER_IS_BLOCKED") ||
+		strings.Contains(errMsg, "PEER_ID_INVALID") ||
+		strings.Contains(errMsg, "CHAT_WRITE_FORBIDDEN") ||
+		strings.Contains(errMsg, "403") ||
+		strings.Contains(strings.ToLower(errMsg), "blocked by the user") {
+		s.logger.Warn("delivery failed: user blocked bot or chat inaccessible",
+			"chat_id", chatID,
+			"description", errMsg,
+		)
+		return ErrBlockedByUser
+	}
+
+	// Bad Request / Invalid reference
+	s.logger.Error("telegram api error during media delivery",
 		"chat_id", chatID,
-		"error", err,
+		"error", errMsg,
 	)
-	return fmt.Errorf("%w: %v", ErrTelegramAPI, err)
+	return fmt.Errorf("%w: %s", ErrTelegramAPI, errMsg)
 }
 
 // safeIdentifierPrefix masks long identifiers in log statements.
@@ -390,13 +390,15 @@ func safeIdentifierPrefix(id string) string {
 
 // isBadMediaRequest checks if error is related to incompatible media format.
 func isBadMediaRequest(err error) bool {
-	var tgErr *gotgbot.TelegramError
-	if errors.As(err, &tgErr) {
-		desc := strings.ToLower(tgErr.Description)
-		return strings.Contains(desc, "wrong file identifier") ||
-			strings.Contains(desc, "wrong type") ||
-			strings.Contains(desc, "bad request") ||
-			strings.Contains(desc, "can't use file")
+	if err == nil {
+		return false
 	}
-	return false
+	desc := strings.ToLower(err.Error())
+	return strings.Contains(desc, "wrong file identifier") ||
+		strings.Contains(desc, "wrong type") ||
+		strings.Contains(desc, "bad request") ||
+		strings.Contains(desc, "can't use file") ||
+		strings.Contains(desc, "media_invalid") ||
+		strings.Contains(desc, "file_id_invalid") ||
+		strings.Contains(desc, "fileref_")
 }

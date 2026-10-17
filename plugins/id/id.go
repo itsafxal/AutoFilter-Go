@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -39,7 +38,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 }
 
 // FormatPrivateID creates formatted ID card for private chats.
-func FormatPrivateID(user *gotgbot.User, chatID int64) string {
+func FormatPrivateID(user *telegram.UserObj, chatID int64) string {
 	firstName := "N/A"
 	lastName := "N/A"
 	username := "N/A"
@@ -55,7 +54,7 @@ func FormatPrivateID(user *gotgbot.User, chatID int64) string {
 		if user.Username != "" {
 			username = "@" + commands.EscapeHTML(user.Username)
 		}
-		userIDStr = fmt.Sprintf("<code>%d</code>", user.Id)
+		userIDStr = fmt.Sprintf("<code>%d</code>", user.ID)
 	}
 
 	return fmt.Sprintf(
@@ -76,19 +75,16 @@ func FormatPrivateID(user *gotgbot.User, chatID int64) string {
 }
 
 // FormatGroupID creates formatted ID report for group/supergroup chats.
-func FormatGroupID(chat *gotgbot.Chat, user *gotgbot.User, replyMsg *gotgbot.Message) string {
-	chatID := int64(0)
-	chatTitle := "Unknown"
-	if chat != nil {
-		chatID = chat.Id
-		if chat.Title != "" {
-			chatTitle = commands.EscapeHTML(chat.Title)
-		}
+func FormatGroupID(chatID int64, chatTitle string, user *telegram.UserObj, replyMsg *telegram.NewMessage) string {
+	if chatTitle == "" {
+		chatTitle = "Unknown"
+	} else {
+		chatTitle = commands.EscapeHTML(chatTitle)
 	}
 
 	userIDStr := "Anonymous"
 	if user != nil {
-		userIDStr = fmt.Sprintf("<code>%d</code>", user.Id)
+		userIDStr = fmt.Sprintf("<code>%d</code>", user.ID)
 	}
 
 	var sb strings.Builder
@@ -99,13 +95,15 @@ func FormatGroupID(chat *gotgbot.Chat, user *gotgbot.User, replyMsg *gotgbot.Mes
 
 	if replyMsg != nil {
 		repliedUserIDStr := "Anonymous"
-		if replyMsg.From != nil {
-			repliedUserIDStr = fmt.Sprintf("<code>%d</code>", replyMsg.From.Id)
+		if replyMsg.Sender != nil {
+			repliedUserIDStr = fmt.Sprintf("<code>%d</code>", replyMsg.Sender.ID)
 		} else if replyMsg.SenderChat != nil {
-			repliedUserIDStr = fmt.Sprintf("<code>%d</code> (Channel)", replyMsg.SenderChat.Id)
+			repliedUserIDStr = fmt.Sprintf("<code>%d</code> (Channel)", replyMsg.SenderChat.ID)
+		} else if replyMsg.SenderID() != 0 {
+			repliedUserIDStr = fmt.Sprintf("<code>%d</code>", replyMsg.SenderID())
 		}
 		sb.WriteString(fmt.Sprintf("↩️ <b>Replied User ID:</b> %s\n", repliedUserIDStr))
-		sb.WriteString(fmt.Sprintf("📨 <b>Replied Message ID:</b> <code>%d</code>\n", replyMsg.MessageId))
+		sb.WriteString(fmt.Sprintf("📨 <b>Replied Message ID:</b> <code>%d</code>\n", replyMsg.ID))
 	}
 
 	sb.WriteString("────────────────────")
@@ -113,24 +111,32 @@ func FormatGroupID(chat *gotgbot.Chat, user *gotgbot.User, replyMsg *gotgbot.Mes
 }
 
 // HandleID handles the /id command.
-func (p *Plugin) HandleID(b *gotgbot.Bot, ctx *ext.Context) error {
-	msg := ctx.EffectiveMessage
-	chat := ctx.EffectiveChat
-
-	var user *gotgbot.User
-	if ctx.EffectiveSender != nil {
-		user = ctx.EffectiveSender.User
-	}
+func (p *Plugin) HandleID(m *telegram.NewMessage) error {
+	user := m.Sender
+	chatID := m.ChatID()
 
 	var report string
-	if chat.Type == "private" {
-		report = FormatPrivateID(user, chat.Id)
+	if m.IsPrivate() {
+		report = FormatPrivateID(user, chatID)
 	} else {
-		report = FormatGroupID(chat, user, msg.ReplyToMessage)
+		chatTitle := "Unknown"
+		if m.Channel != nil && m.Channel.Title != "" {
+			chatTitle = m.Channel.Title
+		} else if m.Chat != nil && m.Chat.Title != "" {
+			chatTitle = m.Chat.Title
+		}
+		var replyMsg *telegram.NewMessage
+		if m.IsReply() {
+			reply, err := m.GetReplyMessage()
+			if err == nil {
+				replyMsg = reply
+			}
+		}
+		report = FormatGroupID(chatID, chatTitle, user, replyMsg)
 	}
 
-	_, err := msg.Reply(b, report, &gotgbot.SendMessageOpts{
-		ParseMode: "HTML",
+	_, err := m.Reply(report, &telegram.SendOptions{
+		ParseMode: "html",
 	})
 	return err
 }

@@ -1,8 +1,7 @@
 package cmds
 
 import (
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -36,14 +35,14 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 }
 
 // HandleCmds renders the dynamically generated help text based on registered plugins.
-func (p *Plugin) HandleCmds(b *gotgbot.Bot, ctx *ext.Context) error {
+func (p *Plugin) HandleCmds(m *telegram.NewMessage) error {
 	helpText := "<b><u>🤖 BOT COMMANDS & USAGE GUIDE 🤖</u></b>\n\nNo commands registered."
 	if p.appCtx != nil && p.appCtx.Registry != nil {
 		helpText = p.appCtx.Registry.GenerateHelpText()
 	}
 
-	_, err := ctx.EffectiveMessage.Reply(b, helpText, &gotgbot.SendMessageOpts{
-		ParseMode: "HTML",
+	_, err := m.Reply(helpText, &telegram.SendOptions{
+		ParseMode: "html",
 	})
 	return err
 }

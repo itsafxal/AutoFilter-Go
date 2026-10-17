@@ -11,6 +11,8 @@
 *.cert
 *.crt
 *.session
+*.dat
+cache*.db
 
 # Local binaries and build artifacts
 *.exe

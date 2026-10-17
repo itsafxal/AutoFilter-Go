@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
@@ -20,18 +20,13 @@ import (
 
 // mockSender implements TelegramSender for isolated unit testing.
 type mockSender struct {
-	lastMethod      string
-	lastChatID      int64
-	lastInput       gotgbot.InputFileOrString
-	lastCaption     string
-	lastProtect     bool
-	sendDocumentErr error
-	sendVideoErr    error
-	sendAudioErr    error
-	sendPhotoErr    error
-	sendAnimErr     error
-	sendVoiceErr    error
-	returnMsgID     int64
+	lastPeerID   any
+	lastMedia    any
+	lastOpts     *telegram.MediaOptions
+	callCount    int
+	sendMediaErr error
+	fallbackErr  error
+	returnMsgID  int32
 }
 
 func newMockSender() *mockSender {
@@ -40,88 +35,22 @@ func newMockSender() *mockSender {
 	}
 }
 
-func (m *mockSender) SendDocument(chatId int64, document gotgbot.InputFileOrString, opts *gotgbot.SendDocumentOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendDocument"
-	m.lastChatID = chatId
-	m.lastInput = document
-	if opts != nil {
-		m.lastCaption = opts.Caption
-		m.lastProtect = opts.ProtectContent
+func (m *mockSender) SendMedia(peerID any, media any, opts ...*telegram.MediaOptions) (*telegram.NewMessage, error) {
+	m.callCount++
+	m.lastPeerID = peerID
+	m.lastMedia = media
+	if len(opts) > 0 && opts[0] != nil {
+		m.lastOpts = opts[0]
 	}
-	if m.sendDocumentErr != nil {
-		return nil, m.sendDocumentErr
+	if m.fallbackErr != nil && m.callCount == 1 {
+		return nil, m.fallbackErr
 	}
-	return &gotgbot.Message{MessageId: m.returnMsgID, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-
-func (m *mockSender) SendVideo(chatId int64, video gotgbot.InputFileOrString, opts *gotgbot.SendVideoOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendVideo"
-	m.lastChatID = chatId
-	m.lastInput = video
-	if opts != nil {
-		m.lastCaption = opts.Caption
-		m.lastProtect = opts.ProtectContent
+	if m.sendMediaErr != nil {
+		return nil, m.sendMediaErr
 	}
-	if m.sendVideoErr != nil {
-		return nil, m.sendVideoErr
-	}
-	return &gotgbot.Message{MessageId: m.returnMsgID, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-
-func (m *mockSender) SendAudio(chatId int64, audio gotgbot.InputFileOrString, opts *gotgbot.SendAudioOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendAudio"
-	m.lastChatID = chatId
-	m.lastInput = audio
-	if opts != nil {
-		m.lastCaption = opts.Caption
-		m.lastProtect = opts.ProtectContent
-	}
-	if m.sendAudioErr != nil {
-		return nil, m.sendAudioErr
-	}
-	return &gotgbot.Message{MessageId: m.returnMsgID, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-
-func (m *mockSender) SendPhoto(chatId int64, photo gotgbot.InputFileOrString, opts *gotgbot.SendPhotoOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendPhoto"
-	m.lastChatID = chatId
-	m.lastInput = photo
-	if opts != nil {
-		m.lastCaption = opts.Caption
-		m.lastProtect = opts.ProtectContent
-	}
-	if m.sendPhotoErr != nil {
-		return nil, m.sendPhotoErr
-	}
-	return &gotgbot.Message{MessageId: m.returnMsgID, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-
-func (m *mockSender) SendAnimation(chatId int64, animation gotgbot.InputFileOrString, opts *gotgbot.SendAnimationOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendAnimation"
-	m.lastChatID = chatId
-	m.lastInput = animation
-	if opts != nil {
-		m.lastCaption = opts.Caption
-		m.lastProtect = opts.ProtectContent
-	}
-	if m.sendAnimErr != nil {
-		return nil, m.sendAnimErr
-	}
-	return &gotgbot.Message{MessageId: m.returnMsgID, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-
-func (m *mockSender) SendVoice(chatId int64, voice gotgbot.InputFileOrString, opts *gotgbot.SendVoiceOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendVoice"
-	m.lastChatID = chatId
-	m.lastInput = voice
-	if opts != nil {
-		m.lastCaption = opts.Caption
-		m.lastProtect = opts.ProtectContent
-	}
-	if m.sendVoiceErr != nil {
-		return nil, m.sendVoiceErr
-	}
-	return &gotgbot.Message{MessageId: m.returnMsgID, Chat: gotgbot.Chat{Id: chatId}}, nil
+	return &telegram.NewMessage{
+		ID: m.returnMsgID,
+	}, nil
 }
 
 // setupTestDB creates an isolated SQLite test database populated with a sample media record.
@@ -277,9 +206,6 @@ func TestDelivery_MethodSelection(t *testing.T) {
 			if res.DeliveryMethod != tc.expectedMethod {
 				t.Errorf("expected method %s, got %s", tc.expectedMethod, res.DeliveryMethod)
 			}
-			if mock.lastMethod != tc.expectedMethod {
-				t.Errorf("expected sender method %s, got %s", tc.expectedMethod, mock.lastMethod)
-			}
 		})
 	}
 }
@@ -312,11 +238,11 @@ func TestDelivery_SuccessfulDelivery(t *testing.T) {
 	if !res.ProtectedContent {
 		t.Error("expected ProtectedContent true")
 	}
-	if mock.lastCaption != "Custom Movie Caption" {
-		t.Errorf("expected caption 'Custom Movie Caption', got %q", mock.lastCaption)
+	if mock.lastOpts == nil || mock.lastOpts.Caption != "Custom Movie Caption" {
+		t.Errorf("expected caption 'Custom Movie Caption', got %v", mock.lastOpts)
 	}
-	if !mock.lastProtect {
-		t.Error("expected mock sender protect flag to be true")
+	if mock.lastOpts == nil || !mock.lastOpts.NoForwards {
+		t.Error("expected mock sender NoForwards flag to be true")
 	}
 }
 
@@ -327,8 +253,9 @@ func TestDelivery_TelegramAPIFailure(t *testing.T) {
 
 	svc := NewService(dbMgr, nil)
 	mock := newMockSender()
-	mock.sendDocumentErr = &gotgbot.TelegramError{
+	mock.sendMediaErr = &telegram.RpcError{
 		Code:        400,
+		Message:     "FILE_ID_INVALID",
 		Description: "Bad Request: wrong file identifier",
 	}
 	svc.SetSender(mock)
@@ -337,7 +264,7 @@ func TestDelivery_TelegramAPIFailure(t *testing.T) {
 	if !errors.Is(err, ErrTelegramAPI) {
 		t.Errorf("expected ErrTelegramAPI, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "wrong file identifier") {
+	if !strings.Contains(err.Error(), "FILE_ID_INVALID") && !strings.Contains(err.Error(), "wrong file identifier") {
 		t.Errorf("expected error to mention description, got %v", err)
 	}
 }
@@ -351,12 +278,10 @@ func TestDelivery_RateLimitAndBlockedUser(t *testing.T) {
 	mock := newMockSender()
 	svc.SetSender(mock)
 
-	// Sub-test: Flood Wait (429)
-	mock.sendDocumentErr = &gotgbot.TelegramError{
-		Code: 429,
-		ResponseParams: &gotgbot.ResponseParameters{
-			RetryAfter: 25,
-		},
+	// Sub-test: Flood Wait (420 / FLOOD_WAIT_25)
+	mock.sendMediaErr = &telegram.RpcError{
+		Code:    420,
+		Message: "FLOOD_WAIT_25",
 	}
 	_, err := svc.Deliver(context.Background(), 12345, "doc123", DeliveryOptions{})
 	if !errors.Is(err, ErrRateLimited) {
@@ -366,9 +291,10 @@ func TestDelivery_RateLimitAndBlockedUser(t *testing.T) {
 		t.Errorf("expected error message to contain retry after duration, got %v", err)
 	}
 
-	// Sub-test: Blocked by user (403)
-	mock.sendDocumentErr = &gotgbot.TelegramError{
+	// Sub-test: Blocked by user (USER_IS_BLOCKED / 403)
+	mock.sendMediaErr = &telegram.RpcError{
 		Code:        403,
+		Message:     "USER_IS_BLOCKED",
 		Description: "Forbidden: bot was blocked by the user",
 	}
 	_, err = svc.Deliver(context.Background(), 12345, "doc123", DeliveryOptions{})
@@ -461,9 +387,10 @@ func TestDelivery_SendVideoFallback(t *testing.T) {
 
 	svc := NewService(dbMgr, nil)
 	mock := newMockSender()
-	// Simulate Telegram rejecting video format (e.g. MKV uploaded as document)
-	mock.sendVideoErr = &gotgbot.TelegramError{
+	// Simulate Telegram rejecting video format on first attempt
+	mock.fallbackErr = &telegram.RpcError{
 		Code:        400,
+		Message:     "wrong file identifier/HTTP URL specified",
 		Description: "Bad Request: wrong file identifier/HTTP URL specified",
 	}
 	svc.SetSender(mock)
@@ -475,8 +402,8 @@ func TestDelivery_SendVideoFallback(t *testing.T) {
 	if res.DeliveryMethod != "SendDocument" {
 		t.Errorf("expected fallback method 'SendDocument', got %s", res.DeliveryMethod)
 	}
-	if mock.lastMethod != "SendDocument" {
-		t.Errorf("expected mock sender lastMethod 'SendDocument', got %s", mock.lastMethod)
+	if mock.lastOpts == nil || !mock.lastOpts.ForceDocument {
+		t.Errorf("expected fallback to have ForceDocument=true, got %+v", mock.lastOpts)
 	}
 }
 

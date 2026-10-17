@@ -2,12 +2,13 @@ package autofilter
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
@@ -58,16 +59,22 @@ func TestAutofilterPlugin_Structure(t *testing.T) {
 	filter := msgHandlers[0].Filter
 
 	// Non-command text message
-	plainMsg := &gotgbot.Message{Text: "kgf"}
+	plainMsg := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			Message: "kgf",
+		},
+	}
 	if !filter(plainMsg) {
 		t.Errorf("expected filter to accept plain text 'kgf'")
 	}
 
 	// Command message
-	cmdMsg := &gotgbot.Message{
-		Text: "/start",
-		Entities: []gotgbot.MessageEntity{
-			{Type: gotgbot.MessageEntityTypeBotCommand, Offset: 0, Length: 6},
+	cmdMsg := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			Message: "/start",
+			Entities: []telegram.MessageEntity{
+				&telegram.MessageEntityBotCommand{Offset: 0, Length: 6},
+			},
 		},
 	}
 	if filter(cmdMsg) {
@@ -77,9 +84,11 @@ func TestAutofilterPlugin_Structure(t *testing.T) {
 
 func TestAutofilter_RecoverSession(t *testing.T) {
 	plugin := &Plugin{}
-	msg := &gotgbot.Message{
-		Text: "𝗛𝗘𝗬 👋 User 🫶\n    \n📁 Query : kgf chapter 2\n\n🗓️ Page No › 1",
-		Chat: gotgbot.Chat{Id: -10012345},
+	msg := &telegram.NewMessage{
+		Chat: &telegram.ChatObj{ID: -10012345},
+		Message: &telegram.MessageObj{
+			Message: "𝗛𝗘𝗬 👋 User 🫶\n    \n📁 Query : kgf chapter 2\n\n🗓️ Page No › 1",
+		},
 	}
 
 	sess := plugin.recoverSessionFromMessage(msg, 998877)
@@ -98,7 +107,8 @@ func TestAutofilter_RecoverSession(t *testing.T) {
 }
 
 func TestAutofilter_IsMessageNotModified(t *testing.T) {
-	if !isMessageNotModified(&gotgbot.TelegramError{Description: "Bad Request: message is not modified: specified new message content and reply markup are exactly the same"}) {
+	err := errors.New("RPCError: 400 MESSAGE_NOT_MODIFIED: message is not modified")
+	if !isMessageNotModified(err) {
 		t.Errorf("expected isMessageNotModified to be true")
 	}
 	if isMessageNotModified(nil) {

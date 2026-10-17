@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -21,8 +21,8 @@ func TestIDPlugin_Metadata(t *testing.T) {
 }
 
 func TestFormatPrivateID_NormalUser(t *testing.T) {
-	user := &gotgbot.User{
-		Id:        12345678,
+	user := &telegram.UserObj{
+		ID:        12345678,
 		FirstName: "John",
 		LastName:  "Doe",
 		Username:  "johndoe",
@@ -55,21 +55,17 @@ func TestFormatPrivateID_MissingUser(t *testing.T) {
 }
 
 func TestFormatGroupID_NormalAndReplied(t *testing.T) {
-	chat := &gotgbot.Chat{
-		Id:    -1001234567890,
-		Title: "Test Movie Group",
+	user := &telegram.UserObj{
+		ID: 111222333,
 	}
-	user := &gotgbot.User{
-		Id: 111222333,
-	}
-	replyMsg := &gotgbot.Message{
-		MessageId: 42,
-		From: &gotgbot.User{
-			Id: 444555666,
+	replyMsg := &telegram.NewMessage{
+		ID: 42,
+		Sender: &telegram.UserObj{
+			ID: 444555666,
 		},
 	}
 
-	report := FormatGroupID(chat, user, replyMsg)
+	report := FormatGroupID(-1001234567890, "Test Movie Group", user, replyMsg)
 	if !strings.Contains(report, "-1001234567890") {
 		t.Errorf("expected Chat ID in report, got:\n%s", report)
 	}
@@ -89,18 +85,14 @@ func TestFormatGroupID_NormalAndReplied(t *testing.T) {
 
 func TestFormatGroupID_MissingUserAndAnonymousReply(t *testing.T) {
 	// Anonymous sender (user is nil) in group, replying to a channel post
-	chat := &gotgbot.Chat{
-		Id:    -1009876543210,
-		Title: "Anonymous Group",
-	}
-	replyMsg := &gotgbot.Message{
-		MessageId: 101,
-		SenderChat: &gotgbot.Chat{
-			Id: -1005555555555,
+	replyMsg := &telegram.NewMessage{
+		ID: 101,
+		SenderChat: &telegram.Channel{
+			ID: -1005555555555,
 		},
 	}
 
-	report := FormatGroupID(chat, nil, replyMsg)
+	report := FormatGroupID(-1009876543210, "Anonymous Group", nil, replyMsg)
 	if !strings.Contains(report, "Anonymous") {
 		t.Errorf("expected 'Anonymous' for missing user, got:\n%s", report)
 	}

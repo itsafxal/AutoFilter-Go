@@ -5,8 +5,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -64,7 +63,7 @@ func BuildPingReport(localDuration, apiRoundTrip time.Duration, startTime time.T
 }
 
 // HandlePing handles the /ping command.
-func (p *Plugin) HandlePing(b *gotgbot.Bot, ctx *ext.Context) error {
+func (p *Plugin) HandlePing(m *telegram.NewMessage) error {
 	localStart := time.Now()
 
 	// Local processing time: time taken before initiating the API call
@@ -72,8 +71,8 @@ func (p *Plugin) HandlePing(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	// Telegram API round-trip latency: time taken to send and acknowledge the reply
 	apiStart := time.Now()
-	sentMsg, err := ctx.EffectiveMessage.Reply(b, "⚡️ Pinging...", &gotgbot.SendMessageOpts{
-		ParseMode: "HTML",
+	sentMsg, err := m.Reply("⚡️ Pinging...", &telegram.SendOptions{
+		ParseMode: "html",
 	})
 	if err != nil {
 		return err
@@ -87,9 +86,8 @@ func (p *Plugin) HandlePing(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	report := BuildPingReport(localProcessingDuration, apiRoundTrip, startTime)
 
-	_, _, err = sentMsg.EditText(b, &gotgbot.EditMessageTextOpts{
-		Text:      report,
-		ParseMode: "HTML",
+	_, err = sentMsg.Edit(report, &telegram.SendOptions{
+		ParseMode: "html",
 	})
 	return err
 }

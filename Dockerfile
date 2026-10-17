@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build standalone Go binary
 # ==========================================
-FROM golang:1.24-alpine3.21 AS builder
+FROM golang:alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates

@@ -8,6 +8,10 @@ import (
 
 func TestLoadFromEnv_Success(t *testing.T) {
 	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("SESSION_PATH", "custom_bot.session")
+	os.Setenv("MEMORY_SESSION", "true")
 	os.Setenv("OWNER_ID", "99887766")
 	os.Setenv("ADMINS", "11223344, 55667788")
 	os.Setenv("LOG_LEVEL", "DEBUG")
@@ -18,6 +22,10 @@ func TestLoadFromEnv_Success(t *testing.T) {
 	os.Setenv("SYNC_BATCH_SIZE", "5000")
 	defer func() {
 		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("SESSION_PATH")
+		os.Unsetenv("MEMORY_SESSION")
 		os.Unsetenv("OWNER_ID")
 		os.Unsetenv("ADMINS")
 		os.Unsetenv("LOG_LEVEL")
@@ -35,6 +43,18 @@ func TestLoadFromEnv_Success(t *testing.T) {
 
 	if cfg.BotToken != "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" {
 		t.Errorf("expected BotToken to match, got %s", cfg.BotToken)
+	}
+	if cfg.AppID != 123456 {
+		t.Errorf("expected AppID to be 123456, got %d", cfg.AppID)
+	}
+	if cfg.AppHash != "abcdef0123456789abcdef0123456789" {
+		t.Errorf("expected AppHash to match, got %s", cfg.AppHash)
+	}
+	if cfg.SessionPath != "custom_bot.session" {
+		t.Errorf("expected SessionPath to be custom_bot.session, got %s", cfg.SessionPath)
+	}
+	if !cfg.MemorySession {
+		t.Error("expected MemorySession to be true")
 	}
 	if cfg.OwnerID != 99887766 {
 		t.Errorf("expected OwnerID to be 99887766, got %d", cfg.OwnerID)
@@ -79,7 +99,11 @@ func TestLoadFromEnv_Success(t *testing.T) {
 
 func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "654321")
+	os.Setenv("API_HASH", "fedcba9876543210fedcba9876543210")
 	os.Setenv("OWNER_ID", "99887766")
+	os.Unsetenv("SESSION_PATH")
+	os.Unsetenv("MEMORY_SESSION")
 	os.Unsetenv("ADMINS")
 	os.Unsetenv("LOG_LEVEL")
 	os.Unsetenv("DATABASE_URI")
@@ -88,6 +112,8 @@ func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 	os.Unsetenv("SQLITE_DB_PATH")
 	defer func() {
 		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
 		os.Unsetenv("OWNER_ID")
 	}()
 
@@ -98,6 +124,12 @@ func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 
 	if cfg.LogLevel != LogLevelInfo {
 		t.Errorf("expected default LogLevel to be INFO, got %s", cfg.LogLevel)
+	}
+	if cfg.SessionPath != "bot.session" {
+		t.Errorf("expected default SessionPath to be bot.session, got %s", cfg.SessionPath)
+	}
+	if cfg.MemorySession {
+		t.Error("expected default MemorySession to be false")
 	}
 	if len(cfg.Admins) != 1 || cfg.Admins[0] != 99887766 {
 		t.Errorf("expected Admins to contain only OwnerID, got %v", cfg.Admins)
@@ -121,8 +153,14 @@ func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 
 func TestLoadFromEnv_MissingBotToken(t *testing.T) {
 	os.Unsetenv("BOT_TOKEN")
+	os.Setenv("API_ID", "123")
+	os.Setenv("API_HASH", "hash123")
 	os.Setenv("OWNER_ID", "12345")
-	defer os.Unsetenv("OWNER_ID")
+	defer func() {
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("OWNER_ID")
+	}()
 
 	_, err := LoadFromEnv()
 	if err == nil {
@@ -133,10 +171,79 @@ func TestLoadFromEnv_MissingBotToken(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnv_MissingAPIID(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Unsetenv("API_ID")
+	os.Unsetenv("APP_ID")
+	os.Setenv("API_HASH", "hash123")
+	os.Setenv("OWNER_ID", "12345")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("OWNER_ID")
+	}()
+
+	_, err := LoadFromEnv()
+	if err == nil {
+		t.Fatal("expected error for missing API_ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "API_ID") {
+		t.Errorf("expected error message to mention API_ID, got: %v", err)
+	}
+}
+
+func TestLoadFromEnv_InvalidAPIID(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Setenv("API_ID", "-10")
+	os.Setenv("API_HASH", "hash123")
+	os.Setenv("OWNER_ID", "12345")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("OWNER_ID")
+	}()
+
+	_, err := LoadFromEnv()
+	if err == nil {
+		t.Fatal("expected error for negative API_ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "API_ID") {
+		t.Errorf("expected error message to mention API_ID, got: %v", err)
+	}
+}
+
+func TestLoadFromEnv_MissingAPIHash(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Setenv("API_ID", "12345")
+	os.Unsetenv("API_HASH")
+	os.Unsetenv("APP_HASH")
+	os.Setenv("OWNER_ID", "12345")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("OWNER_ID")
+	}()
+
+	_, err := LoadFromEnv()
+	if err == nil {
+		t.Fatal("expected error for missing API_HASH, got nil")
+	}
+	if !strings.Contains(err.Error(), "API_HASH") {
+		t.Errorf("expected error message to mention API_HASH, got: %v", err)
+	}
+}
+
 func TestLoadFromEnv_MissingOwnerID(t *testing.T) {
 	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Setenv("API_ID", "12345")
+	os.Setenv("API_HASH", "hash123")
 	os.Unsetenv("OWNER_ID")
-	defer os.Unsetenv("BOT_TOKEN")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+	}()
 
 	_, err := LoadFromEnv()
 	if err == nil {
@@ -149,9 +256,13 @@ func TestLoadFromEnv_MissingOwnerID(t *testing.T) {
 
 func TestLoadFromEnv_InvalidOwnerID(t *testing.T) {
 	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Setenv("API_ID", "12345")
+	os.Setenv("API_HASH", "hash123")
 	os.Setenv("OWNER_ID", "not_a_number")
 	defer func() {
 		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
 		os.Unsetenv("OWNER_ID")
 	}()
 
@@ -163,10 +274,14 @@ func TestLoadFromEnv_InvalidOwnerID(t *testing.T) {
 
 func TestLoadFromEnv_InvalidAdminID(t *testing.T) {
 	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Setenv("API_ID", "12345")
+	os.Setenv("API_HASH", "hash123")
 	os.Setenv("OWNER_ID", "12345")
 	os.Setenv("ADMINS", "123,invalid_admin,456")
 	defer func() {
 		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
 		os.Unsetenv("OWNER_ID")
 		os.Unsetenv("ADMINS")
 	}()
@@ -179,10 +294,14 @@ func TestLoadFromEnv_InvalidAdminID(t *testing.T) {
 
 func TestLoadFromEnv_InvalidLogLevel(t *testing.T) {
 	os.Setenv("BOT_TOKEN", "123:abc")
+	os.Setenv("API_ID", "12345")
+	os.Setenv("API_HASH", "hash123")
 	os.Setenv("OWNER_ID", "12345")
 	os.Setenv("LOG_LEVEL", "TRACE_VERBOSE")
 	defer func() {
 		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
 		os.Unsetenv("OWNER_ID")
 		os.Unsetenv("LOG_LEVEL")
 	}()
@@ -195,10 +314,14 @@ func TestLoadFromEnv_InvalidLogLevel(t *testing.T) {
 
 func TestSecretRedaction(t *testing.T) {
 	secret := "987654321:AAFE_secret_bot_token_value_xyz"
+	apiHash := "super_secret_api_hash_1234567890abcdef"
 	dbURI := "mongodb+srv://botadmin:SuperSecretPass123!@cluster0.abc.mongodb.net/CyberTG?retryWrites=true"
 
 	cfg := &Config{
 		BotToken:       secret,
+		AppID:          123456,
+		AppHash:        apiHash,
+		SessionPath:    "bot.session",
 		OwnerID:        12345,
 		Admins:         []int64{12345},
 		LogLevel:       LogLevelInfo,
@@ -212,6 +335,9 @@ func TestSecretRedaction(t *testing.T) {
 	if strings.Contains(str, "AAFE_secret_bot_token_value_xyz") {
 		t.Errorf("CRITICAL SECURITY FLAW: secret token leaked in String(): %s", str)
 	}
+	if strings.Contains(str, "super_secret_api_hash_1234567890abcdef") {
+		t.Errorf("CRITICAL SECURITY FLAW: api hash leaked in String(): %s", str)
+	}
 	if strings.Contains(str, "SuperSecretPass123!") {
 		t.Errorf("CRITICAL SECURITY FLAW: database password leaked in String(): %s", str)
 	}
@@ -222,6 +348,11 @@ func TestSecretRedaction(t *testing.T) {
 	masked := cfg.MaskedToken()
 	if strings.Contains(masked, "AAFE_secret_bot_token_value_xyz") {
 		t.Errorf("CRITICAL SECURITY FLAW: secret token leaked in MaskedToken(): %s", masked)
+	}
+
+	maskedHash := cfg.MaskedAppHash()
+	if strings.Contains(maskedHash, "1234567890abcdef") {
+		t.Errorf("CRITICAL SECURITY FLAW: api hash leaked in MaskedAppHash(): %s", maskedHash)
 	}
 
 	maskedURI := MaskURI(dbURI)

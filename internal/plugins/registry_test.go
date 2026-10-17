@@ -4,8 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/amarnathcjd/gogram/telegram"
 )
 
 type mockPlugin struct {
@@ -21,7 +20,7 @@ func (m *mockPlugin) Commands() []CommandDefinition {
 	return m.commands
 }
 
-func dummyHandler(b *gotgbot.Bot, ctx *ext.Context) error {
+func dummyHandler(m *telegram.NewMessage) error {
 	return nil
 }
 

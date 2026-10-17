@@ -44,6 +44,8 @@ func run() error {
 		"admins_count", len(cfg.Admins),
 		"log_level", string(cfg.LogLevel),
 		"bot_token", cfg.MaskedToken(),
+		"app_id", cfg.AppID,
+		"app_hash", cfg.MaskedAppHash(),
 	)
 
 	// 4. Initialize application container

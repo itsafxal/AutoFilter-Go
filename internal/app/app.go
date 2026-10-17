@@ -97,14 +97,14 @@ func (a *App) InitDatabase(ctx context.Context) error {
 	return nil
 }
 
-// InitBot initializes the Telegram Bot API client and dispatcher.
+// InitBot initializes the Telegram MTProto client and dispatcher.
 func (a *App) InitBot() error {
 	a.Logger.Info("initializing telegram bot client...")
 	if err := a.BotService.Init(); err != nil {
 		return err
 	}
 	if a.DeliveryService != nil {
-		a.DeliveryService.SetSender(a.BotService.Bot())
+		a.DeliveryService.SetSender(a.BotService.Client())
 	}
 	return nil
 }

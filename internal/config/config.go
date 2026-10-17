@@ -25,6 +25,18 @@ type Config struct {
 	// BotToken is the Telegram Bot API authentication token.
 	BotToken string
 
+	// AppID is the Telegram MTProto API ID from my.telegram.org.
+	AppID int32
+
+	// AppHash is the Telegram MTProto API Hash from my.telegram.org.
+	AppHash string
+
+	// SessionPath is the file path for persistent MTProto session storage.
+	SessionPath string
+
+	// MemorySession specifies whether to keep the session in memory only without writing to disk.
+	MemorySession bool
+
 	// OwnerID is the Telegram user ID of the bot owner.
 	OwnerID int64
 
@@ -63,6 +75,34 @@ func LoadFromEnv() (*Config, error) {
 	if token == "" {
 		return nil, errors.New("configuration error: BOT_TOKEN is required and cannot be empty")
 	}
+
+	apiIDStr := strings.TrimSpace(os.Getenv("API_ID"))
+	if apiIDStr == "" {
+		apiIDStr = strings.TrimSpace(os.Getenv("APP_ID"))
+	}
+	if apiIDStr == "" {
+		return nil, errors.New("configuration error: API_ID is required and cannot be empty")
+	}
+	apiID64, err := strconv.ParseInt(apiIDStr, 10, 32)
+	if err != nil || apiID64 <= 0 {
+		return nil, fmt.Errorf("configuration error: API_ID must be a positive integer, got %q", apiIDStr)
+	}
+	apiID := int32(apiID64)
+
+	apiHash := strings.TrimSpace(os.Getenv("API_HASH"))
+	if apiHash == "" {
+		apiHash = strings.TrimSpace(os.Getenv("APP_HASH"))
+	}
+	if apiHash == "" {
+		return nil, errors.New("configuration error: API_HASH is required and cannot be empty")
+	}
+
+	sessionPath := strings.TrimSpace(os.Getenv("SESSION_PATH"))
+	if sessionPath == "" {
+		sessionPath = "bot.session"
+	}
+
+	memorySession := strings.EqualFold(strings.TrimSpace(os.Getenv("MEMORY_SESSION")), "true")
 
 	ownerIDStr := strings.TrimSpace(os.Getenv("OWNER_ID"))
 	if ownerIDStr == "" {
@@ -124,6 +164,10 @@ func LoadFromEnv() (*Config, error) {
 
 	cfg := &Config{
 		BotToken:       token,
+		AppID:          apiID,
+		AppHash:        apiHash,
+		SessionPath:    sessionPath,
+		MemorySession:  memorySession,
 		OwnerID:        ownerID,
 		Admins:         admins,
 		LogLevel:       logLevel,
@@ -211,6 +255,14 @@ func (c *Config) MaskedToken() string {
 	return "***REDACTED***"
 }
 
+// MaskedAppHash returns a safely redacted representation of the Telegram API hash.
+func (c *Config) MaskedAppHash() string {
+	if len(c.AppHash) > 6 {
+		return c.AppHash[:4] + "***REDACTED***"
+	}
+	return "***REDACTED***"
+}
+
 var uriUserInfoRegex = regexp.MustCompile(`://([^:]+):([^@]+)@`)
 
 // MaskURI redacts credentials from database URIs to prevent secret leaks in logs.
@@ -235,6 +287,6 @@ func MaskURI(rawURI string) string {
 
 // String provides a safe string representation that NEVER exposes secrets.
 func (c *Config) String() string {
-	return fmt.Sprintf("Config{BotToken:%s, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s}",
-		c.MaskedToken(), c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath)
+	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s}",
+		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath)
 }

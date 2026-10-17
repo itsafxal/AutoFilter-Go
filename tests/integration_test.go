@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/app"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
@@ -28,6 +28,8 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 
 	cfg := &config.Config{
 		BotToken: "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+		AppID:    12345,
+		AppHash:  "0123456789abcdef0123456789abcdef",
 		OwnerID:  99887766,
 		Admins:   []int64{99887766, 123456},
 		LogLevel: config.LogLevelInfo,
@@ -123,6 +125,8 @@ func TestIntegration_ShutdownHandling(t *testing.T) {
 
 	cfg := &config.Config{
 		BotToken: "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+		AppID:    12345,
+		AppHash:  "0123456789abcdef0123456789abcdef",
 		OwnerID:  99887766,
 		Admins:   []int64{99887766},
 		LogLevel: config.LogLevelInfo,
@@ -150,39 +154,14 @@ func TestIntegration_ShutdownHandling(t *testing.T) {
 }
 
 type integrationMockSender struct {
-	lastMethod string
-	lastChatID int64
+	lastPeerID any
+	lastMedia  any
 }
 
-func (m *integrationMockSender) SendDocument(chatId int64, document gotgbot.InputFileOrString, opts *gotgbot.SendDocumentOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendDocument"
-	m.lastChatID = chatId
-	return &gotgbot.Message{MessageId: 777, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-func (m *integrationMockSender) SendVideo(chatId int64, video gotgbot.InputFileOrString, opts *gotgbot.SendVideoOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendVideo"
-	m.lastChatID = chatId
-	return &gotgbot.Message{MessageId: 777, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-func (m *integrationMockSender) SendAudio(chatId int64, audio gotgbot.InputFileOrString, opts *gotgbot.SendAudioOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendAudio"
-	m.lastChatID = chatId
-	return &gotgbot.Message{MessageId: 777, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-func (m *integrationMockSender) SendPhoto(chatId int64, photo gotgbot.InputFileOrString, opts *gotgbot.SendPhotoOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendPhoto"
-	m.lastChatID = chatId
-	return &gotgbot.Message{MessageId: 777, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-func (m *integrationMockSender) SendAnimation(chatId int64, animation gotgbot.InputFileOrString, opts *gotgbot.SendAnimationOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendAnimation"
-	m.lastChatID = chatId
-	return &gotgbot.Message{MessageId: 777, Chat: gotgbot.Chat{Id: chatId}}, nil
-}
-func (m *integrationMockSender) SendVoice(chatId int64, voice gotgbot.InputFileOrString, opts *gotgbot.SendVoiceOpts) (*gotgbot.Message, error) {
-	m.lastMethod = "SendVoice"
-	m.lastChatID = chatId
-	return &gotgbot.Message{MessageId: 777, Chat: gotgbot.Chat{Id: chatId}}, nil
+func (m *integrationMockSender) SendMedia(peerID any, media any, opts ...*telegram.MediaOptions) (*telegram.NewMessage, error) {
+	m.lastPeerID = peerID
+	m.lastMedia = media
+	return &telegram.NewMessage{ID: 777}, nil
 }
 
 func TestIntegration_MediaDeliveryWorkflow(t *testing.T) {
@@ -194,6 +173,8 @@ func TestIntegration_MediaDeliveryWorkflow(t *testing.T) {
 
 	cfg := &config.Config{
 		BotToken:     "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+		AppID:        12345,
+		AppHash:      "0123456789abcdef0123456789abcdef",
 		OwnerID:      99887766,
 		Admins:       []int64{99887766},
 		LogLevel:     config.LogLevelInfo,
