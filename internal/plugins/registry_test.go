@@ -312,3 +312,80 @@ func TestRegistry_AttachToClient_MessageHandlers(t *testing.T) {
 	}
 }
 
+func TestRegistry_ChannelExclusion(t *testing.T) {
+	r := NewRegistry(nil)
+
+	calledCmd := false
+	cmdHandler := r.wrapHandler(CommandDefinition{
+		Name: "test",
+		Handler: func(m *telegram.NewMessage) error {
+			calledCmd = true
+			return nil
+		},
+	})
+
+	calledMsg := false
+	msgHandler := r.wrapMessageHandler(MessageDefinition{
+		Handler: func(m *telegram.NewMessage) error {
+			calledMsg = true
+			return nil
+		},
+	})
+
+	calledCb := false
+	cbHandler := r.wrapCallbackHandler(CallbackDefinition{
+		Prefix: "test#",
+		Handler: func(cb *telegram.CallbackQuery) error {
+			calledCb = true
+			return nil
+		},
+	})
+
+	// 1. Channel message should NOT invoke handlers
+	channelMsg := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			PeerID: &telegram.PeerChannel{ChannelID: 12345},
+		},
+		Channel: &telegram.Channel{
+			ID:        12345,
+			Broadcast: true, // Broadcast channel
+		},
+	}
+
+	_ = cmdHandler(channelMsg)
+	if calledCmd {
+		t.Error("expected command handler NOT to be called for broadcast channel")
+	}
+
+	_ = msgHandler(channelMsg)
+	if calledMsg {
+		t.Error("expected message handler NOT to be called for broadcast channel")
+	}
+
+	channelCb := &telegram.CallbackQuery{
+		OriginalUpdate: &telegram.UpdateBotCallbackQuery{
+			Peer: &telegram.PeerChannel{ChannelID: 12345},
+		},
+	}
+	_ = cbHandler(channelCb)
+	if calledCb {
+		t.Error("expected callback handler NOT to be called for channel")
+	}
+
+	// 2. Private chat message SHOULD invoke handlers
+	pmMsg := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			PeerID: &telegram.PeerUser{UserID: 111},
+		},
+	}
+	_ = cmdHandler(pmMsg)
+	if !calledCmd {
+		t.Error("expected command handler to be called for private chat")
+	}
+
+	_ = msgHandler(pmMsg)
+	if !calledMsg {
+		t.Error("expected message handler to be called for private chat")
+	}
+}
+

@@ -214,8 +214,13 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 		botUsername = p.appCtx.BotUser.Username
 	}
 
+	// Ignore broadcast channels completely
+	if m.IsChannel() || m.IsChannelPost() {
+		return nil
+	}
+
 	// Handle Group and Supergroup chats
-	if m.IsGroup() || m.IsChannel() {
+	if m.IsGroup() {
 		chatTitle := "Chat"
 		if m.Channel != nil && m.Channel.Title != "" {
 			chatTitle = m.Channel.Title

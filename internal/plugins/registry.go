@@ -209,9 +209,13 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 	return nil
 }
 
-// wrapMessageHandler wraps a message handler with panic recovery and structured logging.
+// wrapMessageHandler wraps a message handler with channel filtering, panic recovery, and structured logging.
 func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 	return func(m *telegram.NewMessage) (err error) {
+		if m != nil && (m.IsChannel() || m.IsChannelPost()) {
+			// Never reply or process ambient messages in broadcast channels
+			return nil
+		}
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in message handler: %v", rec)
@@ -233,6 +237,10 @@ func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 // wrapCallbackHandler wraps a callback handler with panic recovery and structured logging.
 func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) CallbackHandlerFunc {
 	return func(query *telegram.CallbackQuery) (err error) {
+		if query != nil && query.IsChannel() {
+			// Never process callback queries in broadcast channels
+			return nil
+		}
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in callback prefix %q: %v", cb.Prefix, rec)
@@ -248,9 +256,13 @@ func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) CallbackHandlerFun
 	}
 }
 
-// wrapHandler wraps a command handler with admin protection and panic recovery.
+// wrapHandler wraps a command handler with channel filtering, admin protection and panic recovery.
 func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 	return func(m *telegram.NewMessage) (err error) {
+		if m != nil && (m.IsChannel() || m.IsChannelPost()) {
+			// Never reply or process commands in broadcast channels
+			return nil
+		}
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in command /%s: %v", cmd.Name, rec)

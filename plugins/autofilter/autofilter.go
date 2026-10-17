@@ -80,7 +80,7 @@ func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
 	return []plugins.MessageDefinition{
 		{
 			Filter: func(m *telegram.NewMessage) bool {
-				if m == nil || m.Text() == "" {
+				if m == nil || m.Text() == "" || m.IsChannel() || m.IsChannelPost() {
 					return false
 				}
 				// Reject commands
@@ -110,7 +110,7 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 
 // HandleTextMessage intercepts user movie search queries in PM and group chats.
 func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
-	if m == nil {
+	if m == nil || m.IsChannel() || m.IsChannelPost() {
 		return nil
 	}
 
