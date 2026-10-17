@@ -195,6 +195,33 @@ func (p *Plugin) HandleCheckSubCallback(cb *telegram.CallbackQuery) error {
 		userID = cb.Sender.ID
 	}
 
+	// Verify Force Subscribe status matching legacy pm_filter checksub logic
+	if p.appCtx != nil && p.appCtx.FSub != nil {
+		isAdmin := false
+		if p.appCtx.Config != nil {
+			isAdmin = p.appCtx.Config.IsAdmin(userID) || p.appCtx.Config.IsOwner(userID)
+		}
+		if !isAdmin {
+			payload := "file_" + fileID
+			if protectContent {
+				payload = "filep_" + fileID
+			}
+			markup, unjoined := p.appCtx.FSub.BuildDynamicFSubKeyboard(context.Background(), p.appCtx.Client, userID, payload)
+			if len(unjoined) > 0 {
+				if cb.MessageID != 0 && markup != nil && p.appCtx.Client != nil {
+					_, _ = p.appCtx.Client.EditMessage(cb.GetChatID(), cb.MessageID, "<b>Pʟᴇᴀꜱᴇ Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟs Tᴏ Gᴇᴛ Yᴏᴜʀ Rᴇǫᴜᴇꜱᴛᴇᴅ Mᴏᴠɪᴇ Fɪʟᴇ 🚀</b>", &telegram.SendOptions{
+						ParseMode:   "html",
+						ReplyMarkup: markup,
+					})
+				}
+				_, alertErr := cb.Answer("🚨 You haven't joined all required channels yet! Joined channel buttons have been hidden. Please join the remaining channel(s) shown above.", &telegram.CallbackOptions{
+					Alert: true,
+				})
+				return alertErr
+			}
+		}
+	}
+
 	opts := deliveryCore.DeliveryOptions{
 		UserID:         userID,
 		ProtectContent: protectContent,

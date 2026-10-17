@@ -120,6 +120,11 @@ func (s *BotService) Start(ctx context.Context) error {
 
 	if s.appCtx != nil {
 		s.appCtx.BotUser = botUser
+		if s.appCtx.FSub != nil {
+			if err := s.appCtx.FSub.Init(ctx, s.client, botUser.ID); err != nil {
+				s.logger.Warn("failed to initialize FSub service loadout", "error", err)
+			}
+		}
 	}
 
 	s.logger.Info("gogram telegram bot client authenticated successfully",

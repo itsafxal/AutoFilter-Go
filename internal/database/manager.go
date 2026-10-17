@@ -9,6 +9,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
 	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // DatabaseManager coordinates authoritative MongoDB connections and temporary SQLite runtime caches.
@@ -153,6 +154,16 @@ func (m *DatabaseManager) IsReady() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.ready
+}
+
+// MongoPrimaryDB returns the authoritative primary MongoDB database instance.
+func (m *DatabaseManager) MongoPrimaryDB() *mongo.Database {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.mongoManager != nil {
+		return m.mongoManager.PrimaryDB()
+	}
+	return nil
 }
 
 // UserRepo returns the authoritative MongoDB UserRepository.

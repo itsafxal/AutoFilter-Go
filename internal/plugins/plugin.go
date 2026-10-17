@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -10,6 +11,14 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 )
+
+// FSubService defines the force subscribe operations required across plugins.
+type FSubService interface {
+	BuildDynamicFSubKeyboard(ctx context.Context, client *telegram.Client, userID int64, fileID string) (*telegram.ReplyInlineMarkup, []int64)
+	CheckLoopSubDynamic(ctx context.Context, client *telegram.Client, userID int64, chatID int64, promptMsgID int32, fileID string) bool
+	CheckChannelMembership(ctx context.Context, client *telegram.Client, userID int64, channelID int64, slot int) bool
+	Init(ctx context.Context, client *telegram.Client, botID int64) error
+}
 
 // AppContext carries shared application dependencies passed to plugins.
 type AppContext struct {
@@ -22,6 +31,7 @@ type AppContext struct {
 	Delivery  delivery.MediaDeliveryService
 	Search    search.SearchService
 	Client    *telegram.Client
+	FSub      FSubService
 }
 
 // HandlerFunc is the Gogram message/command handler function signature.
@@ -92,3 +102,13 @@ type MessagePlugin interface {
 	Plugin
 	MessageHandlers() []MessageDefinition
 }
+
+// JoinRequestHandlerFunc is the handler function for Telegram join requests.
+type JoinRequestHandlerFunc func(req *telegram.JoinRequestUpdate) error
+
+// JoinRequestPlugin is an optional interface plugins can implement to receive chat join requests.
+type JoinRequestPlugin interface {
+	Plugin
+	JoinRequestHandlers() []JoinRequestHandlerFunc
+}
+

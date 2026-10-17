@@ -13,6 +13,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/plugins/autofilter"
 	"github.com/itsafxal/MYTGBOTZ/plugins/cmds"
 	"github.com/itsafxal/MYTGBOTZ/plugins/delivery"
+	"github.com/itsafxal/MYTGBOTZ/plugins/fsub"
 	"github.com/itsafxal/MYTGBOTZ/plugins/id"
 	"github.com/itsafxal/MYTGBOTZ/plugins/info"
 	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
@@ -64,6 +65,7 @@ func run() error {
 		info.New(application.AppContext),
 		delivery.New(application.AppContext),
 		autofilter.New(application.AppContext),
+		fsub.New(application.AppContext, application.FSubService),
 	)
 	if err != nil {
 		return fmt.Errorf("plugin registration failure: %w", err)

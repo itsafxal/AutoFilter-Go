@@ -184,6 +184,26 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 				}
 			}
 		}
+
+		// Register join request handlers if the plugin implements JoinRequestPlugin
+		if jrPlugin, ok := p.(JoinRequestPlugin); ok {
+			for _, jh := range jrPlugin.JoinRequestHandlers() {
+				jhCopy := jh
+				client.OnJoinRequest(func(req *telegram.JoinRequestUpdate) (err error) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							err = fmt.Errorf("panic in join request handler: %v", rec)
+							if r.appCtx != nil && r.appCtx.Logger != nil {
+								r.appCtx.Logger.Error("panic recovered in join request handler",
+									"panic", rec,
+								)
+							}
+						}
+					}()
+					return jhCopy(req)
+				})
+			}
+		}
 	}
 
 	return nil

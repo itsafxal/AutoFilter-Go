@@ -10,6 +10,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/MYTGBOTZ/internal/fsub"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 	"github.com/itsafxal/MYTGBOTZ/internal/telegram"
@@ -25,6 +26,7 @@ type App struct {
 	DBManager       *database.DatabaseManager
 	DeliveryService delivery.MediaDeliveryService
 	SearchService   search.SearchService
+	FSubService     *fsub.Service
 	StartTime       time.Time
 }
 
@@ -41,6 +43,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	dbManager := database.NewDatabaseManager(cfg, logger)
 	deliveryService := delivery.NewService(dbManager, logger)
 	searchService := search.NewService(dbManager, logger)
+	fsubRepo := fsub.NewRepositoryWithProvider(dbManager.MongoPrimaryDB)
+	fsubService := fsub.NewService(fsubRepo, cfg, logger)
 
 	appCtx := &plugins.AppContext{
 		Config:    cfg,
@@ -49,6 +53,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		DB:        dbManager,
 		Delivery:  deliveryService,
 		Search:    searchService,
+		FSub:      fsubService,
 	}
 
 	reg := plugins.NewRegistry(appCtx)
@@ -63,6 +68,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		DBManager:       dbManager,
 		DeliveryService: deliveryService,
 		SearchService:   searchService,
+		FSubService:     fsubService,
 		StartTime:       startTime,
 	}, nil
 }

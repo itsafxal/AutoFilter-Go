@@ -135,6 +135,43 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 					userID = m.SenderID()
 				}
 
+				// Force Subscribe Verification Flow matching legacy TGxCyberBot
+				if p.appCtx != nil && p.appCtx.FSub != nil {
+					isAdmin := false
+					if p.appCtx.Config != nil {
+						isAdmin = p.appCtx.Config.IsAdmin(userID) || p.appCtx.Config.IsOwner(userID)
+					}
+
+					if !isAdmin {
+						markup, unjoined := p.appCtx.FSub.BuildDynamicFSubKeyboard(context.Background(), p.appCtx.Client, userID, payload)
+						if len(unjoined) > 0 && markup != nil {
+							promptMsg, err := m.Reply("<b>Pʟᴇᴀꜱᴇ Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟs Tᴏ Gᴇᴛ Yᴏᴜʀ Rᴇǫᴜᴇꜱᴛᴇᴅ Mᴏᴠɪᴇ Fɪʟᴇ 🚀</b>", &telegram.SendOptions{
+								ParseMode:   "html",
+								ReplyMarkup: markup,
+							})
+							if err != nil {
+								return err
+							}
+
+							var promptMsgID int32
+							if promptMsg != nil {
+								promptMsgID = promptMsg.ID
+							}
+
+							// Seamless refresh background loop: dynamically updates markup & auto-delivers once joined without needing a Try Again button
+							checkSuccess := p.appCtx.FSub.CheckLoopSubDynamic(context.Background(), p.appCtx.Client, userID, m.ChatID(), promptMsgID, payload)
+							if checkSuccess {
+								if p.appCtx.Client != nil && promptMsgID != 0 {
+									_, _ = p.appCtx.Client.DeleteMessages(m.ChatID(), []int32{promptMsgID})
+								}
+							} else {
+								// User hasn't joined within the verification window; stop delivery
+								return nil
+							}
+						}
+					}
+				}
+
 				opts := delivery.DeliveryOptions{
 					UserID:         userID,
 					ProtectContent: protectContent,
