@@ -277,9 +277,11 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 
 	mimeType := DetectMimeType(fileName, rec.MimeType, rec.FileType)
 
-	// Resolve native Telegram InputMedia or BotFileID for download
+	// Resolve native Telegram MTProto media object for download
 	var mediaToDownload any = rec.FileID
-	if resolvedMedia, rErr := delivery.ResolveInputMedia(rec.FileID, rec.FileRef); rErr == nil && resolvedMedia != nil {
+	if resolvedDownload, rErr := delivery.ResolveDownloadMedia(rec.FileID, rec.FileRef, fileName, totalSize, mimeType); rErr == nil && resolvedDownload != nil {
+		mediaToDownload = resolvedDownload
+	} else if resolvedMedia, rErr := delivery.ResolveInputMedia(rec.FileID, rec.FileRef); rErr == nil && resolvedMedia != nil {
 		mediaToDownload = resolvedMedia
 	} else if resolvedBot, rErr := telegram.ResolveBotFileID(rec.FileID); rErr == nil && resolvedBot != nil {
 		mediaToDownload = resolvedBot

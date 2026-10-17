@@ -489,6 +489,32 @@ func TestUnpackRealFileID(t *testing.T) {
 		if docObj.AccessHash != parsed.AccessHash {
 			t.Errorf("expected docObj.AccessHash == %d, got %d", parsed.AccessHash, docObj.AccessHash)
 		}
+
+		// Verify ResolveDownloadMedia for streaming & fast download compatibility
+		downloadMedia, dErr := ResolveDownloadMedia(fid, "", "test_movie.mkv", 1024*1024*50, "video/x-matroska")
+		if dErr != nil {
+			t.Fatalf("ResolveDownloadMedia failed for %s: %v", fid, dErr)
+		}
+		if downloadMedia == nil {
+			t.Fatalf("expected non-nil downloadMedia for %s", fid)
+		}
+
+		loc, dcID, size, name, gErr := telegram.GetFileLocation(downloadMedia)
+		if gErr != nil {
+			t.Fatalf("telegram.GetFileLocation failed for downloadMedia: %v", gErr)
+		}
+		if loc == nil {
+			t.Fatalf("expected non-nil InputFileLocation")
+		}
+		if dcID != parsed.DCID {
+			t.Errorf("expected dcID == %d, got %d", parsed.DCID, dcID)
+		}
+		if size != 1024*1024*50 {
+			t.Errorf("expected size == %d, got %d", 1024*1024*50, size)
+		}
+		if name != "test_movie.mkv" {
+			t.Errorf("expected filename 'test_movie.mkv', got %s", name)
+		}
 	}
 }
 

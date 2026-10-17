@@ -243,3 +243,80 @@ func ResolveInputMedia(fileID string, fileRefStr string) (telegram.InputMedia, e
 		},
 	}, nil
 }
+
+// ResolveDownloadMedia converts a file_id, file_ref, and metadata into a native MTProto media object
+// (*telegram.DocumentObj or *telegram.PhotoObj) that is natively supported by Gogram's GetFileLocation
+// and DownloadChunk for streaming and direct HTTP downloads.
+func ResolveDownloadMedia(fileID string, fileRefStr string, fileName string, fileSize int64, mimeType string) (any, error) {
+	parsed, err := UnpackFileID(fileID)
+	if err != nil {
+		// Try Gogram's built-in parser as fallback
+		if res, errGogram := telegram.ResolveBotFileID(fileID); errGogram == nil && res != nil {
+			switch m := res.(type) {
+			case *telegram.MessageMediaDocument:
+				if doc, ok := m.Document.(*telegram.DocumentObj); ok {
+					if fileSize > 0 {
+						doc.Size = fileSize
+					}
+					if mimeType != "" {
+						doc.MimeType = mimeType
+					}
+					if fileName != "" {
+						doc.Attributes = append(doc.Attributes, &telegram.DocumentAttributeFilename{
+							FileName: fileName,
+						})
+					}
+					return doc, nil
+				}
+			case *telegram.MessageMediaPhoto:
+				if photo, ok := m.Photo.(*telegram.PhotoObj); ok {
+					return photo, nil
+				}
+			}
+			return res, nil
+		}
+		return nil, err
+	}
+
+	// Determine file reference
+	fileRef := parsed.FileReference
+	if len(fileRef) == 0 && strings.TrimSpace(fileRefStr) != "" {
+		if refBytes, err := decodeBase64FileID(fileRefStr); err == nil {
+			fileRef = refBytes
+		}
+	}
+
+	// Photo type (FileType 2)
+	if parsed.FileType == 2 {
+		return &telegram.PhotoObj{
+			ID:            parsed.MediaID,
+			AccessHash:    parsed.AccessHash,
+			FileReference: fileRef,
+			DcID:          parsed.DCID,
+			Sizes: []telegram.PhotoSize{
+				&telegram.PhotoSizeObj{
+					Type: "x",
+					Size: int32(fileSize),
+				},
+			},
+		}, nil
+	}
+
+	// All other types (document, video, audio, etc.) map to DocumentObj
+	var attrs []telegram.DocumentAttribute
+	if fileName != "" {
+		attrs = append(attrs, &telegram.DocumentAttributeFilename{
+			FileName: fileName,
+		})
+	}
+
+	return &telegram.DocumentObj{
+		ID:            parsed.MediaID,
+		AccessHash:    parsed.AccessHash,
+		FileReference: fileRef,
+		DcID:          parsed.DCID,
+		Size:          fileSize,
+		MimeType:      mimeType,
+		Attributes:    attrs,
+	}, nil
+}
