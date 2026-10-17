@@ -562,6 +562,18 @@ func TestDelivery_FastDownloadButton(t *testing.T) {
 	if mock.lastOpts == nil || mock.lastOpts.ReplyMarkup != nil {
 		t.Errorf("expected nil ReplyMarkup when disabled, got %v", mock.lastOpts.ReplyMarkup)
 	}
+
+	// 3. Test retry when Telegram returns BUTTON_URL_INVALID
+	mock.callCount = 0
+	mock.fallbackErr = errors.New("sending MessagesSendMedia: [BUTTON_URL_INVALID] Button URL invalid. (code 400)")
+	mock.returnMsgID = 9999
+	res, err = svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
+	if err != nil {
+		t.Fatalf("Deliver failed to fallback on BUTTON_URL_INVALID: %v", err)
+	}
+	if res.MessageID != 9999 {
+		t.Errorf("expected messageID 9999 after fallback, got %d", res.MessageID)
+	}
 }
 
 

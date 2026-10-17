@@ -396,8 +396,8 @@ func TestLoadFromEnv_StreamConfig(t *testing.T) {
 	if cfg.StreamBindAddr != "0.0.0.0" {
 		t.Errorf("expected default StreamBindAddr 0.0.0.0, got %s", cfg.StreamBindAddr)
 	}
-	if cfg.StreamURL != "http://localhost:8080" {
-		t.Errorf("expected default StreamURL http://localhost:8080, got %s", cfg.StreamURL)
+	if cfg.StreamURL != "" {
+		t.Errorf("expected default StreamURL empty, got %s", cfg.StreamURL)
 	}
 	if cfg.StreamBotToken != "" {
 		t.Errorf("expected default empty StreamBotToken, got %s", cfg.StreamBotToken)

@@ -305,12 +305,18 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	}
 
 	var replyMarkup telegram.ReplyMarkup
-	if enableBtn && targetStreamURL != "" {
+	if enableBtn {
 		watchURL := fmt.Sprintf("%s/watch/%s", targetStreamURL, cleanID)
-		replyMarkup = telegram.NewKeyboard().
-			AddRow(telegram.Button.URL("⚡ Get Fast Download", watchURL)).
-			AddRow(telegram.Button.Data("🔗 Get Direct Links", fmt.Sprintf("stream_links#%s", cleanID))).
-			Build()
+		if commands.IsValidTelegramButtonURL(watchURL) {
+			replyMarkup = telegram.NewKeyboard().
+				AddRow(telegram.Button.URL("⚡ Get Fast Download", watchURL)).
+				AddRow(telegram.Button.Data("🔗 Get Direct Links", fmt.Sprintf("stream_links#%s", cleanID))).
+				Build()
+		} else {
+			replyMarkup = telegram.NewKeyboard().
+				AddRow(telegram.Button.Data("⚡ Get Fast Download", fmt.Sprintf("stream_links#%s", cleanID))).
+				Build()
+		}
 	}
 
 	mediaOpts := &telegram.MediaOptions{
@@ -356,6 +362,14 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		docOpts := *mediaOpts
 		docOpts.ForceDocument = true
 		sentMsg, err = sender.SendMedia(chatID, mediaToSend, &docOpts)
+	}
+
+	// If Telegram rejected with BUTTON_URL_INVALID or BUTTON_DATA_INVALID, retry without markup to guarantee delivery
+	if err != nil && (strings.Contains(err.Error(), "BUTTON_URL_INVALID") || strings.Contains(err.Error(), "BUTTON_DATA_INVALID")) {
+		s.logger.Warn("sendMedia failed with button error, retrying without replyMarkup", "error", err)
+		fallbackOpts := *mediaOpts
+		fallbackOpts.ReplyMarkup = nil
+		sentMsg, err = sender.SendMedia(chatID, mediaToSend, &fallbackOpts)
 	}
 
 	// 9. Handle Telegram errors

@@ -128,15 +128,18 @@ func (p *Plugin) HandleStreamCommand(m *telegram.NewMessage) error {
 		watchURL,
 	)
 
-	replyMarkup := telegram.NewKeyboard().
-		AddRow(
-			telegram.Button.URL("📺 Watch Online", watchURL),
-			telegram.Button.URL("⚡ Fast Download", downloadURL),
-		).
-		AddRow(
-			telegram.Button.URL("🌐 Web Player", watchURL),
-		).
-		Build()
+	var replyMarkup *telegram.ReplyInlineMarkup
+	if commands.IsValidTelegramButtonURL(watchURL) && commands.IsValidTelegramButtonURL(downloadURL) {
+		replyMarkup = telegram.NewKeyboard().
+			AddRow(
+				telegram.Button.URL("📺 Watch Online", watchURL),
+				telegram.Button.URL("⚡ Fast Download", downloadURL),
+			).
+			AddRow(
+				telegram.Button.URL("🌐 Web Player", watchURL),
+			).
+			Build()
+	}
 
 	sentMsg, err := m.Reply(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -207,12 +210,15 @@ func (p *Plugin) HandleStreamLinksCallback(cb *telegram.CallbackQuery) error {
 		watchURL,
 	)
 
-	replyMarkup := telegram.NewKeyboard().
-		AddRow(
-			telegram.Button.URL("📺 Stream / Watch", watchURL),
-			telegram.Button.URL("⚡ Fast Download", downloadURL),
-		).
-		Build()
+	var replyMarkup *telegram.ReplyInlineMarkup
+	if commands.IsValidTelegramButtonURL(watchURL) && commands.IsValidTelegramButtonURL(downloadURL) {
+		replyMarkup = telegram.NewKeyboard().
+			AddRow(
+				telegram.Button.URL("📺 Stream / Watch", watchURL),
+				telegram.Button.URL("⚡ Fast Download", downloadURL),
+			).
+			Build()
+	}
 
 	// Send links to the user in chat
 	if p.appCtx.Client != nil && cb.SenderID != 0 {
@@ -227,8 +233,13 @@ func (p *Plugin) HandleStreamLinksCallback(cb *telegram.CallbackQuery) error {
 		return sErr
 	}
 
-	_, aErr := cb.Answer("", &telegram.CallbackOptions{
-		URL: watchURL,
-	})
+	if commands.IsValidTelegramButtonURL(watchURL) {
+		_, aErr := cb.Answer("", &telegram.CallbackOptions{
+			URL: watchURL,
+		})
+		return aErr
+	}
+
+	_, aErr := cb.Answer("✅ Stream & Download links sent to your chat!")
 	return aErr
 }

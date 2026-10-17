@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"html"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -119,5 +120,26 @@ func FormatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// IsValidTelegramButtonURL verifies if a URL can safely be used in a Telegram InlineKeyboardButton URL.
+// Telegram requires public HTTP/HTTPS URLs and strictly rejects localhost, loopback IPs, or invalid formats with BUTTON_URL_INVALID.
+func IsValidTelegramButtonURL(rawURL string) bool {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return false
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1" || strings.HasSuffix(host, ".local") {
+		return false
+	}
+	return true
 }
 

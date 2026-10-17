@@ -149,3 +149,27 @@ func TestFormatBytes(t *testing.T) {
 	}
 }
 
+func TestIsValidTelegramButtonURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"", false},
+		{"localhost:8080", false},
+		{"http://localhost:8080/watch/123", false},
+		{"http://127.0.0.1:8080/watch/123", false},
+		{"http://0.0.0.0:8080/watch/123", false},
+		{"ftp://example.com/watch", false},
+		{"https://stream.mydomain.com/watch/123", true},
+		{"http://159.65.12.34:8080/watch/123", true},
+		{"https://my-vps.app/watch/123?foo=bar", true},
+	}
+
+	for _, tt := range tests {
+		got := IsValidTelegramButtonURL(tt.url)
+		if got != tt.want {
+			t.Errorf("IsValidTelegramButtonURL(%q) = %v, want %v", tt.url, got, tt.want)
+		}
+	}
+}
+

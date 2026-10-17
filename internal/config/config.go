@@ -256,9 +256,6 @@ func LoadFromEnv() (*Config, error) {
 	if streamURL == "" {
 		streamURL = strings.TrimSpace(os.Getenv("WEB_URL"))
 	}
-	if streamURL == "" {
-		streamURL = fmt.Sprintf("http://localhost:%d", streamPort)
-	}
 	streamURL = strings.TrimRight(streamURL, "/")
 
 	streamBotToken := strings.TrimSpace(os.Getenv("STREAM_BOT_TOKEN"))
