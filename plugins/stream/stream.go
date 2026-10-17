@@ -2,14 +2,11 @@ package stream
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -48,24 +45,6 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 		{
 			Prefix:  "stream_links#",
 			Handler: p.HandleStreamLinksCallback,
-		},
-	}
-}
-
-// MessageHandlers registers listeners for files forwarded or sent directly to the bot.
-func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
-	return []plugins.MessageDefinition{
-		{
-			Filter: func(m *telegram.NewMessage) bool {
-				if m == nil || !m.IsPrivate() || !m.IsMedia() {
-					return false
-				}
-				if m.IsCommand() || strings.HasPrefix(m.Text(), "/") {
-					return false
-				}
-				return true
-			},
-			Handler: p.HandleIncomingMedia,
 		},
 	}
 }
@@ -263,114 +242,4 @@ func (p *Plugin) HandleStreamLinksCallback(cb *telegram.CallbackQuery) error {
 
 	_, aErr := cb.Answer("✅ Stream & Download links sent to your chat!")
 	return aErr
-}
-
-// HandleIncomingMedia automatically extracts metadata and generates stream & download links for any file sent or forwarded.
-func (p *Plugin) HandleIncomingMedia(m *telegram.NewMessage) error {
-	if p.appCtx == nil || p.appCtx.Stream == nil || p.appCtx.Delivery == nil {
-		return nil
-	}
-
-	media := m.Media()
-	if media == nil {
-		return nil
-	}
-
-	botFileID := telegram.PackBotFileID(media)
-	if botFileID == "" {
-		return nil
-	}
-
-	var fileName, mimeType, fileType string
-	var fileSize int64
-	var fileRef []byte
-
-	switch doc := media.(type) {
-	case *telegram.MessageMediaDocument:
-		if d, ok := doc.Document.(*telegram.DocumentObj); ok {
-			fileSize = d.Size
-			mimeType = d.MimeType
-			fileRef = d.FileReference
-			fileType = "document"
-			for _, attr := range d.Attributes {
-				if fn, ok := attr.(*telegram.DocumentAttributeFilename); ok {
-					fileName = fn.FileName
-					break
-				}
-			}
-		}
-	case *telegram.MessageMediaPhoto:
-		if ph, ok := doc.Photo.(*telegram.PhotoObj); ok {
-			fileRef = ph.FileReference
-			fileType = "photo"
-			mimeType = "image/jpeg"
-			fileName = fmt.Sprintf("photo_%d.jpg", ph.ID)
-			if len(ph.Sizes) > 0 {
-				if lastSize, ok := ph.Sizes[len(ph.Sizes)-1].(*telegram.PhotoSizeObj); ok {
-					fileSize = int64(lastSize.Size)
-				}
-			}
-		}
-	}
-
-	if fileName == "" {
-		fileName = "Media_" + botFileID
-	}
-	sizeStr := commands.FormatBytes(fileSize)
-
-	if len(fileRef) > 0 {
-		delivery.StoreFreshFileRef(botFileID, fileRef)
-	}
-
-	// Persist media metadata so /stream, /dl, and /watch can immediately resolve it
-	rec := &delivery.MediaDetails{
-		FileID:    botFileID,
-		FileRef:   base64.RawURLEncoding.EncodeToString(fileRef),
-		FileName:  fileName,
-		FileSize:  fileSize,
-		Size:      sizeStr,
-		FileType:  fileType,
-		MimeType:  mimeType,
-		Caption:   m.Text(),
-		DateSaved: time.Now(),
-	}
-	_ = p.appCtx.Delivery.SaveMedia(context.Background(), rec)
-
-	streamURL := p.appCtx.Stream.GetStreamURL(botFileID, fileName)
-	downloadURL := p.appCtx.Stream.GetDownloadURL(botFileID, fileName)
-	watchURL := p.appCtx.Stream.GetWatchURL(botFileID)
-
-	text := fmt.Sprintf(
-		"🎬 <b><u>Fast Stream & Download Links</u></b>\n\n"+
-			"📁 <b>File:</b> <code>%s</code>\n"+
-			"📦 <b>Size:</b> <code>%s</code>\n\n"+
-			"📺 <b>Online Stream Link:</b>\n"+
-			"<a href=\"%s\">▶️ Click to Stream (High Quality)</a>\n\n"+
-			"⚡ <b>Fast Download Link:</b>\n"+
-			"<a href=\"%s\">🚀 Click to Download (High Speed)</a>\n\n"+
-			"🌐 <b>Web Player:</b>\n"+
-			"<a href=\"%s\">💻 Open Web Player & Controls</a>\n\n"+
-			"ℹ️ <i>Stream link can be played directly in Chrome, VLC, or MX Player!</i>",
-		commands.EscapeHTML(fileName),
-		sizeStr,
-		streamURL,
-		downloadURL,
-		watchURL,
-	)
-
-	replyMarkup := telegram.NewKeyboard().
-		AddRow(
-			telegram.Button.URL("⚡ Fast Download", downloadURL),
-			telegram.Button.URL("📺 Watch Online", watchURL),
-		).
-		Build()
-
-	sentMsg, err := m.Reply(text, &telegram.SendOptions{
-		ParseMode:   "html",
-		ReplyMarkup: replyMarkup,
-	})
-	if err == nil && sentMsg != nil && p.appCtx.AutoDelete != nil {
-		_ = p.appCtx.AutoDelete.TrackSentMessage(sentMsg.ChatID(), sentMsg.ID, "stream")
-	}
-	return err
 }

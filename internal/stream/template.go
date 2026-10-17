@@ -25,6 +25,10 @@ type PageData struct {
 	VLCUrl            string
 	MXPlayerUrl       string
 	PlayItUrl         string
+	PotPlayerUrl      string
+	VLCIOSUrl         string
+	OutplayerUrl      string
+	InfuseUrl         string
 }
 
 const watchTemplateHTML = `<!DOCTYPE html>
@@ -340,12 +344,55 @@ const watchTemplateHTML = `<!DOCTYPE html>
             gap: 16px;
         }
 
-        .section-title {
-            font-size: 16px;
-            font-weight: 700;
-            letter-spacing: -0.3px;
+        .players-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 4px;
+        }
+
+        .platform-tabs {
+            display: inline-flex;
+            gap: 6px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 4px;
+            border-radius: 12px;
+            border: 1px solid var(--border-glass);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
             color: var(--text-muted);
-            text-transform: uppercase;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            background: var(--primary-gradient);
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+        }
+
+        .platform-panel {
+            animation: fadeIn 0.25s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .players-grid {
@@ -667,28 +714,67 @@ const watchTemplateHTML = `<!DOCTYPE html>
             </div>
         </section>
 
-        <!-- External Players Integration -->
+        <!-- External Players Integration with Platform Tabs -->
         {{ if or .IsVideo .IsAudio }}
         <section class="external-players-section">
-            <div class="section-title">Play in External App</div>
-            <div class="players-grid">
-                <a href="{{ .VLCUrl }}" class="player-btn player-btn-primary">
-                    <span>🟧</span> Open in VLC
-                </a>
-                <button class="player-btn" onclick="copyVLCCommand('{{ .StreamURL }}')">
-                    <span>📋</span> Copy Stream URL (Ctrl+N)
-                </button>
-                <a href="{{ .MXPlayerUrl }}" class="player-btn">
-                    <span>▶️</span> MX Player (Android)
-                </a>
-                <a href="{{ .PlayItUrl }}" class="player-btn">
-                    <span>⚡</span> PlayIt Player
-                </a>
-                {{ if .BotUsername }}
-                <a href="https://t.me/{{ .BotUsername }}" target="_blank" class="player-btn">
-                    <span>🤖</span> Telegram Bot
-                </a>
-                {{ end }}
+            <div class="players-header">
+                <div class="section-title">Play in External App</div>
+                <div class="platform-tabs">
+                    <button class="tab-btn active" id="tabAndroid" type="button" onclick="switchPlatform('android')">🤖 Android</button>
+                    <button class="tab-btn" id="tabWindows" type="button" onclick="switchPlatform('windows')">💻 Windows</button>
+                    <button class="tab-btn" id="tabIOS" type="button" onclick="switchPlatform('ios')">🍏 iOS / Apple</button>
+                </div>
+            </div>
+
+            <!-- Android Panel -->
+            <div class="platform-panel" id="panelAndroid">
+                <div class="players-grid">
+                    <a href="{{ .VLCUrl }}" class="player-btn player-btn-primary">
+                        <span>🟧</span> VLC for Android
+                    </a>
+                    <a href="{{ .MXPlayerUrl }}" class="player-btn">
+                        <span>▶️</span> MX Player
+                    </a>
+                    <a href="{{ .PlayItUrl }}" class="player-btn">
+                        <span>⚡</span> PlayIt Player
+                    </a>
+                    <button class="player-btn" type="button" onclick="copyToClipboard('{{ .StreamURL }}', 'Stream link copied! Paste into any Android media player.')">
+                        <span>📋</span> Copy Stream Link
+                    </button>
+                </div>
+            </div>
+
+            <!-- Windows Panel -->
+            <div class="platform-panel" id="panelWindows" style="display: none;">
+                <div class="players-grid">
+                    <a href="{{ .VLCUrl }}" class="player-btn player-btn-primary">
+                        <span>🟧</span> VLC Media Player
+                    </a>
+                    <a href="{{ .PotPlayerUrl }}" class="player-btn">
+                        <span>🎯</span> PotPlayer
+                    </a>
+                    <button class="player-btn" type="button" onclick="copyVLCCommand('{{ .StreamURL }}')">
+                        <span>📋</span> Copy Stream URL (Ctrl+N)
+                    </button>
+                </div>
+            </div>
+
+            <!-- iOS Panel -->
+            <div class="platform-panel" id="panelIOS" style="display: none;">
+                <div class="players-grid">
+                    <a href="{{ .VLCIOSUrl }}" class="player-btn player-btn-primary">
+                        <span>🟧</span> VLC for iOS
+                    </a>
+                    <a href="{{ .OutplayerUrl }}" class="player-btn">
+                        <span>🎬</span> Outplayer
+                    </a>
+                    <a href="{{ .InfuseUrl }}" class="player-btn">
+                        <span>🍿</span> Infuse Player
+                    </a>
+                    <button class="player-btn" type="button" onclick="copyToClipboard('{{ .StreamURL }}', 'Stream link copied! Open VLC/Infuse -> Open Network Stream.')">
+                        <span>📋</span> Copy Stream Link
+                    </button>
+                </div>
             </div>
         </section>
         {{ end }}
@@ -747,6 +833,41 @@ const watchTemplateHTML = `<!DOCTYPE html>
         function copyVLCCommand(url) {
             copyToClipboard(url, 'Stream link copied! Open VLC -> Press Ctrl+N -> Paste & Stream!');
         }
+
+        function switchPlatform(platform) {
+            const tabs = ['android', 'windows', 'ios'];
+            tabs.forEach(p => {
+                const tabEl = document.getElementById('tab' + p.charAt(0).toUpperCase() + p.slice(1));
+                const panelEl = document.getElementById('panel' + p.charAt(0).toUpperCase() + p.slice(1));
+                if (p === platform) {
+                    if (tabEl) tabEl.classList.add('active');
+                    if (panelEl) {
+                        panelEl.style.display = 'block';
+                        panelEl.classList.add('active');
+                    }
+                } else {
+                    if (tabEl) tabEl.classList.remove('active');
+                    if (panelEl) {
+                        panelEl.style.display = 'none';
+                        panelEl.classList.remove('active');
+                    }
+                }
+            });
+        }
+
+        // Auto-detect user OS on load
+        (function autoDetectOS() {
+            try {
+                const ua = navigator.userAgent || '';
+                if (/android/i.test(ua)) {
+                    switchPlatform('android');
+                } else if (/iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+                    switchPlatform('ios');
+                } else if (/windows/i.test(ua)) {
+                    switchPlatform('windows');
+                }
+            } catch (e) {}
+        })();
 
         // Video Player handling and Error Detection
         const video = document.getElementById('videoPlayer');

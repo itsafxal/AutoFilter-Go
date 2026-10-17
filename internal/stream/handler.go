@@ -216,6 +216,10 @@ func (h *Handler) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	vlcURL := fmt.Sprintf("vlc://%s", streamURL)
 	mxPlayerURL := fmt.Sprintf("intent:%s#Intent;package=com.mxtech.videoplayer.ad;type=%s;end", streamURL, mimeType)
 	playItURL := fmt.Sprintf("playit://playit.app/video?url=%s", url.QueryEscape(streamURL))
+	potPlayerURL := fmt.Sprintf("potplayer://%s", streamURL)
+	vlcIOSURL := fmt.Sprintf("vlc-x-callback://x-callback-url/stream?url=%s", url.QueryEscape(streamURL))
+	outplayerURL := fmt.Sprintf("outplayer://%s", streamURL)
+	infuseURL := fmt.Sprintf("infuse://open?url=%s", url.QueryEscape(streamURL))
 
 	pageData := PageData{
 		Title:             fileName + " - Fast Stream & Download",
@@ -236,6 +240,10 @@ func (h *Handler) HandleWatch(w http.ResponseWriter, r *http.Request) {
 		VLCUrl:            vlcURL,
 		MXPlayerUrl:       mxPlayerURL,
 		PlayItUrl:         playItURL,
+		PotPlayerUrl:      potPlayerURL,
+		VLCIOSUrl:         vlcIOSURL,
+		OutplayerUrl:      outplayerURL,
+		InfuseUrl:         infuseURL,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

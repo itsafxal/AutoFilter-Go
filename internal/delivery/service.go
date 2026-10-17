@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -343,35 +342,18 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	if opts.StreamURL != "" {
 		targetStreamURL = strings.TrimRight(strings.TrimSpace(opts.StreamURL), "/")
 	}
-	enableBtn := s.enableFastDownload
+	enableBtn := s.enableFastDownload && targetStreamURL != ""
 	if opts.EnableFastDownload != nil {
 		enableBtn = *opts.EnableFastDownload
 	}
 
 	var replyMarkup telegram.ReplyMarkup
 	if enableBtn {
-		watchURL := fmt.Sprintf("%s/watch/%s", targetStreamURL, cleanID)
-		downloadURL := fmt.Sprintf("%s/dl/%s/%s", targetStreamURL, cleanID, url.PathEscape(rec.FileName))
-		if commands.IsValidTelegramButtonURL(downloadURL) && commands.IsValidTelegramButtonURL(watchURL) {
-			replyMarkup = telegram.NewKeyboard().
-				AddRow(
-					telegram.Button.URL("⚡ Fast Download", downloadURL),
-					telegram.Button.URL("📺 Watch Online", watchURL),
-				).
-				AddRow(
-					telegram.Button.Data("🔗 Get Stream & Download Links", fmt.Sprintf("stream_links#%s", cleanID)),
-				).
-				Build()
-		} else if commands.IsValidTelegramButtonURL(watchURL) {
-			replyMarkup = telegram.NewKeyboard().
-				AddRow(telegram.Button.URL("⚡ Fast Download", watchURL)).
-				AddRow(telegram.Button.Data("🔗 Get Stream & Download Links", fmt.Sprintf("stream_links#%s", cleanID))).
-				Build()
-		} else {
-			replyMarkup = telegram.NewKeyboard().
-				AddRow(telegram.Button.Data("⚡ Generate Stream & Download Links", fmt.Sprintf("stream_links#%s", cleanID))).
-				Build()
-		}
+		replyMarkup = telegram.NewKeyboard().
+			AddRow(
+				telegram.Button.Data("📺 Watch Online / Fast Download", fmt.Sprintf("stream_links#%s", cleanID)),
+			).
+			Build()
 	}
 
 	mediaOpts := &telegram.MediaOptions{

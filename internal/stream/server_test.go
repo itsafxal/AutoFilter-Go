@@ -370,6 +370,15 @@ func TestHandleWatch_MKV(t *testing.T) {
 	if !strings.Contains(body, "Open in VLC") {
 		t.Errorf("expected watch page to include Open in VLC button")
 	}
+	if !strings.Contains(body, "PotPlayer") {
+		t.Errorf("expected watch page to include PotPlayer for Windows")
+	}
+	if !strings.Contains(body, "MX Player") {
+		t.Errorf("expected watch page to include MX Player for Android")
+	}
+	if !strings.Contains(body, "Outplayer") {
+		t.Errorf("expected watch page to include Outplayer for iOS")
+	}
 }
 
 func TestHandlePlaylist(t *testing.T) {
