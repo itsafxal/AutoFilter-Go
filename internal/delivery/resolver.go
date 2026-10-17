@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -183,6 +184,18 @@ func readTLBytes(buf *bytes.Reader) ([]byte, error) {
 
 // UnpackFileID unpacks a Telegram Bot API file_id string into MTProto routing components.
 func UnpackFileID(fileID string) (*ParsedFileID, error) {
+	// 1. Try Gogram's UnpackBotFileID first (handles 28-byte and 20-byte modern Bot API packed IDs)
+	if fID, accessHash, fileType, dcID, _ := telegram.UnpackBotFileID(fileID); fID != 0 && accessHash != 0 && dcID >= 1 && dcID <= 5 {
+		return &ParsedFileID{
+			FileType:      fileType,
+			DCID:          dcID,
+			MediaID:       fID,
+			AccessHash:    accessHash,
+			FileReference: nil,
+		}, nil
+	}
+
+	// 2. Decode base64
 	raw, err := decodeBase64FileID(fileID)
 	if err != nil {
 		return nil, err
@@ -245,6 +258,36 @@ func UnpackFileID(fileID string) (*ParsedFileID, error) {
 	}
 	if err := binary.Read(buf, binary.LittleEndian, &accessHash); err != nil {
 		return nil, err
+	}
+
+	// Validate DCID and non-zero identifiers: Telegram only operates DCs 1 through 5
+	if dcID < 1 || dcID > 5 || mediaID == 0 || accessHash == 0 {
+		// Fallback to Gogram's ResolveBotFileID parser
+		if res, gErr := telegram.ResolveBotFileID(fileID); gErr == nil && res != nil {
+			switch m := res.(type) {
+			case *telegram.MessageMediaDocument:
+				if doc, ok := m.Document.(*telegram.DocumentObj); ok && doc.DcID >= 1 && doc.DcID <= 5 {
+					return &ParsedFileID{
+						FileType:      cleanFileType,
+						DCID:          doc.DcID,
+						MediaID:       doc.ID,
+						AccessHash:    doc.AccessHash,
+						FileReference: fileRef,
+					}, nil
+				}
+			case *telegram.MessageMediaPhoto:
+				if photo, ok := m.Photo.(*telegram.PhotoObj); ok && photo.DcID >= 1 && photo.DcID <= 5 {
+					return &ParsedFileID{
+						FileType:      2,
+						DCID:          photo.DcID,
+						MediaID:       photo.ID,
+						AccessHash:    photo.AccessHash,
+						FileReference: fileRef,
+					}, nil
+				}
+			}
+		}
+		return nil, fmt.Errorf("invalid file_id components: dcID=%d, mediaID=%d", dcID, mediaID)
 	}
 
 	return &ParsedFileID{

@@ -460,6 +460,7 @@ func TestUnpackRealFileID(t *testing.T) {
 		"BQADBQADUSMAAh2okFbVi5c8UqF9IhYE",
 		"BQADBQADUYMAAk5vkVaZsqm_4ZRrBRYE",
 		"BQADBAADmh8AAm192VH4gNHxsL7qdRYE",
+		"BQAABCOWAABpzmhQ-z6D-IA_BjYjwtWIAAAAAA",
 	}
 
 	for _, fid := range fileIDs {
