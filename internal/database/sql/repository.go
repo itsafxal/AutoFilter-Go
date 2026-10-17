@@ -200,3 +200,15 @@ func (r *MediaRepository) UpdateFileRef(ctx context.Context, fileID string, file
 	_, err := r.dbManager.DB().ExecContext(ctx, "UPDATE media SET file_ref = ? WHERE file_id = ?", fileRef, fileID)
 	return err
 }
+
+// SaveMedia inserts or updates a media record in the runtime SQLite database.
+func (r *MediaRepository) SaveMedia(ctx context.Context, rec MediaRecord) error {
+	if r.dbManager == nil || r.dbManager.DB() == nil || rec.FileID == "" {
+		return nil
+	}
+	query := `INSERT OR REPLACE INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
+	_, err := r.dbManager.DB().ExecContext(ctx, query,
+		rec.FileID, rec.FileRef, rec.FileName, rec.FileSize, rec.Size, rec.FileType, rec.MimeType, rec.Caption, rec.DateSaved)
+	return err
+}

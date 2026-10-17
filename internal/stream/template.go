@@ -605,11 +605,11 @@ const watchTemplateHTML = `<!DOCTYPE html>
                     </p>
                 </div>
                 <div class="banner-actions">
-                    <a href="{{ .PlaylistURL }}" class="banner-btn vlc-btn">
-                        <span>🟧</span> Stream in VLC (.m3u)
+                    <a href="{{ .VLCUrl }}" class="banner-btn vlc-btn">
+                        <span>🟧</span> Open in VLC
                     </a>
                     <button class="banner-btn copy-btn" onclick="copyVLCCommand('{{ .StreamURL }}')">
-                        <span>📋</span> Copy VLC Link
+                        <span>📋</span> Copy Stream Link
                     </button>
                 </div>
             </div>
@@ -672,15 +672,12 @@ const watchTemplateHTML = `<!DOCTYPE html>
         <section class="external-players-section">
             <div class="section-title">Play in External App</div>
             <div class="players-grid">
-                <a href="{{ .PlaylistURL }}" class="player-btn player-btn-primary">
-                    <span>🟧</span> VLC Media Player (.m3u)
+                <a href="{{ .VLCUrl }}" class="player-btn player-btn-primary">
+                    <span>🟧</span> Open in VLC
                 </a>
                 <button class="player-btn" onclick="copyVLCCommand('{{ .StreamURL }}')">
-                    <span>📋</span> Copy Stream Link (Ctrl+N)
+                    <span>📋</span> Copy Stream URL (Ctrl+N)
                 </button>
-                <a href="{{ .VLCUrl }}" class="player-btn">
-                    <span>📱</span> VLC Mobile
-                </a>
                 <a href="{{ .MXPlayerUrl }}" class="player-btn">
                     <span>▶️</span> MX Player (Android)
                 </a>

@@ -367,8 +367,8 @@ func TestHandleWatch_MKV(t *testing.T) {
 	if !strings.Contains(body, "MKV / 10-Bit Container Detected") {
 		t.Errorf("expected watch page to include MKV format banner")
 	}
-	if !strings.Contains(body, "Stream in VLC (.m3u)") {
-		t.Errorf("expected watch page to include VLC playlist button")
+	if !strings.Contains(body, "Open in VLC") {
+		t.Errorf("expected watch page to include Open in VLC button")
 	}
 }
 

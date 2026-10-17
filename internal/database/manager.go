@@ -211,3 +211,14 @@ func (m *DatabaseManager) UpdateMediaFileRef(ctx context.Context, fileID string,
 	}
 	return nil
 }
+
+// SaveMedia saves a media record into the runtime SQLite database.
+func (m *DatabaseManager) SaveMedia(ctx context.Context, rec sql.MediaRecord) error {
+	m.mu.RLock()
+	repo := m.sqlMediaRepo
+	m.mu.RUnlock()
+	if repo != nil {
+		return repo.SaveMedia(ctx, rec)
+	}
+	return nil
+}

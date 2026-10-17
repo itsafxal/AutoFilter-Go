@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
+	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
 )
 
 var validIdentifierRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
@@ -48,6 +50,9 @@ type MediaDeliveryService interface {
 
 	// RefreshFileRef re-fetches a fresh Telegram file reference by sending the media silently and immediately deleting it.
 	RefreshFileRef(ctx context.Context, fileID string) (any, error)
+
+	// SaveMedia stores or updates a media record in the database for on-demand link generation.
+	SaveMedia(ctx context.Context, media *MediaDetails) error
 }
 
 // Service implements MediaDeliveryService.
@@ -187,6 +192,29 @@ func (s *Service) ValidateMediaRecord(record *MediaDetails) error {
 	return nil
 }
 
+// SaveMedia stores or updates a media record in the runtime SQLite database.
+func (s *Service) SaveMedia(ctx context.Context, media *MediaDetails) error {
+	if s.db == nil || media == nil || media.FileID == "" {
+		return nil
+	}
+	dateSaved := media.DateSaved
+	if dateSaved.IsZero() {
+		dateSaved = time.Now()
+	}
+	sqlRec := sql.MediaRecord{
+		FileID:    media.FileID,
+		FileRef:   media.FileRef,
+		FileName:  media.FileName,
+		FileSize:  media.FileSize,
+		Size:      media.Size,
+		FileType:  media.FileType,
+		MimeType:  media.MimeType,
+		Caption:   media.Caption,
+		DateSaved: dateSaved,
+	}
+	return s.db.SaveMedia(ctx, sqlRec)
+}
+
 // Deliver executes the media delivery workflow with authorization checks, deduplication,
 // method selection, and error handling.
 func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, opts DeliveryOptions) (*DeliveryResult, error) {
@@ -323,14 +351,25 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	var replyMarkup telegram.ReplyMarkup
 	if enableBtn {
 		watchURL := fmt.Sprintf("%s/watch/%s", targetStreamURL, cleanID)
-		if commands.IsValidTelegramButtonURL(watchURL) {
+		downloadURL := fmt.Sprintf("%s/dl/%s/%s", targetStreamURL, cleanID, url.PathEscape(rec.FileName))
+		if commands.IsValidTelegramButtonURL(downloadURL) && commands.IsValidTelegramButtonURL(watchURL) {
 			replyMarkup = telegram.NewKeyboard().
-				AddRow(telegram.Button.URL("⚡ Get Fast Download", watchURL)).
-				AddRow(telegram.Button.Data("🔗 Get Direct Links", fmt.Sprintf("stream_links#%s", cleanID))).
+				AddRow(
+					telegram.Button.URL("⚡ Fast Download", downloadURL),
+					telegram.Button.URL("📺 Watch Online", watchURL),
+				).
+				AddRow(
+					telegram.Button.Data("🔗 Get Stream & Download Links", fmt.Sprintf("stream_links#%s", cleanID)),
+				).
+				Build()
+		} else if commands.IsValidTelegramButtonURL(watchURL) {
+			replyMarkup = telegram.NewKeyboard().
+				AddRow(telegram.Button.URL("⚡ Fast Download", watchURL)).
+				AddRow(telegram.Button.Data("🔗 Get Stream & Download Links", fmt.Sprintf("stream_links#%s", cleanID))).
 				Build()
 		} else {
 			replyMarkup = telegram.NewKeyboard().
-				AddRow(telegram.Button.Data("⚡ Get Fast Download", fmt.Sprintf("stream_links#%s", cleanID))).
+				AddRow(telegram.Button.Data("⚡ Generate Stream & Download Links", fmt.Sprintf("stream_links#%s", cleanID))).
 				Build()
 		}
 	}

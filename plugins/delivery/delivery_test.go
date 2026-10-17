@@ -64,6 +64,10 @@ func (m *mockDeliveryService) RefreshFileRef(ctx context.Context, fileID string)
 	return nil, nil
 }
 
+func (m *mockDeliveryService) SaveMedia(ctx context.Context, media *deliveryCore.MediaDetails) error {
+	return nil
+}
+
 
 func TestDeliveryPlugin_Metadata(t *testing.T) {
 	appCtx := &plugins.AppContext{}
