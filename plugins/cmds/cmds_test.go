@@ -14,14 +14,20 @@ func TestCmdsPlugin_Metadata(t *testing.T) {
 	}
 
 	cmds := p.Commands()
-	if len(cmds) != 1 {
-		t.Fatalf("expected 1 command, got %d", len(cmds))
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 commands (cmds, cmdc), got %d", len(cmds))
 	}
 	if cmds[0].Name != "cmds" {
 		t.Errorf("expected command name 'cmds', got %q", cmds[0].Name)
 	}
 	if len(cmds[0].Aliases) == 0 || cmds[0].Aliases[0] != "help" {
 		t.Errorf("expected alias 'help', got %v", cmds[0].Aliases)
+	}
+	if cmds[1].Name != "cmdc" {
+		t.Errorf("expected command name 'cmdc', got %q", cmds[1].Name)
+	}
+	if !cmds[1].AdminOnly {
+		t.Errorf("expected cmdc to be AdminOnly")
 	}
 }
 
@@ -40,4 +46,10 @@ func TestCmdsPlugin_DynamicHelpContent(t *testing.T) {
 	if !strings.Contains(help, "/help") {
 		t.Errorf("expected help text to contain alias /help, got: %s", help)
 	}
+
+	adminHelp := reg.GenerateAdminHelpText()
+	if !strings.Contains(adminHelp, "/cmdc") {
+		t.Errorf("expected admin help text to contain /cmdc, got: %s", adminHelp)
+	}
 }
+

@@ -67,7 +67,44 @@ type Config struct {
 
 	// SyncBatchSize defines how many records are fetched and inserted per batch during SQLite sync (default: 10000).
 	SyncBatchSize int
+
+	// CustomCaption defines the default media caption template when none is overridden by an admin.
+	CustomCaption string
+
+	// FSubChannelDescription is the default channel description set automatically when a channel is added to FSub.
+	FSubChannelDescription string
+
+	// AutoDeleteFilterTime defines the default duration before search filter messages are deleted (default: "15m").
+	AutoDeleteFilterTime string
+
+	// AutoDeleteFileTime defines the default duration before delivered file messages are deleted (default: "30m").
+	AutoDeleteFileTime string
+
+	// AutoDeleteWeeklyTrash specifies whether weekly trash cleanup is enabled (default: true).
+	AutoDeleteWeeklyTrash bool
+
+	// TrashRetentionDays specifies the message retention in days before weekly trash purges them (default: 7).
+	TrashRetentionDays int
+
+	// StreamServerEnabled specifies whether the HTTP streaming & download server is enabled (default: true).
+	StreamServerEnabled bool
+
+	// StreamURL defines the public base URL for fast download and online streaming links (default: "http://localhost:8080").
+	StreamURL string
+
+	// StreamPort defines the TCP port for the stream server (default: 8080 or env PORT).
+	StreamPort int
+
+	// StreamBindAddr defines the interface IP to bind the stream server (default: "0.0.0.0").
+	StreamBindAddr string
+
+	// StreamBotToken optionally specifies a dedicated bot token for media download streaming to prevent rate limits on the main bot.
+	StreamBotToken string
+
+	// EnableFastDownloadButton specifies whether the "⚡ Get Fast Download" button is added to delivered media (default: true).
+	EnableFastDownloadButton bool
 }
+
 
 // LoadFromEnv loads and validates configuration from the current environment variables.
 func LoadFromEnv() (*Config, error) {
@@ -162,26 +199,111 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
+	customCaption := strings.TrimSpace(os.Getenv("CUSTOM_CAPTION"))
+	if customCaption == "" {
+		customCaption = "CUSTOM CAPTION {filename} {file sise}"
+	}
+
+	fsubDesc := strings.TrimSpace(os.Getenv("FSUB_CHANNEL_DESCRIPTION"))
+	if fsubDesc == "" {
+		fsubDesc = "You need to request to join channel to get file 🚀"
+	}
+
+	filterDelTime := strings.TrimSpace(os.Getenv("AUTO_DELETE_FILTER_TIME"))
+	if filterDelTime == "" {
+		filterDelTime = "15m"
+	}
+
+	fileDelTime := strings.TrimSpace(os.Getenv("AUTO_DELETE_FILE_TIME"))
+	if fileDelTime == "" {
+		fileDelTime = "30m"
+	}
+
+	weeklyTrash := true
+	if rawTrash := strings.TrimSpace(os.Getenv("AUTO_DELETE_WEEKLY_TRASH")); rawTrash != "" {
+		weeklyTrash = strings.EqualFold(rawTrash, "true") || rawTrash == "1"
+	}
+
+	trashRetentionDays := 7
+	if rawDays := strings.TrimSpace(os.Getenv("TRASH_RETENTION_DAYS")); rawDays != "" {
+		if parsed, err := strconv.Atoi(rawDays); err == nil && parsed > 0 {
+			trashRetentionDays = parsed
+		}
+	}
+
+	streamServerEnabled := true
+	if rawStream := strings.TrimSpace(os.Getenv("STREAM_SERVER_ENABLED")); rawStream != "" {
+		streamServerEnabled = strings.EqualFold(rawStream, "true") || rawStream == "1"
+	}
+
+	streamPort := 8080
+	portStr := strings.TrimSpace(os.Getenv("STREAM_PORT"))
+	if portStr == "" {
+		portStr = strings.TrimSpace(os.Getenv("PORT"))
+	}
+	if portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p <= 65535 {
+			streamPort = p
+		}
+	}
+
+	streamBindAddr := strings.TrimSpace(os.Getenv("STREAM_BIND_ADDR"))
+	if streamBindAddr == "" {
+		streamBindAddr = "0.0.0.0"
+	}
+
+	streamURL := strings.TrimSpace(os.Getenv("STREAM_URL"))
+	if streamURL == "" {
+		streamURL = strings.TrimSpace(os.Getenv("WEB_URL"))
+	}
+	if streamURL == "" {
+		streamURL = fmt.Sprintf("http://localhost:%d", streamPort)
+	}
+	streamURL = strings.TrimRight(streamURL, "/")
+
+	streamBotToken := strings.TrimSpace(os.Getenv("STREAM_BOT_TOKEN"))
+	if streamBotToken == "" {
+		streamBotToken = strings.TrimSpace(os.Getenv("FILE_TO_LINK_BOT_TOKEN"))
+	}
+
+	enableFastDownloadBtn := true
+	if rawBtn := strings.TrimSpace(os.Getenv("ENABLE_FAST_DOWNLOAD_BUTTON")); rawBtn != "" {
+		enableFastDownloadBtn = strings.EqualFold(rawBtn, "true") || rawBtn == "1"
+	}
+
 	cfg := &Config{
-		BotToken:       token,
-		AppID:          apiID,
-		AppHash:        apiHash,
-		SessionPath:    sessionPath,
-		MemorySession:  memorySession,
-		OwnerID:        ownerID,
-		Admins:         admins,
-		LogLevel:       logLevel,
-		DatabaseURI:    dbURI,
-		DatabaseName:   dbName,
-		CollectionName: colName,
-		DatabaseURI2:   dbURI2,
-		DatabaseURI3:   dbURI3,
-		SQLiteDBPath:   sqlitePath,
-		SyncBatchSize:  batchSize,
+		BotToken:                 token,
+		AppID:                    apiID,
+		AppHash:                  apiHash,
+		SessionPath:              sessionPath,
+		MemorySession:            memorySession,
+		OwnerID:                  ownerID,
+		Admins:                   admins,
+		LogLevel:                 logLevel,
+		DatabaseURI:              dbURI,
+		DatabaseName:             dbName,
+		CollectionName:           colName,
+		DatabaseURI2:             dbURI2,
+		DatabaseURI3:             dbURI3,
+		SQLiteDBPath:             sqlitePath,
+		SyncBatchSize:            batchSize,
+		CustomCaption:            customCaption,
+		FSubChannelDescription:   fsubDesc,
+		AutoDeleteFilterTime:     filterDelTime,
+		AutoDeleteFileTime:       fileDelTime,
+		AutoDeleteWeeklyTrash:    weeklyTrash,
+		TrashRetentionDays:       trashRetentionDays,
+		StreamServerEnabled:      streamServerEnabled,
+		StreamURL:                streamURL,
+		StreamPort:               streamPort,
+		StreamBindAddr:           streamBindAddr,
+		StreamBotToken:           streamBotToken,
+		EnableFastDownloadButton: enableFastDownloadBtn,
 	}
 
 	return cfg, nil
 }
+
 
 // parseAdminIDs parses space- or comma-separated user IDs, ensuring ownerID is included and deduplicated.
 func parseAdminIDs(raw string, ownerID int64) ([]int64, error) {
@@ -263,6 +385,21 @@ func (c *Config) MaskedAppHash() string {
 	return "***REDACTED***"
 }
 
+// MaskedStreamToken returns a safely redacted representation of the dedicated stream bot token.
+func (c *Config) MaskedStreamToken() string {
+	if c.StreamBotToken == "" {
+		return "None"
+	}
+	parts := strings.Split(c.StreamBotToken, ":")
+	if len(parts) >= 2 {
+		return parts[0] + ":***REDACTED***"
+	}
+	if len(c.StreamBotToken) > 6 {
+		return c.StreamBotToken[:4] + "***REDACTED***"
+	}
+	return "***REDACTED***"
+}
+
 var uriUserInfoRegex = regexp.MustCompile(`://([^:]+):([^@]+)@`)
 
 // MaskURI redacts credentials from database URIs to prevent secret leaks in logs.
@@ -287,6 +424,7 @@ func MaskURI(rawURI string) string {
 
 // String provides a safe string representation that NEVER exposes secrets.
 func (c *Config) String() string {
-	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s}",
-		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath)
+	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s, Caption:%s, FSubDesc:%s, FilterDel:%s, FileDel:%s, WeeklyTrash:%t, TrashRetention:%dd, StreamServer:%t, StreamURL:%s, StreamPort:%d, StreamBotToken:%s, FastDownloadBtn:%t}",
+		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath, c.CustomCaption, c.FSubChannelDescription, c.AutoDeleteFilterTime, c.AutoDeleteFileTime, c.AutoDeleteWeeklyTrash, c.TrashRetentionDays, c.StreamServerEnabled, c.StreamURL, c.StreamPort, c.MaskedStreamToken(), c.EnableFastDownloadButton)
 }
+

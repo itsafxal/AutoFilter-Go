@@ -492,3 +492,77 @@ func TestUnpackRealFileID(t *testing.T) {
 	}
 }
 
+type mockCaptionFormatter struct {
+	template string
+}
+
+func (m *mockCaptionFormatter) FormatMedia(ctx context.Context, fileName, sizeStr, originalCaption string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(m.template, "{filename}", fileName), "{file sise}", sizeStr)
+}
+
+func (m *mockCaptionFormatter) Format(template, fileName, sizeStr, originalCaption string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(template, "{filename}", fileName), "{file sise}", sizeStr)
+}
+
+func TestDelivery_DynamicCaptionFormatter(t *testing.T) {
+	dbMgr, _ := setupTestDB(t)
+	defer dbMgr.Close()
+
+	svc := NewService(dbMgr, nil)
+	mock := newMockSender()
+	svc.SetSender(mock)
+
+	cf := &mockCaptionFormatter{template: "CUSTOM CAPTION {filename} {file sise}"}
+	svc.SetCaptionFormatter(cf)
+
+	res, err := svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
+	if err != nil {
+		t.Fatalf("Deliver failed: %v", err)
+	}
+	if !res.Success {
+		t.Error("expected Success true")
+	}
+
+	expectedCaption := "CUSTOM CAPTION sample_movie.mp4 1 MB"
+	if mock.lastOpts == nil || mock.lastOpts.Caption != expectedCaption {
+		t.Errorf("expected caption %q, got %v", expectedCaption, mock.lastOpts)
+	}
+}
+
+func TestDelivery_FastDownloadButton(t *testing.T) {
+	dbMgr, _ := setupTestDB(t)
+	defer dbMgr.Close()
+
+	svc := NewService(dbMgr, nil)
+	mock := newMockSender()
+	svc.SetSender(mock)
+	svc.SetStreamConfig("http://localhost:8080", true)
+
+	// 1. Delivery with stream enabled should attach ReplyMarkup
+	res, err := svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
+	if err != nil {
+		t.Fatalf("Deliver failed: %v", err)
+	}
+	if !res.Success {
+		t.Error("expected Success true")
+	}
+	if mock.lastOpts == nil || mock.lastOpts.ReplyMarkup == nil {
+		t.Fatal("expected ReplyMarkup with Fast Download button attached, got nil")
+	}
+
+	// 2. Delivery with fast download disabled override
+	disabled := false
+	_, err = svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{
+		UserID:             111,
+		EnableFastDownload: &disabled,
+	})
+	if err != nil {
+		t.Fatalf("Deliver failed: %v", err)
+	}
+	if mock.lastOpts == nil || mock.lastOpts.ReplyMarkup != nil {
+		t.Errorf("expected nil ReplyMarkup when disabled, got %v", mock.lastOpts.ReplyMarkup)
+	}
+}
+
+
+

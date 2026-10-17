@@ -345,6 +345,76 @@ func (r *Registry) GenerateHelpText() string {
 	return strings.TrimSpace(sb.String())
 }
 
+// GenerateAdminHelpText dynamically builds a comprehensive HTML command usage guide
+// including all administrative, media, and force-subscribe commands.
+func (r *Registry) GenerateAdminHelpText() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Group commands by category
+	categories := make(map[string][]CommandDefinition)
+	for _, cmd := range r.commands {
+		cat := strings.TrimSpace(cmd.Category)
+		if cat == "" {
+			cat = "General"
+		}
+		categories[cat] = append(categories[cat], cmd)
+	}
+
+	// Order categories: General, Media, Admin, others
+	catNames := make([]string, 0, len(categories))
+	for name := range categories {
+		catNames = append(catNames, name)
+	}
+	sort.Slice(catNames, func(i, j int) bool {
+		priority := func(name string) int {
+			switch name {
+			case "General":
+				return 1
+			case "Media":
+				return 2
+			case "Admin":
+				return 3
+			default:
+				return 4
+			}
+		}
+		p1, p2 := priority(catNames[i]), priority(catNames[j])
+		if p1 != p2 {
+			return p1 < p2
+		}
+		return catNames[i] < catNames[j]
+	})
+
+	var sb strings.Builder
+	sb.WriteString("<b><u>👑 BOT COMMANDS MASTER LIST (ADMIN) 👑</u></b>\n\n")
+
+	for _, cat := range catNames {
+		cmds := categories[cat]
+		sort.Slice(cmds, func(i, j int) bool {
+			return cmds[i].Name < cmds[j].Name
+		})
+
+		sb.WriteString(fmt.Sprintf("<b>⚡ <u>%s Commands</u></b>\n", cat))
+		for _, cmd := range cmds {
+			aliasStr := ""
+			if len(cmd.Aliases) > 0 {
+				aliasStr = fmt.Sprintf(" (aliases: <code>/%s</code>)", strings.Join(cmd.Aliases, ", /"))
+			}
+			adminTag := ""
+			if cmd.AdminOnly {
+				adminTag = " <i>[Admin]</i>"
+			}
+			sb.WriteString(fmt.Sprintf("• <code>/%s</code>%s%s - %s\n", cmd.Name, aliasStr, adminTag, cmd.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("<i>Admin privileges verified. All bot commands including administrative and force-subscribe controls are listed above.</i>")
+	return strings.TrimSpace(sb.String())
+}
+
+
 // PluginCount returns the number of registered plugins.
 func (r *Registry) PluginCount() int {
 	r.mu.RLock()

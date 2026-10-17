@@ -31,6 +31,14 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Category:    "General",
 			Handler:     p.HandleCmds,
 		},
+		{
+			Name:        "cmdc",
+			Description: "View all bot commands including administrative and FSub commands (Admin Only)",
+			Usage:       "/cmdc",
+			Category:    "Admin",
+			AdminOnly:   true,
+			Handler:     p.HandleCmdc,
+		},
 	}
 }
 
@@ -46,3 +54,17 @@ func (p *Plugin) HandleCmds(m *telegram.NewMessage) error {
 	})
 	return err
 }
+
+// HandleCmdc renders all bot commands including administrative and FSub controls (Admin Only).
+func (p *Plugin) HandleCmdc(m *telegram.NewMessage) error {
+	helpText := "<b><u>👑 BOT COMMANDS MASTER LIST (ADMIN) 👑</u></b>\n\nNo commands registered."
+	if p.appCtx != nil && p.appCtx.Registry != nil {
+		helpText = p.appCtx.Registry.GenerateAdminHelpText()
+	}
+
+	_, err := m.Reply(helpText, &telegram.SendOptions{
+		ParseMode: "html",
+	})
+	return err
+}
+

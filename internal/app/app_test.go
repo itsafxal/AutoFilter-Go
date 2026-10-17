@@ -50,17 +50,25 @@ func TestApp_Lifecycle(t *testing.T) {
 	if application.Registry.PluginCount() != 5 {
 		t.Errorf("expected 5 plugins, got %d", application.Registry.PluginCount())
 	}
-	if application.Registry.CommandCount() != 5 {
-		t.Errorf("expected 5 primary commands, got %d", application.Registry.CommandCount())
+	if application.Registry.CommandCount() != 6 {
+		t.Errorf("expected 6 primary commands, got %d", application.Registry.CommandCount())
 	}
 
-	// Verify help generation includes all 5 commands
+	// Verify help generation includes all commands
 	help := application.Registry.GenerateHelpText()
-	expectedCommands := []string{"/start", "/cmds", "/ping", "/id", "/info"}
+	expectedCommands := []string{"/start", "/cmds", "/cmdc", "/ping", "/id", "/info"}
 	for _, expected := range expectedCommands {
 		if !bytes.Contains([]byte(help), []byte(expected)) {
 			t.Errorf("expected help text to contain %s, got:\n%s", expected, help)
 		}
+	}
+
+
+	if application.AppContext.AutoDelete == nil {
+		t.Error("expected AutoDeleteService in AppContext to be non-nil")
+	}
+	if application.AppContext.Stream == nil {
+		t.Error("expected StreamService in AppContext to be non-nil")
 	}
 
 	// Test shutdown

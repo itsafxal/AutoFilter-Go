@@ -6,10 +6,13 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/autodelete"
+	"github.com/itsafxal/MYTGBOTZ/internal/caption"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
+	"github.com/itsafxal/MYTGBOTZ/internal/stream"
 )
 
 // FSubService defines the force subscribe operations required across plugins.
@@ -22,17 +25,21 @@ type FSubService interface {
 
 // AppContext carries shared application dependencies passed to plugins.
 type AppContext struct {
-	Config    *config.Config
-	Logger    *slog.Logger
-	StartTime time.Time
-	BotUser   *telegram.UserObj
-	Registry  *Registry
-	DB        *database.DatabaseManager
-	Delivery  delivery.MediaDeliveryService
-	Search    search.SearchService
-	Client    *telegram.Client
-	FSub      FSubService
+	Config     *config.Config
+	Logger     *slog.Logger
+	StartTime  time.Time
+	BotUser    *telegram.UserObj
+	Registry   *Registry
+	DB         *database.DatabaseManager
+	Delivery   delivery.MediaDeliveryService
+	Search     search.SearchService
+	Client     *telegram.Client
+	FSub       FSubService
+	Caption    caption.CaptionService
+	AutoDelete autodelete.AutoDeleteService
+	Stream     stream.StreamService
 }
+
 
 // HandlerFunc is the Gogram message/command handler function signature.
 type HandlerFunc = telegram.MessageHandler

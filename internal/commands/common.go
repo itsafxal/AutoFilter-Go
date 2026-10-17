@@ -103,3 +103,21 @@ func FormatDurationMs(d time.Duration) string {
 func EscapeHTML(s string) string {
 	return html.EscapeString(s)
 }
+
+// FormatBytes formats a byte count into a human-readable size string (e.g., "1.45 GB", "500.00 MB").
+func FormatBytes(b int64) string {
+	const unit = 1024
+	if b < 0 {
+		b = 0
+	}
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+

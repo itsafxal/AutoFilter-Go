@@ -18,7 +18,9 @@ import (
 type SearchService interface {
 	Search(ctx context.Context, query string, limit, offset int, filter SearchFilter) (*SearchResult, error)
 	GetSuggestions(ctx context.Context, query string, limit int) ([]string, error)
+	GetLatest(ctx context.Context, limit int) ([]MediaFile, error)
 }
+
 
 // Service implements the SearchService against the high-speed SQLite runtime cache.
 type Service struct {
@@ -416,3 +418,30 @@ func (c *lruCache) set(key string, value any) {
 		expiresAt: time.Now().Add(c.ttl),
 	}
 }
+
+// GetLatest retrieves the most recently indexed media files up to limit.
+func (s *Service) GetLatest(ctx context.Context, limit int) ([]MediaFile, error) {
+	if s.dbManager == nil || s.dbManager.SqlMediaRepo() == nil {
+		return nil, nil
+	}
+	recs, err := s.dbManager.SqlMediaRepo().GetLatestFiles(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]MediaFile, 0, len(recs))
+	for _, r := range recs {
+		files = append(files, MediaFile{
+			FileID:    r.FileID,
+			FileRef:   r.FileRef,
+			FileName:  r.FileName,
+			FileSize:  r.FileSize,
+			Size:      r.Size,
+			FileType:  r.FileType,
+			MimeType:  r.MimeType,
+			Caption:   r.Caption,
+			DateSaved: r.DateSaved,
+		})
+	}
+	return files, nil
+}
+

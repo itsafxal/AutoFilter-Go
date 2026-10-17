@@ -100,8 +100,11 @@ func (p *Plugin) HandleGetFile(m *telegram.NewMessage) error {
 		ReplyToMessageID: int64(m.ID),
 	}
 
-	_, err := p.appCtx.Delivery.Deliver(context.Background(), m.ChatID(), fileID, opts)
+	res, err := p.appCtx.Delivery.Deliver(context.Background(), m.ChatID(), fileID, opts)
 	if err == nil {
+		if res != nil && res.MessageID != 0 && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+			_ = p.appCtx.AutoDelete.ScheduleFileDelete(m.ChatID(), int32(res.MessageID))
+		}
 		return nil
 	}
 

@@ -128,3 +128,24 @@ func TestEscapeHTML(t *testing.T) {
 		t.Errorf("expected &lt;script&gt;, got %s", escaped)
 	}
 }
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		bytes int64
+		want  string
+	}{
+		{500, "500 B"},
+		{1024, "1.00 KB"},
+		{1572864, "1.50 MB"},
+		{1073741824, "1.00 GB"},
+		{2684354560, "2.50 GB"},
+	}
+
+	for _, tt := range tests {
+		got := FormatBytes(tt.bytes)
+		if got != tt.want {
+			t.Errorf("FormatBytes(%d) = %s, want %s", tt.bytes, got, tt.want)
+		}
+	}
+}
+

@@ -84,6 +84,53 @@ func (r *MediaRepository) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+// GetLatestFiles returns the most recently indexed media files up to limit.
+func (r *MediaRepository) GetLatestFiles(ctx context.Context, limit int) ([]MediaRecord, error) {
+	if r.dbManager == nil || r.dbManager.DB() == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `
+		SELECT file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved
+		FROM media
+		ORDER BY date_saved DESC, rowid DESC
+		LIMIT ?;
+	`
+	rows, err := r.dbManager.DB().QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed querying latest media files: %w", err)
+	}
+	defer rows.Close()
+
+	var records []MediaRecord
+	for rows.Next() {
+		var rec MediaRecord
+		var dateSaved sql.NullTime
+		if err := rows.Scan(
+			&rec.FileID,
+			&rec.FileRef,
+			&rec.FileName,
+			&rec.FileSize,
+			&rec.Size,
+			&rec.FileType,
+			&rec.MimeType,
+			&rec.Caption,
+			&dateSaved,
+		); err != nil {
+			return nil, fmt.Errorf("failed scanning media record: %w", err)
+		}
+		if dateSaved.Valid {
+			rec.DateSaved = dateSaved.Time
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+
 // Search performs a basic substring search on the SQLite media table.
 func (r *MediaRepository) Search(ctx context.Context, keyword string, limit, offset int) ([]MediaRecord, int64, error) {
 	if r.dbManager == nil || r.dbManager.DB() == nil || keyword == "" {

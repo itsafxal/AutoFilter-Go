@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -514,6 +515,9 @@ func (s *Service) SetChannel(ctx context.Context, client *telegram.Client, slot 
 		_ = s.repo.DeleteAllReq(ctx, slot)
 	}
 
+	// Automatically update channel description matching bot requirements
+	_ = s.UpdateChannelDescription(client, chatID, "")
+
 	return title, link, nil
 }
 
@@ -545,6 +549,9 @@ func (s *Service) SetSecondaryChannel(ctx context.Context, client *telegram.Clie
 	if s.repo != nil {
 		_ = s.repo.UpdateLoadout(ctx, s.botID, key, chatID)
 	}
+
+	// Automatically update channel description matching bot requirements
+	_ = s.UpdateChannelDescription(client, chatID, "")
 
 	return title, link, nil
 }
@@ -814,3 +821,39 @@ func (s *Service) getChatTitle(client *telegram.Client, chatID int64) string {
 	}
 	return fmt.Sprintf("Chat %d", chatID)
 }
+
+// GetDefaultChannelDescription returns the configured or default about/description text for FSub channels.
+func (s *Service) GetDefaultChannelDescription() string {
+	if s.cfg != nil && strings.TrimSpace(s.cfg.FSubChannelDescription) != "" {
+		return s.cfg.FSubChannelDescription
+	}
+	return "You need to request to join channel to get file 🚀"
+}
+
+// UpdateChannelDescription updates the channel's about/description text in Telegram.
+func (s *Service) UpdateChannelDescription(client *telegram.Client, chatID int64, description string) error {
+	if client == nil {
+		return fmt.Errorf("telegram client unavailable")
+	}
+	if strings.TrimSpace(description) == "" {
+		description = s.GetDefaultChannelDescription()
+	}
+
+	peer, err := client.ResolvePeer(chatID)
+	if err != nil {
+		return fmt.Errorf("cannot resolve peer for description update: %w", err)
+	}
+
+	_, err = client.MessagesEditChatAbout(peer, description)
+	if err != nil {
+		if strings.Contains(strings.ToUpper(err.Error()), "CHAT_NOT_MODIFIED") {
+			return nil
+		}
+		s.logger.Warn("failed to update channel description", "chat_id", chatID, "error", err)
+		return err
+	}
+
+	s.logger.Info("successfully updated channel description", "chat_id", chatID, "description", description)
+	return nil
+}
+

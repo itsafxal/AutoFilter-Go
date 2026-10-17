@@ -179,7 +179,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		text := formatResultText(userMention, query, 1)
 		kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
 
-		_, replyErr := m.Reply(text, &telegram.SendOptions{
+		replyMsg, replyErr := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
@@ -187,6 +187,9 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			p.appCtx.Logger.Error("failed to send search results reply", "query", query, "error", replyErr)
 		} else if p.appCtx.Logger != nil {
 			p.appCtx.Logger.Info("search results reply sent", "query", query, "results_count", len(result.Files))
+		}
+		if replyErr == nil && replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+			_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
 		}
 		return replyErr
 	}
@@ -205,7 +208,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		text := formatSpellCheckText(userMention, query)
 		kb := p.buildSpellCheckKeyboard(suggestions, searchKey)
 
-		_, replyErr := m.Reply(text, &telegram.SendOptions{
+		replyMsg, replyErr := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
@@ -213,6 +216,9 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			p.appCtx.Logger.Error("failed to send suggestions reply", "query", query, "error", replyErr)
 		} else if p.appCtx.Logger != nil {
 			p.appCtx.Logger.Info("spelling suggestions reply sent", "query", query, "suggestions_count", len(suggestions))
+		}
+		if replyErr == nil && replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+			_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
 		}
 		return replyErr
 	}
@@ -222,13 +228,16 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		"Hᴇʏ %s 💫,\nNᴏ Sᴇᴀʀᴄʜ Rᴇꜱᴜʟᴛ Fᴏᴜɴᴅ Fᴏʀ Yᴏᴜʀ Rᴇᴏ̨ᴜᴇsᴛᴇᴅ Mᴏᴠɪᴇ.\n\n➪ Sᴇɴᴅ Mᴇ A Cᴏʀʀᴇᴄᴛ Sᴘᴇʟʟɪɴɢ. Oʀ Pʟᴇᴀꜱᴇ Cʜᴇᴄᴋ Tʜᴀᴛ Mᴏᴠɪᴇ Oᴛᴛ Rᴇʟᴇᴇsᴇᴅ.✨",
 		userMention,
 	)
-	_, replyErr := m.Reply(notFoundText, &telegram.SendOptions{
+	replyMsg, replyErr := m.Reply(notFoundText, &telegram.SendOptions{
 		ParseMode: "html",
 	})
 	if replyErr != nil && p.appCtx.Logger != nil {
 		p.appCtx.Logger.Error("failed to send not-found reply", "query", query, "error", replyErr)
 	} else if p.appCtx.Logger != nil {
 		p.appCtx.Logger.Info("not-found reply sent", "query", query)
+	}
+	if replyErr == nil && replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+		_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
 	}
 	return replyErr
 }

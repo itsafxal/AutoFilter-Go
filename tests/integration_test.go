@@ -60,8 +60,8 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 	if botApp.Registry.PluginCount() != 5 {
 		t.Errorf("expected 5 plugins, got %d", botApp.Registry.PluginCount())
 	}
-	if botApp.Registry.CommandCount() != 5 {
-		t.Errorf("expected 5 primary commands, got %d", botApp.Registry.CommandCount())
+	if botApp.Registry.CommandCount() != 6 {
+		t.Errorf("expected 6 primary commands, got %d", botApp.Registry.CommandCount())
 	}
 
 	// Generate and inspect help guide
@@ -70,9 +70,11 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 		"<b><u>🤖 BOT COMMANDS & USAGE GUIDE 🤖</u></b>",
 		"• <code>/start</code>",
 		"• <code>/cmds</code>",
+		"• <code>/cmdc</code>",
 		"• <code>/ping</code>",
 		"• <code>/id</code>",
 		"• <code>/info</code>",
+
 		"(aliases: <code>/help</code>)",
 		"(aliases: <code>/about</code>)",
 	}

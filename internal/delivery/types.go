@@ -31,6 +31,12 @@ type DeliveryOptions struct {
 
 	// ReplyToMessageID allows replying to a specific message.
 	ReplyToMessageID int64
+
+	// StreamURL optionally overrides the stream base URL.
+	StreamURL string
+
+	// EnableFastDownload optionally overrides the service-level fast download button configuration.
+	EnableFastDownload *bool
 }
 
 // DeliveryResult contains structured metadata about a completed media delivery.

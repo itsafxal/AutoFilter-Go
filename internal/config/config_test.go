@@ -146,6 +146,18 @@ func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 	if cfg.SyncBatchSize != 10000 {
 		t.Errorf("expected default SyncBatchSize 10000, got %d", cfg.SyncBatchSize)
 	}
+	if cfg.AutoDeleteFilterTime != "15m" {
+		t.Errorf("expected default AutoDeleteFilterTime 15m, got %s", cfg.AutoDeleteFilterTime)
+	}
+	if cfg.AutoDeleteFileTime != "30m" {
+		t.Errorf("expected default AutoDeleteFileTime 30m, got %s", cfg.AutoDeleteFileTime)
+	}
+	if !cfg.AutoDeleteWeeklyTrash {
+		t.Error("expected default AutoDeleteWeeklyTrash to be true")
+	}
+	if cfg.TrashRetentionDays != 7 {
+		t.Errorf("expected default TrashRetentionDays 7, got %d", cfg.TrashRetentionDays)
+	}
 	if cfg.HasDatabase() {
 		t.Error("expected HasDatabase to be false when DATABASE_URI is unset")
 	}
@@ -361,5 +373,91 @@ func TestSecretRedaction(t *testing.T) {
 	}
 	if !strings.Contains(maskedURI, "***REDACTED***") {
 		t.Errorf("expected MaskURI to contain ***REDACTED***, got: %s", maskedURI)
+	}
+}
+
+func TestLoadFromEnv_StreamConfig(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("OWNER_ID", "99887766")
+
+	// 1. Defaults
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.StreamServerEnabled {
+		t.Error("expected StreamServerEnabled default true")
+	}
+	if cfg.StreamPort != 8080 {
+		t.Errorf("expected default StreamPort 8080, got %d", cfg.StreamPort)
+	}
+	if cfg.StreamBindAddr != "0.0.0.0" {
+		t.Errorf("expected default StreamBindAddr 0.0.0.0, got %s", cfg.StreamBindAddr)
+	}
+	if cfg.StreamURL != "http://localhost:8080" {
+		t.Errorf("expected default StreamURL http://localhost:8080, got %s", cfg.StreamURL)
+	}
+	if cfg.StreamBotToken != "" {
+		t.Errorf("expected default empty StreamBotToken, got %s", cfg.StreamBotToken)
+	}
+	if !cfg.EnableFastDownloadButton {
+		t.Error("expected default EnableFastDownloadButton true")
+	}
+	if cfg.MaskedStreamToken() != "None" {
+		t.Errorf("expected MaskedStreamToken None, got %s", cfg.MaskedStreamToken())
+	}
+
+	// 2. Custom values
+	os.Setenv("STREAM_SERVER_ENABLED", "false")
+	os.Setenv("STREAM_PORT", "9090")
+	os.Setenv("STREAM_BIND_ADDR", "127.0.0.1")
+	os.Setenv("STREAM_URL", "https://stream.mybot.com/")
+	os.Setenv("STREAM_BOT_TOKEN", "987654321:XYZStreamDedicatedBotTokenSecret")
+	os.Setenv("ENABLE_FAST_DOWNLOAD_BUTTON", "false")
+
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("OWNER_ID")
+		os.Unsetenv("STREAM_SERVER_ENABLED")
+		os.Unsetenv("STREAM_PORT")
+		os.Unsetenv("STREAM_BIND_ADDR")
+		os.Unsetenv("STREAM_URL")
+		os.Unsetenv("STREAM_BOT_TOKEN")
+		os.Unsetenv("ENABLE_FAST_DOWNLOAD_BUTTON")
+	}()
+
+	customCfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if customCfg.StreamServerEnabled {
+		t.Error("expected StreamServerEnabled false")
+	}
+	if customCfg.StreamPort != 9090 {
+		t.Errorf("expected StreamPort 9090, got %d", customCfg.StreamPort)
+	}
+	if customCfg.StreamBindAddr != "127.0.0.1" {
+		t.Errorf("expected StreamBindAddr 127.0.0.1, got %s", customCfg.StreamBindAddr)
+	}
+	if customCfg.StreamURL != "https://stream.mybot.com" {
+		t.Errorf("expected trimmed StreamURL https://stream.mybot.com, got %s", customCfg.StreamURL)
+	}
+	if customCfg.StreamBotToken != "987654321:XYZStreamDedicatedBotTokenSecret" {
+		t.Errorf("expected StreamBotToken to match, got %s", customCfg.StreamBotToken)
+	}
+	if customCfg.EnableFastDownloadButton {
+		t.Error("expected EnableFastDownloadButton false")
+	}
+
+	str := customCfg.String()
+	if strings.Contains(str, "XYZStreamDedicatedBotTokenSecret") {
+		t.Errorf("CRITICAL SECURITY FLAW: StreamBotToken secret leaked in String(): %s", str)
+	}
+	if !strings.Contains(str, "987654321:***REDACTED***") {
+		t.Errorf("expected masked StreamBotToken in String(), got: %s", str)
 	}
 }

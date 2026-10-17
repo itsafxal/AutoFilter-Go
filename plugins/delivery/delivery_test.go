@@ -56,6 +56,9 @@ func (m *mockDeliveryService) Deliver(ctx context.Context, chatID int64, identif
 
 func (m *mockDeliveryService) SetSender(sender deliveryCore.TelegramSender) {}
 
+func (m *mockDeliveryService) SetCaptionFormatter(cf deliveryCore.CaptionFormatter) {}
+
+
 func TestDeliveryPlugin_Metadata(t *testing.T) {
 	appCtx := &plugins.AppContext{}
 	p := New(appCtx)

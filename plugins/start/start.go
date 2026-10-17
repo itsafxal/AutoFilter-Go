@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
@@ -12,7 +14,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
-// Plugin implements the /start command plugin.
+// Plugin implements the /start command plugin and interactive menu navigation.
 type Plugin struct {
 	appCtx *plugins.AppContext
 }
@@ -38,6 +40,171 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Handler:     p.HandleStart,
 		},
 	}
+}
+
+// CallbackHandlers registers interactive callback query handlers for start menu navigation.
+func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
+	return []plugins.CallbackDefinition{
+		{Prefix: "start_help", Handler: p.HandleHelpCallback},
+		{Prefix: "start_about", Handler: p.HandleAboutCallback},
+		{Prefix: "start_home", Handler: p.HandleHomeCallback},
+		{Prefix: "help", Handler: p.HandleHelpCallback},
+		{Prefix: "about", Handler: p.HandleAboutCallback},
+	}
+}
+
+func (p *Plugin) buildWelcomeContent(user *telegram.UserObj, botUsername string) (string, *telegram.ReplyInlineMarkup) {
+	userMention := "there"
+	if user != nil {
+		if user.FirstName != "" {
+			userMention = commands.EscapeHTML(user.FirstName)
+		} else if user.Username != "" {
+			userMention = "@" + commands.EscapeHTML(user.Username)
+		}
+	}
+
+	welcomeText := fmt.Sprintf(
+		"👋 <b>Hey there, %s!</b>\n\n"+
+			"I'm your auto-filter bot – advanced, powerful, and designed to turn your groups into movie request groups!\n\n"+
+			"Let's get started! 🚀",
+		userMention,
+	)
+
+	replyMarkup := telegram.NewKeyboard().
+		AddRow(telegram.Button.URL("➕ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ ➕", fmt.Sprintf("https://t.me/%s?startgroup=true", botUsername))).
+		AddRow(
+			telegram.Button.Data("ℹ️ ʜᴇʟᴘ", "start_help"),
+			telegram.Button.Data("✨ ᴀʙᴏᴜᴛ", "start_about"),
+		).
+		Build()
+
+	return welcomeText, replyMarkup
+}
+
+func (p *Plugin) buildHelpContent() (string, *telegram.ReplyInlineMarkup) {
+	helpText := "📖 <b><u>Help & Available Commands</u></b>\n\n" +
+		"Here are the commands you can use:\n\n" +
+		"• /start - Start the bot & check status\n" +
+		"• /ping - Check bot response speed & latency\n" +
+		"• /info - View bot info & user profile\n" +
+		"• /id - Get chat ID and user Telegram ID\n" +
+		"• /latest - View recently added media files\n" +
+		"• /request - Request a movie or series title\n\n" +
+		"💡 <b>How to get movies:</b>\n" +
+		"Simply send any movie or series title in PM or in any connected group, and I will search and deliver the files instantly!"
+
+	replyMarkup := telegram.NewKeyboard().
+		AddRow(
+			telegram.Button.Data("✨ ᴀʙᴏᴜᴛ", "start_about"),
+			telegram.Button.Data("🏠 ʜᴏᴍᴇ", "start_home"),
+		).
+		Build()
+
+	return helpText, replyMarkup
+}
+
+func (p *Plugin) buildAboutContent() (string, *telegram.ReplyInlineMarkup) {
+	botName := "AutoFilter Bot"
+	botUsername := "bot"
+	if p.appCtx != nil && p.appCtx.BotUser != nil {
+		if p.appCtx.BotUser.FirstName != "" {
+			botName = commands.EscapeHTML(p.appCtx.BotUser.FirstName)
+		}
+		if p.appCtx.BotUser.Username != "" {
+			botUsername = commands.EscapeHTML(p.appCtx.BotUser.Username)
+		}
+	}
+
+	ownerID := int64(0)
+	if p.appCtx != nil && p.appCtx.Config != nil {
+		ownerID = p.appCtx.Config.OwnerID
+	}
+
+	var startTime time.Time
+	if p.appCtx != nil {
+		startTime = p.appCtx.StartTime
+	}
+	uptime := commands.FormatUptime(startTime)
+	goVer := runtime.Version()
+
+	devLink := fmt.Sprintf("<a href=\"tg://user?id=%d\">Developer</a>", ownerID)
+	if ownerID == 0 {
+		devLink = "Bot Administrator"
+	}
+
+	aboutText := fmt.Sprintf(
+		"🤖 <b><u>About This Bot</u></b>\n\n"+
+			"• <b>My Name:</b> %s\n"+
+			"• <b>Username:</b> @%s\n"+
+			"• <b>Developer:</b> %s\n"+
+			"• <b>Developer ID:</b> <code>%d</code>\n"+
+			"• <b>Library:</b> <code>Gogram v1.7.71</code>\n"+
+			"• <b>Language:</b> <code>Go %s</code>\n"+
+			"• <b>Database:</b> <code>MongoDB & SQLite</code>\n"+
+			"• <b>Bot Server:</b> <code>Telegram MTProto</code>\n"+
+			"• <b>Uptime:</b> <code>%s</code>",
+		botName,
+		botUsername,
+		devLink,
+		ownerID,
+		goVer,
+		uptime,
+	)
+
+	replyMarkup := telegram.NewKeyboard().
+		AddRow(
+			telegram.Button.Data("ℹ️ ʜᴇʟᴘ", "start_help"),
+			telegram.Button.Data("🏠 ʜᴏᴍᴇ", "start_home"),
+		).
+		Build()
+
+	return aboutText, replyMarkup
+}
+
+// HandleHelpCallback renders the Help view in-place.
+func (p *Plugin) HandleHelpCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+	text, markup := p.buildHelpContent()
+	_, _ = cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: markup,
+	})
+	_, err := cb.Answer("")
+	return err
+}
+
+// HandleAboutCallback renders the About view in-place.
+func (p *Plugin) HandleAboutCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+	text, markup := p.buildAboutContent()
+	_, _ = cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: markup,
+	})
+	_, err := cb.Answer("")
+	return err
+}
+
+// HandleHomeCallback renders the Start welcome view in-place.
+func (p *Plugin) HandleHomeCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+	botUsername := "bot"
+	if p.appCtx != nil && p.appCtx.BotUser != nil && p.appCtx.BotUser.Username != "" {
+		botUsername = p.appCtx.BotUser.Username
+	}
+	text, markup := p.buildWelcomeContent(cb.Sender, botUsername)
+	_, _ = cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: markup,
+	})
+	_, err := cb.Answer("")
+	return err
 }
 
 // HandleStart handles the /start command in private and group chats.
@@ -103,17 +270,25 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 
 		// 1. Help/commands deep link
 		if payload == "help" {
-			helpText := "Use /cmds to view available commands."
-			if p.appCtx != nil && p.appCtx.Registry != nil {
-				helpText = p.appCtx.Registry.GenerateHelpText()
-			}
-			_, err := m.Reply(helpText, &telegram.SendOptions{
-				ParseMode: "html",
+			text, markup := p.buildHelpContent()
+			_, err := m.Reply(text, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: markup,
 			})
 			return err
 		}
 
-		// 2. Media delivery deep link: file_<id>, filep_<id>, or direct file ID
+		// 2. About deep link
+		if payload == "about" {
+			text, markup := p.buildAboutContent()
+			_, err := m.Reply(text, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: markup,
+			})
+			return err
+		}
+
+		// 3. Media delivery deep link: file_<id>, filep_<id>, or direct file ID
 		if p.appCtx != nil && p.appCtx.Delivery != nil {
 			var fileID string
 			protectContent := false
@@ -123,7 +298,7 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 				protectContent = true
 			} else if strings.HasPrefix(payload, "file_") {
 				fileID = strings.TrimPrefix(payload, "file_")
-			} else if payload != "about" && payload != "subscribe" && payload != "error" && payload != "okay" {
+			} else if payload != "subscribe" && payload != "error" && payload != "okay" {
 				fileID = payload
 			}
 
@@ -177,8 +352,11 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 					ProtectContent: protectContent,
 				}
 
-				_, err := p.appCtx.Delivery.Deliver(context.Background(), m.ChatID(), fileID, opts)
+				res, err := p.appCtx.Delivery.Deliver(context.Background(), m.ChatID(), fileID, opts)
 				if err == nil {
+					if res != nil && res.MessageID != 0 && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+						_ = p.appCtx.AutoDelete.ScheduleFileDelete(m.ChatID(), int32(res.MessageID))
+					}
 					return nil
 				}
 
@@ -224,31 +402,16 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 		return err
 	}
 
-	// Standard private welcome
-	userMention := "there"
-	if user != nil {
-		if user.FirstName != "" {
-			userMention = commands.EscapeHTML(user.FirstName)
-		} else if user.Username != "" {
-			userMention = "@" + commands.EscapeHTML(user.Username)
-		}
-	}
+	// Standard private welcome with 3 buttons: Add Me To Group, Help, About
+	welcomeText, replyMarkup := p.buildWelcomeContent(user, botUsername)
 
-	welcomeText := fmt.Sprintf(
-		"👋 <b>Hey there, %s!</b>\n\n"+
-			"I'm your auto-filter bot – advanced, powerful, and designed to turn your groups into movie request groups!\n\n"+
-			"Let's get started! 🚀",
-		userMention,
-	)
-
-	replyMarkup := telegram.NewKeyboard().
-		AddRow(telegram.Button.URL("➜ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ ➜", fmt.Sprintf("https://t.me/%s?startgroup=true", botUsername))).
-		AddRow(telegram.Button.URL("⭐ Cᴏɴᴛᴀᴄᴛ Aᴅᴍɪɴ ⭐", fmt.Sprintf("https://t.me/%s", botUsername))).
-		Build()
-
-	_, err := m.Reply(welcomeText, &telegram.SendOptions{
+	sentMsg, err := m.Reply(welcomeText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: replyMarkup,
 	})
+	if err == nil && sentMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+		_ = p.appCtx.AutoDelete.TrackSentMessage(sentMsg.ChatID(), sentMsg.ID, "start")
+	}
 	return err
 }
+

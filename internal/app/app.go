@@ -2,32 +2,41 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/itsafxal/MYTGBOTZ/internal/autodelete"
+	"github.com/itsafxal/MYTGBOTZ/internal/caption"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/fsub"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
+	"github.com/itsafxal/MYTGBOTZ/internal/stream"
 	"github.com/itsafxal/MYTGBOTZ/internal/telegram"
+
+	gogram "github.com/amarnathcjd/gogram/telegram"
 )
 
 // App coordinates the lifecycle of configuration, plugins, logging, database, and Telegram services.
 type App struct {
-	Config          *config.Config
-	Logger          *slog.Logger
-	Registry        *plugins.Registry
-	AppContext      *plugins.AppContext
-	BotService      *telegram.BotService
-	DBManager       *database.DatabaseManager
-	DeliveryService delivery.MediaDeliveryService
-	SearchService   search.SearchService
-	FSubService     *fsub.Service
-	StartTime       time.Time
+	Config            *config.Config
+	Logger            *slog.Logger
+	Registry          *plugins.Registry
+	AppContext        *plugins.AppContext
+	BotService        *telegram.BotService
+	DBManager         *database.DatabaseManager
+	DeliveryService   delivery.MediaDeliveryService
+	SearchService     search.SearchService
+	FSubService       *fsub.Service
+	CaptionService    caption.CaptionService
+	AutoDeleteService autodelete.AutoDeleteService
+	StreamService     stream.StreamService
+	StartTime         time.Time
 }
 
 // New creates and configures a new App instance.
@@ -42,36 +51,65 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	startTime := time.Now()
 	dbManager := database.NewDatabaseManager(cfg, logger)
 	deliveryService := delivery.NewService(dbManager, logger)
+	deliveryService.SetStreamConfig(cfg.StreamURL, cfg.EnableFastDownloadButton)
+
 	searchService := search.NewService(dbManager, logger)
 	fsubRepo := fsub.NewRepositoryWithProvider(dbManager.MongoPrimaryDB)
 	fsubService := fsub.NewService(fsubRepo, cfg, logger)
 
+	sqlProv := func() *sql.DB {
+		if dbManager.SQLManager() != nil {
+			return dbManager.SQLManager().DB()
+		}
+		return nil
+	}
+	captionService := caption.NewService(cfg.CustomCaption, dbManager.MongoPrimaryDB, sqlProv, logger)
+	deliveryService.SetCaptionFormatter(captionService)
+
+	autoDeleteService := autodelete.NewService(cfg, sqlProv, dbManager.MongoPrimaryDB, logger)
+
+	streamConfig := stream.Config{
+		BaseURL:     cfg.StreamURL,
+		Port:        cfg.StreamPort,
+		BindAddr:    cfg.StreamBindAddr,
+		BotUsername: "",
+		Enabled:     cfg.StreamServerEnabled,
+	}
+	streamService := stream.NewServer(streamConfig, deliveryService, nil, logger)
+
 	appCtx := &plugins.AppContext{
-		Config:    cfg,
-		Logger:    logger,
-		StartTime: startTime,
-		DB:        dbManager,
-		Delivery:  deliveryService,
-		Search:    searchService,
-		FSub:      fsubService,
+		Config:     cfg,
+		Logger:     logger,
+		StartTime:  startTime,
+		DB:         dbManager,
+		Delivery:   deliveryService,
+		Search:     searchService,
+		FSub:       fsubService,
+		Caption:    captionService,
+		AutoDelete: autoDeleteService,
+		Stream:     streamService,
 	}
 
 	reg := plugins.NewRegistry(appCtx)
 	botService := telegram.NewBotService(cfg, logger, reg, appCtx)
 
 	return &App{
-		Config:          cfg,
-		Logger:          logger,
-		Registry:        reg,
-		AppContext:      appCtx,
-		BotService:      botService,
-		DBManager:       dbManager,
-		DeliveryService: deliveryService,
-		SearchService:   searchService,
-		FSubService:     fsubService,
-		StartTime:       startTime,
+		Config:            cfg,
+		Logger:            logger,
+		Registry:          reg,
+		AppContext:        appCtx,
+		BotService:        botService,
+		DBManager:         dbManager,
+		DeliveryService:   deliveryService,
+		SearchService:     searchService,
+		FSubService:       fsubService,
+		CaptionService:    captionService,
+		AutoDeleteService: autoDeleteService,
+		StreamService:     streamService,
+		StartTime:         startTime,
 	}, nil
 }
+
 
 // RegisterPlugins registers one or more plugins into the application registry.
 func (a *App) RegisterPlugins(plugs ...plugins.Plugin) error {
@@ -99,9 +137,15 @@ func (a *App) InitDatabase(ctx context.Context) error {
 	if err := a.DBManager.Init(ctx); err != nil {
 		return fmt.Errorf("database initialization failure: %w", err)
 	}
+	if a.CaptionService != nil {
+		if err := a.CaptionService.Init(ctx); err != nil {
+			a.Logger.Warn("failed initializing caption service from database", "error", err)
+		}
+	}
 	a.Logger.Info("database layer initialized and ready")
 	return nil
 }
+
 
 // InitBot initializes the Telegram MTProto client and dispatcher.
 func (a *App) InitBot() error {
@@ -111,6 +155,39 @@ func (a *App) InitBot() error {
 	}
 	if a.DeliveryService != nil {
 		a.DeliveryService.SetSender(a.BotService.Client())
+	}
+	if a.AutoDeleteService != nil {
+		_ = a.AutoDeleteService.Init(context.Background(), a.BotService.Client())
+		a.AutoDeleteService.Start(context.Background())
+	}
+	if a.StreamService != nil {
+		if srv, ok := a.StreamService.(*stream.Server); ok {
+			if a.Config != nil && a.Config.StreamBotToken != "" {
+				// Dedicated bot client for media download streaming
+				streamClient, sErr := gogram.NewClient(gogram.ClientConfig{
+					AppID:         a.Config.AppID,
+					AppHash:       a.Config.AppHash,
+					LogLevel:      gogram.LogError,
+					MemorySession: true,
+				})
+				if sErr == nil {
+					if lErr := streamClient.LoginBot(a.Config.StreamBotToken); lErr == nil {
+						srv.SetDownloader(streamClient)
+						a.Logger.Info("stream service initialized with dedicated stream bot token")
+					} else {
+						a.Logger.Warn("failed to login dedicated stream bot, falling back to primary bot client", "error", lErr)
+						srv.SetDownloader(a.BotService.Client())
+					}
+				} else {
+					srv.SetDownloader(a.BotService.Client())
+				}
+			} else if a.BotService != nil {
+				srv.SetDownloader(a.BotService.Client())
+			}
+		}
+		if a.Config != nil && a.Config.StreamServerEnabled {
+			_ = a.StreamService.Start(context.Background())
+		}
 	}
 	return nil
 }
@@ -136,6 +213,18 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) Shutdown() error {
 	a.Logger.Info("initiating graceful application shutdown...")
 	var errs []error
+
+	if a.StreamService != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := a.StreamService.Stop(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("stream server shutdown error: %w", err))
+		}
+		cancel()
+	}
+
+	if a.AutoDeleteService != nil {
+		a.AutoDeleteService.Stop()
+	}
 
 	if a.BotService != nil {
 		if err := a.BotService.Stop(); err != nil {

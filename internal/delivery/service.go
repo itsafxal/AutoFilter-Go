@@ -11,10 +11,17 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 )
 
 var validIdentifierRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
+
+// CaptionFormatter defines dynamic formatting operations for media captions.
+type CaptionFormatter interface {
+	FormatMedia(ctx context.Context, fileName, sizeStr, originalCaption string) string
+	Format(template, fileName, sizeStr, originalCaption string) string
+}
 
 // MediaDeliveryService defines operations for validating, resolving, and delivering
 // media records stored in MongoDB / SQLite cache via Telegram Bot API.
@@ -30,15 +37,21 @@ type MediaDeliveryService interface {
 
 	// SetSender assigns the Telegram sender client (typically *telegram.Client).
 	SetSender(sender TelegramSender)
+
+	// SetCaptionFormatter assigns the dynamic caption formatter.
+	SetCaptionFormatter(cf CaptionFormatter)
 }
 
 // Service implements MediaDeliveryService.
 type Service struct {
-	db       *database.DatabaseManager
-	sender   TelegramSender
-	senderMu sync.RWMutex
-	logger   *slog.Logger
-	inFlight *InFlightTracker
+	db               *database.DatabaseManager
+	sender           TelegramSender
+	senderMu         sync.RWMutex
+	logger           *slog.Logger
+	inFlight           *InFlightTracker
+	captionFormatter   CaptionFormatter
+	streamURL          string
+	enableFastDownload bool
 }
 
 // NewService constructs a new media delivery service.
@@ -47,9 +60,10 @@ func NewService(db *database.DatabaseManager, logger *slog.Logger) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		db:       db,
-		logger:   logger,
-		inFlight: NewInFlightTracker(30 * time.Second),
+		db:                 db,
+		logger:             logger,
+		inFlight:           NewInFlightTracker(30 * time.Second),
+		enableFastDownload: true,
 	}
 }
 
@@ -59,6 +73,18 @@ func (s *Service) SetSender(sender TelegramSender) {
 	defer s.senderMu.Unlock()
 	s.sender = sender
 }
+
+// SetCaptionFormatter sets the dynamic media caption formatter.
+func (s *Service) SetCaptionFormatter(cf CaptionFormatter) {
+	s.captionFormatter = cf
+}
+
+// SetStreamConfig configures the stream base URL and button enablement.
+func (s *Service) SetStreamConfig(streamURL string, enableFastDownload bool) {
+	s.streamURL = strings.TrimRight(strings.TrimSpace(streamURL), "/")
+	s.enableFastDownload = enableFastDownload
+}
+
 
 // getSender safely retrieves the current Telegram sender client.
 func (s *Service) getSender() TelegramSender {
@@ -220,14 +246,28 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		return nil, ErrTelegramUnavailable
 	}
 
-	// 7. Format caption (prefer custom caption, then record caption, fallback to filename)
-	caption := opts.CustomCaption
-	if strings.TrimSpace(caption) == "" {
+	// 7. Format caption (prefer custom caption, then dynamic formatter, fallback to record caption or filename)
+	sizeStr := rec.Size
+	if strings.TrimSpace(sizeStr) == "" && rec.FileSize > 0 {
+		sizeStr = commands.FormatBytes(rec.FileSize)
+	}
+
+	var caption string
+	if strings.TrimSpace(opts.CustomCaption) != "" {
+		if s.captionFormatter != nil {
+			caption = s.captionFormatter.Format(opts.CustomCaption, rec.FileName, sizeStr, rec.Caption)
+		} else {
+			caption = opts.CustomCaption
+		}
+	} else if s.captionFormatter != nil {
+		caption = s.captionFormatter.FormatMedia(ctx, rec.FileName, sizeStr, rec.Caption)
+	} else {
 		caption = rec.Caption
+		if strings.TrimSpace(caption) == "" {
+			caption = rec.FileName
+		}
 	}
-	if strings.TrimSpace(caption) == "" {
-		caption = rec.FileName
-	}
+
 
 	var replyID int32
 	if opts.ReplyToMessageID > 0 {
@@ -254,11 +294,31 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	var sentMsg *telegram.NewMessage
 	var methodUsed string
 
+	// Attach Fast Download & Stream button if enabled
+	targetStreamURL := s.streamURL
+	if opts.StreamURL != "" {
+		targetStreamURL = strings.TrimRight(strings.TrimSpace(opts.StreamURL), "/")
+	}
+	enableBtn := s.enableFastDownload
+	if opts.EnableFastDownload != nil {
+		enableBtn = *opts.EnableFastDownload
+	}
+
+	var replyMarkup telegram.ReplyMarkup
+	if enableBtn && targetStreamURL != "" {
+		watchURL := fmt.Sprintf("%s/watch/%s", targetStreamURL, cleanID)
+		replyMarkup = telegram.NewKeyboard().
+			AddRow(telegram.Button.URL("⚡ Get Fast Download", watchURL)).
+			AddRow(telegram.Button.Data("🔗 Get Direct Links", fmt.Sprintf("stream_links#%s", cleanID))).
+			Build()
+	}
+
 	mediaOpts := &telegram.MediaOptions{
-		Caption:    caption,
-		ParseMode:  "html",
-		NoForwards: opts.ProtectContent,
-		ReplyID:    replyID,
+		Caption:     caption,
+		ParseMode:   "html",
+		NoForwards:  opts.ProtectContent,
+		ReplyID:     replyID,
+		ReplyMarkup: replyMarkup,
 	}
 
 	// 8. Dispatch to appropriate Telegram send method with video fallback

@@ -37,8 +37,8 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 		{
 			Name:        "sub1",
 			Aliases:     []string{"set_sub1"},
-			Description: "Set primary Force Subscribe Channel 1",
-			Usage:       "/sub1 <channel_id>",
+			Description: "Set primary Force Subscribe Channel 1 (or forward from channel)",
+			Usage:       "/sub1 [channel_id]",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.handleSetSub1,
@@ -46,8 +46,8 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 		{
 			Name:        "sub2",
 			Aliases:     []string{"set_sub2"},
-			Description: "Set primary Force Subscribe Channel 2",
-			Usage:       "/sub2 <channel_id>",
+			Description: "Set primary Force Subscribe Channel 2 (or forward from channel)",
+			Usage:       "/sub2 [channel_id]",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.handleSetSub2,
@@ -55,8 +55,8 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 		{
 			Name:        "sub3",
 			Aliases:     []string{"set_sub3"},
-			Description: "Set primary Force Subscribe Channel 3",
-			Usage:       "/sub3 <channel_id>",
+			Description: "Set primary Force Subscribe Channel 3 (or forward from channel)",
+			Usage:       "/sub3 [channel_id]",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.handleSetSub3,
@@ -65,8 +65,8 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 		{
 			Name:        "2sub1",
 			Aliases:     []string{"setchat1_2"},
-			Description: "Set secondary Force Subscribe Channel 1 for threshold switching",
-			Usage:       "/2sub1 <channel_id>",
+			Description: "Set secondary Force Subscribe Channel 1 (or forward from channel)",
+			Usage:       "/2sub1 [channel_id]",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.handleSetSecondary1,
@@ -74,8 +74,8 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 		{
 			Name:        "2sub2",
 			Aliases:     []string{"setchat2_2"},
-			Description: "Set secondary Force Subscribe Channel 2 for threshold switching",
-			Usage:       "/2sub2 <channel_id>",
+			Description: "Set secondary Force Subscribe Channel 2 (or forward from channel)",
+			Usage:       "/2sub2 [channel_id]",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.handleSetSecondary2,
@@ -83,8 +83,8 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 		{
 			Name:        "2sub3",
 			Aliases:     []string{"setchat3_2"},
-			Description: "Set secondary Force Subscribe Channel 3 for threshold switching",
-			Usage:       "/2sub3 <channel_id>",
+			Description: "Set secondary Force Subscribe Channel 3 (or forward from channel)",
+			Usage:       "/2sub3 [channel_id]",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.handleSetSecondary3,
@@ -205,19 +205,30 @@ func (p *Plugin) handleSetSub3(m *telegram.NewMessage) error {
 
 func (p *Plugin) processSetChannel(m *telegram.NewMessage, slot int) error {
 	args := strings.Fields(m.Text())
-	if len(args) < 2 {
-		_, err := m.Reply(fmt.Sprintf(
-			"Please provide the Force Subscribe Channel ID.\n\n<b>Usage:</b> <code>/sub%d -100123456789</code>",
-			slot,
-		), &telegram.SendOptions{ParseMode: "html"})
-		return err
-	}
+	var chatID int64
 
-	rawID := strings.TrimSpace(args[1])
-	chatID, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil {
-		_, replyErr := m.Reply("❌ <b>Invalid Channel ID!</b> Please provide a valid numeric channel ID.", &telegram.SendOptions{ParseMode: "html"})
-		return replyErr
+	if len(args) >= 2 {
+		rawID := strings.TrimSpace(args[1])
+		parsedID, err := strconv.ParseInt(rawID, 10, 64)
+		if err != nil {
+			_, replyErr := m.Reply("❌ <b>Invalid Channel ID!</b> Please provide a valid numeric channel ID or forward a message from the channel.", &telegram.SendOptions{ParseMode: "html"})
+			return replyErr
+		}
+		chatID = parsedID
+	} else {
+		extractedID, ok := extractChannelIDFromMessage(m)
+		if !ok {
+			_, err := m.Reply(fmt.Sprintf(
+				"⚠️ <b>Channel ID Not Found!</b>\n\n"+
+					"You can set the Force Subscribe channel by:\n"+
+					"1. Typing <code>/sub%d</code> inside your channel and forwarding that message here.\n"+
+					"2. Forwarding any post from your channel here and replying with <code>/sub%d</code>.\n"+
+					"3. Providing the numeric Channel ID: <code>/sub%d -1001234567890</code>",
+				slot, slot, slot,
+			), &telegram.SendOptions{ParseMode: "html"})
+			return err
+		}
+		chatID = extractedID
 	}
 
 	title, link, err := p.service.SetChannel(context.Background(), p.appCtx.Client, slot, chatID)
@@ -230,12 +241,21 @@ func (p *Plugin) processSetChannel(m *telegram.NewMessage, slot int) error {
 		return replyErr
 	}
 
+	// Update channel description and report status
+	descErr := p.service.UpdateChannelDescription(p.appCtx.Client, chatID, "")
+	descStatus := ""
+	if descErr != nil {
+		descStatus = "\n<b>📋 Channel Description:</b> ⚠️ <i>Could not update description automatically (ensure bot has 'Change Channel Info' permission)</i>"
+	} else {
+		descStatus = fmt.Sprintf("\n<b>📋 Channel Description:</b> Updated to:\n<i>%s</i>", p.service.GetDefaultChannelDescription())
+	}
+
 	text := fmt.Sprintf(
 		"✅ <b>Force Subscribe Channel %d Successfully Set!</b>\n\n"+
 			"<b>🆔 Chat ID:</b> <code>%d</code>\n"+
 			"<b>📝 Chat Name:</b> <code>%s</code>\n"+
-			"<b>🔗 Invite Link:</b> <a href=\"%s\">Click Here</a>",
-		slot, chatID, title, link,
+			"<b>🔗 Invite Link:</b> <a href=\"%s\">Click Here</a>%s",
+		slot, chatID, title, link, descStatus,
 	)
 
 	_, replyErr := m.Reply(text, &telegram.SendOptions{
@@ -260,19 +280,30 @@ func (p *Plugin) handleSetSecondary3(m *telegram.NewMessage) error {
 
 func (p *Plugin) processSetSecondary(m *telegram.NewMessage, slot int) error {
 	args := strings.Fields(m.Text())
-	if len(args) < 2 {
-		_, err := m.Reply(fmt.Sprintf(
-			"Please provide the Secondary Force Subscribe Channel ID for Channel %d.\n\n<b>Usage:</b> <code>/2sub%d -100123456789</code>",
-			slot, slot,
-		), &telegram.SendOptions{ParseMode: "html"})
-		return err
-	}
+	var chatID int64
 
-	rawID := strings.TrimSpace(args[1])
-	chatID, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil {
-		_, replyErr := m.Reply("❌ <b>Invalid Channel ID!</b> Please provide a valid numeric channel ID.", &telegram.SendOptions{ParseMode: "html"})
-		return replyErr
+	if len(args) >= 2 {
+		rawID := strings.TrimSpace(args[1])
+		parsedID, err := strconv.ParseInt(rawID, 10, 64)
+		if err != nil {
+			_, replyErr := m.Reply("❌ <b>Invalid Channel ID!</b> Please provide a valid numeric channel ID or forward a message from the channel.", &telegram.SendOptions{ParseMode: "html"})
+			return replyErr
+		}
+		chatID = parsedID
+	} else {
+		extractedID, ok := extractChannelIDFromMessage(m)
+		if !ok {
+			_, err := m.Reply(fmt.Sprintf(
+				"⚠️ <b>Channel ID Not Found!</b>\n\n"+
+					"You can set the Secondary Force Subscribe channel by:\n"+
+					"1. Typing <code>/2sub%d</code> inside your channel and forwarding that message here.\n"+
+					"2. Forwarding any post from your channel here and replying with <code>/2sub%d</code>.\n"+
+					"3. Providing the numeric Channel ID: <code>/2sub%d -1001234567890</code>",
+				slot, slot, slot,
+			), &telegram.SendOptions{ParseMode: "html"})
+			return err
+		}
+		chatID = extractedID
 	}
 
 	title, link, err := p.service.SetSecondaryChannel(context.Background(), p.appCtx.Client, slot, chatID)
@@ -284,12 +315,20 @@ func (p *Plugin) processSetSecondary(m *telegram.NewMessage, slot int) error {
 		return replyErr
 	}
 
+	descErr := p.service.UpdateChannelDescription(p.appCtx.Client, chatID, "")
+	descStatus := ""
+	if descErr != nil {
+		descStatus = "\n<b>📋 Channel Description:</b> ⚠️ <i>Could not update description automatically (ensure bot has 'Change Channel Info' permission)</i>"
+	} else {
+		descStatus = fmt.Sprintf("\n<b>📋 Channel Description:</b> Updated to:\n<i>%s</i>", p.service.GetDefaultChannelDescription())
+	}
+
 	text := fmt.Sprintf(
 		"✅ <b>Secondary Force Subscribe Channel %d Set!</b>\n\n"+
-			"🆔 <code>%d</code>\n"+
-			"📛 <code>%s</code>\n"+
-			"🔗 <a href=\"%s\">Invite Link</a>",
-		slot, chatID, title, link,
+			"<b>🆔 Chat ID:</b> <code>%d</code>\n"+
+			"<b>📛 Chat Name:</b> <code>%s</code>\n"+
+			"<b>🔗 Invite Link:</b> <a href=\"%s\">Click Here</a>%s",
+		slot, chatID, title, link, descStatus,
 	)
 
 	_, replyErr := m.Reply(text, &telegram.SendOptions{
@@ -423,4 +462,143 @@ func (p *Plugin) processDelSecondary(m *telegram.NewMessage, slot int) error {
 		ParseMode: "html",
 	})
 	return replyErr
+}
+
+// MessageHandlers registers listeners for forwarded sub commands in DM.
+func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
+	return []plugins.MessageDefinition{
+		{
+			Filter: func(m *telegram.NewMessage) bool {
+				if m == nil || !m.IsPrivate() {
+					return false
+				}
+				if p.appCtx == nil || p.appCtx.Config == nil || !p.appCtx.Config.IsAdmin(m.SenderID()) {
+					return false
+				}
+				// Must be forwarded or have FwdFrom
+				if !m.IsForward() && (m.Message == nil || m.Message.FwdFrom == nil) {
+					return false
+				}
+				text := strings.TrimSpace(m.Text())
+				// If it starts with / or !, command dispatcher handles it; this filter catches plain triggers (e.g. "sub1")
+				if strings.HasPrefix(text, "/") || strings.HasPrefix(text, "!") {
+					return false
+				}
+				_, ok := parseSubTrigger(text)
+				return ok
+			},
+			Handler: p.handleForwardedSubCommand,
+		},
+	}
+}
+
+func (p *Plugin) handleForwardedSubCommand(m *telegram.NewMessage) error {
+	sub, ok := parseSubTrigger(m.Text())
+	if !ok {
+		return nil
+	}
+	if sub.secondary {
+		return p.processSetSecondary(m, sub.slot)
+	}
+	return p.processSetChannel(m, sub.slot)
+}
+
+type subCommandType struct {
+	slot      int
+	secondary bool
+}
+
+func parseSubTrigger(text string) (subCommandType, bool) {
+	text = strings.ToLower(strings.TrimSpace(text))
+	text = strings.TrimPrefix(text, "/")
+	text = strings.TrimPrefix(text, "!")
+	if idx := strings.Index(text, "@"); idx != -1 {
+		text = text[:idx]
+	}
+	text = strings.TrimSpace(text)
+
+	switch text {
+	case "sub1", "set_sub1":
+		return subCommandType{slot: 1, secondary: false}, true
+	case "sub2", "set_sub2":
+		return subCommandType{slot: 2, secondary: false}, true
+	case "sub3", "set_sub3":
+		return subCommandType{slot: 3, secondary: false}, true
+	case "2sub1", "setchat1_2":
+		return subCommandType{slot: 1, secondary: true}, true
+	case "2sub2", "setchat2_2":
+		return subCommandType{slot: 2, secondary: true}, true
+	case "2sub3", "setchat3_2":
+		return subCommandType{slot: 3, secondary: true}, true
+	default:
+		return subCommandType{}, false
+	}
+}
+
+func formatChannelChatID(rawID int64) int64 {
+	if rawID < 0 {
+		return rawID
+	}
+	s := fmt.Sprintf("-100%d", rawID)
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return -rawID
+	}
+	return id
+}
+
+func extractChannelIDFromMessage(m *telegram.NewMessage) (int64, bool) {
+	if m == nil {
+		return 0, false
+	}
+
+	// 1. Check forward headers (from FwdFrom)
+	if m.Message != nil && m.Message.FwdFrom != nil {
+		fwd := m.Message.FwdFrom
+		if peerCh, ok := fwd.FromID.(*telegram.PeerChannel); ok && peerCh.ChannelID != 0 {
+			return formatChannelChatID(peerCh.ChannelID), true
+		}
+		if peerChat, ok := fwd.FromID.(*telegram.PeerChat); ok && peerChat.ChatID != 0 {
+			return -peerChat.ChatID, true
+		}
+		if peerCh, ok := fwd.SavedFromPeer.(*telegram.PeerChannel); ok && peerCh.ChannelID != 0 {
+			return formatChannelChatID(peerCh.ChannelID), true
+		}
+		if peerChat, ok := fwd.SavedFromPeer.(*telegram.PeerChat); ok && peerChat.ChatID != 0 {
+			return -peerChat.ChatID, true
+		}
+		if peerCh, ok := fwd.SavedFromID.(*telegram.PeerChannel); ok && peerCh.ChannelID != 0 {
+			return formatChannelChatID(peerCh.ChannelID), true
+		}
+		if peerChat, ok := fwd.SavedFromID.(*telegram.PeerChat); ok && peerChat.ChatID != 0 {
+			return -peerChat.ChatID, true
+		}
+	}
+
+	// 2. Check SenderChat or Channel if message came directly from or within a channel
+	if m.SenderChat != nil && m.SenderChat.ID != 0 {
+		return formatChannelChatID(m.SenderChat.ID), true
+	}
+	if m.Channel != nil && m.Channel.ID != 0 {
+		return formatChannelChatID(m.Channel.ID), true
+	}
+
+	// 3. If replied to another message, extract from replied message
+	if m.IsReply() {
+		if replyMsg, err := m.GetReplyMessage(); err == nil && replyMsg != nil {
+			if id, ok := extractChannelIDFromMessage(replyMsg); ok {
+				return id, true
+			}
+		}
+	}
+
+	// 4. If executed inside a channel
+	if m.ChannelID() != 0 {
+		return formatChannelChatID(m.ChannelID()), true
+	}
+	if m.IsChannel() && m.ChatID() != 0 {
+		return formatChannelChatID(m.ChatID()), true
+	}
+
+	return 0, false
 }

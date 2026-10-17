@@ -64,6 +64,8 @@ func BuildBotInfoReport(botUser *telegram.UserObj, startTime time.Time) string {
 			"🆔 <b>Bot ID:</b> <code>%d</code>\n"+
 			"📚 <b>Library:</b> <code>Gogram v1.7.71</code>\n"+
 			"💻 <b>Language:</b> <code>%s</code>\n"+
+			"🗄️ <b>Database:</b> <code>MongoDB & SQLite</code>\n"+
+			"🖥️ <b>Bot Server:</b> <code>Telegram MTProto</code>\n"+
 			"⏱️ <b>Uptime:</b> <code>%s</code>\n"+
 			"────────────────────",
 		botName,
@@ -72,6 +74,7 @@ func BuildBotInfoReport(botUser *telegram.UserObj, startTime time.Time) string {
 		goVer,
 		uptime,
 	)
+
 }
 
 // BuildUserInfoReport builds safe user profile details.

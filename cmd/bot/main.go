@@ -10,15 +10,20 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/app"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/logging"
+	"github.com/itsafxal/MYTGBOTZ/plugins/autodelete"
 	"github.com/itsafxal/MYTGBOTZ/plugins/autofilter"
+	"github.com/itsafxal/MYTGBOTZ/plugins/caption"
 	"github.com/itsafxal/MYTGBOTZ/plugins/cmds"
 	"github.com/itsafxal/MYTGBOTZ/plugins/delivery"
 	"github.com/itsafxal/MYTGBOTZ/plugins/fsub"
 	"github.com/itsafxal/MYTGBOTZ/plugins/id"
 	"github.com/itsafxal/MYTGBOTZ/plugins/info"
+	"github.com/itsafxal/MYTGBOTZ/plugins/latest"
 	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
 	"github.com/itsafxal/MYTGBOTZ/plugins/start"
+	streamPlugin "github.com/itsafxal/MYTGBOTZ/plugins/stream"
 )
+
 
 func main() {
 	if err := run(); err != nil {
@@ -66,10 +71,15 @@ func run() error {
 		delivery.New(application.AppContext),
 		autofilter.New(application.AppContext),
 		fsub.New(application.AppContext, application.FSubService),
+		caption.New(application.AppContext),
+		latest.New(application.AppContext),
+		autodelete.New(application.AppContext, application.AutoDeleteService),
+		streamPlugin.New(application.AppContext),
 	)
 	if err != nil {
 		return fmt.Errorf("plugin registration failure: %w", err)
 	}
+
 
 	// 6. Setup signal notification context for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
