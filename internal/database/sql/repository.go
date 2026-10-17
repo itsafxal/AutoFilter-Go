@@ -191,3 +191,12 @@ func (r *MediaRepository) Search(ctx context.Context, keyword string, limit, off
 
 	return records, total, rows.Err()
 }
+
+// UpdateFileRef updates the cached file reference for a media record in the runtime SQLite database.
+func (r *MediaRepository) UpdateFileRef(ctx context.Context, fileID string, fileRef string) error {
+	if r.dbManager == nil || r.dbManager.DB() == nil || fileID == "" || fileRef == "" {
+		return nil
+	}
+	_, err := r.dbManager.DB().ExecContext(ctx, "UPDATE media SET file_ref = ? WHERE file_id = ?", fileRef, fileID)
+	return err
+}

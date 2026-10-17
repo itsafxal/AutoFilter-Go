@@ -68,6 +68,13 @@ func (s *Server) SetDownloader(d TelegramDownloader) {
 	}
 }
 
+// SetRefresher updates the on-demand file reference refresher.
+func (s *Server) SetRefresher(r FileRefRefresher) {
+	if s.handler != nil {
+		s.handler.SetRefresher(r)
+	}
+}
+
 // Handler returns the HTTP handler for testing.
 func (s *Server) Handler() http.Handler {
 	return s.httpServer.Handler

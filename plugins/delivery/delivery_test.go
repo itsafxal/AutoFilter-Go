@@ -58,6 +58,12 @@ func (m *mockDeliveryService) SetSender(sender deliveryCore.TelegramSender) {}
 
 func (m *mockDeliveryService) SetCaptionFormatter(cf deliveryCore.CaptionFormatter) {}
 
+func (m *mockDeliveryService) SetAdminConfig(ownerID int64, admins []int64) {}
+
+func (m *mockDeliveryService) RefreshFileRef(ctx context.Context, fileID string) (any, error) {
+	return nil, nil
+}
+
 
 func TestDeliveryPlugin_Metadata(t *testing.T) {
 	appCtx := &plugins.AppContext{}

@@ -155,6 +155,9 @@ func (a *App) InitBot() error {
 	}
 	if a.DeliveryService != nil {
 		a.DeliveryService.SetSender(a.BotService.Client())
+		if a.Config != nil {
+			a.DeliveryService.SetAdminConfig(a.Config.OwnerID, a.Config.Admins)
+		}
 	}
 	if a.AutoDeleteService != nil {
 		_ = a.AutoDeleteService.Init(context.Background(), a.BotService.Client())
@@ -162,6 +165,9 @@ func (a *App) InitBot() error {
 	}
 	if a.StreamService != nil {
 		if srv, ok := a.StreamService.(*stream.Server); ok {
+			if a.DeliveryService != nil {
+				srv.SetRefresher(a.DeliveryService)
+			}
 			if a.Config != nil && a.Config.StreamBotToken != "" {
 				// Dedicated bot client for media download streaming
 				streamClient, sErr := gogram.NewClient(gogram.ClientConfig{

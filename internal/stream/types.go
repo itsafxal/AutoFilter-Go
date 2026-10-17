@@ -20,6 +20,11 @@ type TelegramDownloader interface {
 	DownloadChunk(media any, start int, end int, chunkSize int) ([]byte, string, error)
 }
 
+// FileRefRefresher defines an on-demand refresher for expired Telegram file references.
+type FileRefRefresher interface {
+	RefreshFileRef(ctx context.Context, fileID string) (any, error)
+}
+
 // Config defines settings for the stream and download server.
 type Config struct {
 	BaseURL     string

@@ -94,6 +94,7 @@ func parseRangeHeader(header string, size int64) (start, end int64, hasRange boo
 type Handler struct {
 	mediaProvider MediaProvider
 	downloader    TelegramDownloader
+	refresher     FileRefRefresher
 	config        Config
 	logger        *slog.Logger
 	startTime     time.Time
@@ -116,6 +117,11 @@ func NewHandler(provider MediaProvider, downloader TelegramDownloader, cfg Confi
 // SetDownloader updates the Telegram downloader client.
 func (h *Handler) SetDownloader(d TelegramDownloader) {
 	h.downloader = d
+}
+
+// SetRefresher updates the on-demand file reference refresher.
+func (h *Handler) SetRefresher(r FileRefRefresher) {
+	h.refresher = r
 }
 
 // HandleHealthz responds with service health status.
@@ -359,12 +365,22 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 			if ctx.Err() != nil {
 				return
 			}
-			h.logger.Warn("stream chunk download error from telegram",
-				"file_id", fileID,
-				"offset", alignedOffset,
-				"error", err,
-			)
-			return
+			// Automatic on-demand refresh if Telegram file reference expired
+			if isFileRefExpired(err) && h.refresher != nil {
+				h.logger.Info("file reference expired, attempting on-demand refresh...", "file_id", fileID)
+				if refreshed, rErr := h.refresher.RefreshFileRef(ctx, fileID); rErr == nil && refreshed != nil {
+					mediaToDownload = refreshed
+					data, _, err = h.downloader.DownloadChunk(mediaToDownload, int(alignedOffset), int(alignedEnd), chunkSize)
+				}
+			}
+			if err != nil {
+				h.logger.Warn("stream chunk download error from telegram",
+					"file_id", fileID,
+					"offset", alignedOffset,
+					"error", err,
+				)
+				return
+			}
 		}
 
 		if len(data) == 0 {
@@ -395,4 +411,13 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 
 		offset = reqEnd
 	}
+}
+
+// isFileRefExpired checks if the error indicates that Telegram's cryptographic file reference has expired.
+func isFileRefExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "FILE_REFERENCE_EXPIRED") || strings.Contains(msg, "FILE_REFERENCE_INVALID")
 }

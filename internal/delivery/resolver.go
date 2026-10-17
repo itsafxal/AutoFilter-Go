@@ -6,9 +6,35 @@ import (
 	"encoding/binary"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
+
+var (
+	// FileRefCache stores fresh Telegram FileReference bytes keyed by file_id.
+	FileRefCache sync.Map
+)
+
+// StoreFreshFileRef caches a fresh Telegram file reference byte slice for a file_id.
+func StoreFreshFileRef(fileID string, ref []byte) {
+	if fileID != "" && len(ref) > 0 {
+		FileRefCache.Store(fileID, ref)
+	}
+}
+
+// GetFreshFileRef retrieves a cached fresh Telegram file reference byte slice for a file_id.
+func GetFreshFileRef(fileID string) ([]byte, bool) {
+	if fileID == "" {
+		return nil, false
+	}
+	if val, ok := FileRefCache.Load(fileID); ok {
+		if ref, ok := val.([]byte); ok && len(ref) > 0 {
+			return ref, true
+		}
+	}
+	return nil, false
+}
 
 const (
 	webLocationFlag   = 1 << 24
@@ -278,11 +304,16 @@ func ResolveDownloadMedia(fileID string, fileRefStr string, fileName string, fil
 		return nil, err
 	}
 
-	// Determine file reference
-	fileRef := parsed.FileReference
-	if len(fileRef) == 0 && strings.TrimSpace(fileRefStr) != "" {
-		if refBytes, err := decodeBase64FileID(fileRefStr); err == nil {
-			fileRef = refBytes
+	// Determine file reference, prioritizing fresh in-memory cache
+	var fileRef []byte
+	if cachedRef, ok := GetFreshFileRef(fileID); ok && len(cachedRef) > 0 {
+		fileRef = cachedRef
+	} else {
+		fileRef = parsed.FileReference
+		if len(fileRef) == 0 && strings.TrimSpace(fileRefStr) != "" {
+			if refBytes, err := decodeBase64FileID(fileRefStr); err == nil {
+				fileRef = refBytes
+			}
 		}
 	}
 

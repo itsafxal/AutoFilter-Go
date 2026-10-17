@@ -200,3 +200,14 @@ func (m *DatabaseManager) SQLManager() *sql.DBManager {
 	defer m.mu.RUnlock()
 	return m.sqlManager
 }
+
+// UpdateMediaFileRef updates the cached file reference for a media record in the runtime SQLite database.
+func (m *DatabaseManager) UpdateMediaFileRef(ctx context.Context, fileID string, fileRef string) error {
+	m.mu.RLock()
+	repo := m.sqlMediaRepo
+	m.mu.RUnlock()
+	if repo != nil {
+		return repo.UpdateFileRef(ctx, fileID, fileRef)
+	}
+	return nil
+}

@@ -2,6 +2,8 @@ package delivery
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -40,6 +42,12 @@ type MediaDeliveryService interface {
 
 	// SetCaptionFormatter assigns the dynamic caption formatter.
 	SetCaptionFormatter(cf CaptionFormatter)
+
+	// SetAdminConfig configures administrative targets for operations like file reference refreshing.
+	SetAdminConfig(ownerID int64, admins []int64)
+
+	// RefreshFileRef re-fetches a fresh Telegram file reference by sending the media silently and immediately deleting it.
+	RefreshFileRef(ctx context.Context, fileID string) (any, error)
 }
 
 // Service implements MediaDeliveryService.
@@ -47,11 +55,13 @@ type Service struct {
 	db               *database.DatabaseManager
 	sender           TelegramSender
 	senderMu         sync.RWMutex
-	logger           *slog.Logger
+	logger             *slog.Logger
 	inFlight           *InFlightTracker
 	captionFormatter   CaptionFormatter
 	streamURL          string
 	enableFastDownload bool
+	ownerID            int64
+	admins             []int64
 }
 
 // NewService constructs a new media delivery service.
@@ -83,6 +93,12 @@ func (s *Service) SetCaptionFormatter(cf CaptionFormatter) {
 func (s *Service) SetStreamConfig(streamURL string, enableFastDownload bool) {
 	s.streamURL = strings.TrimRight(strings.TrimSpace(streamURL), "/")
 	s.enableFastDownload = enableFastDownload
+}
+
+// SetAdminConfig configures administrative targets for operations like file reference refreshing.
+func (s *Service) SetAdminConfig(ownerID int64, admins []int64) {
+	s.ownerID = ownerID
+	s.admins = admins
 }
 
 
@@ -381,6 +397,29 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	var sentMsgID int64
 	if sentMsg != nil {
 		sentMsgID = int64(sentMsg.ID)
+
+		// Persist fresh Telegram file reference returned by Telegram
+		if sentMsg.Message != nil && sentMsg.Message.Media != nil {
+			var freshRef []byte
+			switch m := sentMsg.Message.Media.(type) {
+			case *telegram.MessageMediaDocument:
+				if doc, ok := m.Document.(*telegram.DocumentObj); ok && len(doc.FileReference) > 0 {
+					freshRef = doc.FileReference
+				}
+			case *telegram.MessageMediaPhoto:
+				if photo, ok := m.Photo.(*telegram.PhotoObj); ok && len(photo.FileReference) > 0 {
+					freshRef = photo.FileReference
+				}
+			}
+
+			if len(freshRef) > 0 {
+				StoreFreshFileRef(rec.FileID, freshRef)
+				if s.db != nil {
+					encodedRef := base64.RawURLEncoding.EncodeToString(freshRef)
+					_ = s.db.UpdateMediaFileRef(context.Background(), rec.FileID, encodedRef)
+				}
+			}
+		}
 	}
 	s.logger.Info("telegram media delivery succeeded",
 		"chat_id", chatID,
@@ -477,4 +516,74 @@ func isBadMediaRequest(err error) bool {
 		strings.Contains(desc, "media_invalid") ||
 		strings.Contains(desc, "file_id_invalid") ||
 		strings.Contains(desc, "fileref_")
+}
+
+// RefreshFileRef re-fetches a fresh Telegram file reference by sending the media silently to the owner/admin chat and immediately deleting it.
+func (s *Service) RefreshFileRef(ctx context.Context, fileID string) (any, error) {
+	rec, err := s.GetMedia(ctx, fileID)
+	if err != nil || rec == nil {
+		return nil, fmt.Errorf("media not found: %w", err)
+	}
+
+	sender := s.getSender()
+	if sender == nil {
+		return nil, errors.New("sender not available")
+	}
+
+	var targetChat int64
+	if s.ownerID != 0 {
+		targetChat = s.ownerID
+	} else if len(s.admins) > 0 {
+		targetChat = s.admins[0]
+	}
+	if targetChat == 0 {
+		return nil, errors.New("no admin or owner chat configured for file reference refresh")
+	}
+
+	mediaToSend, err := ResolveInputMedia(rec.FileID, rec.FileRef)
+	if err != nil {
+		return nil, err
+	}
+
+	// Send silently to owner/admin
+	sentMsg, sErr := sender.SendMedia(targetChat, mediaToSend, &telegram.MediaOptions{
+		Silent: true,
+	})
+	if sErr != nil || sentMsg == nil {
+		return nil, sErr
+	}
+
+	// Immediately delete so admin is never disturbed
+	defer func() {
+		_, _ = sentMsg.Delete()
+	}()
+
+	var freshRef []byte
+	if sentMsg.Message != nil && sentMsg.Message.Media != nil {
+		switch m := sentMsg.Message.Media.(type) {
+		case *telegram.MessageMediaDocument:
+			if doc, ok := m.Document.(*telegram.DocumentObj); ok && len(doc.FileReference) > 0 {
+				freshRef = doc.FileReference
+			}
+		case *telegram.MessageMediaPhoto:
+			if photo, ok := m.Photo.(*telegram.PhotoObj); ok && len(photo.FileReference) > 0 {
+				freshRef = photo.FileReference
+			}
+		}
+	}
+
+	if len(freshRef) > 0 {
+		StoreFreshFileRef(rec.FileID, freshRef)
+		if s.db != nil {
+			encodedRef := base64.RawURLEncoding.EncodeToString(freshRef)
+			_ = s.db.UpdateMediaFileRef(ctx, rec.FileID, encodedRef)
+		}
+		fileName := rec.FileName
+		if fileName == "" {
+			fileName = "file_" + fileID
+		}
+		return ResolveDownloadMedia(rec.FileID, base64.RawURLEncoding.EncodeToString(freshRef), fileName, rec.FileSize, rec.MimeType)
+	}
+
+	return nil, errors.New("failed to extract file reference from sent message")
 }

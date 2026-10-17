@@ -183,15 +183,24 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
-		if replyErr != nil && p.appCtx.Logger != nil {
-			p.appCtx.Logger.Error("failed to send search results reply", "query", query, "error", replyErr)
+		if replyErr != nil {
+			if isIgnorableChatError(replyErr) {
+				if p.appCtx.Logger != nil {
+					p.appCtx.Logger.Debug("cannot send search reply in chat without permissions", "chat_id", m.ChatID(), "error", replyErr)
+				}
+				return nil
+			}
+			if p.appCtx.Logger != nil {
+				p.appCtx.Logger.Error("failed to send search results reply", "query", query, "error", replyErr)
+			}
+			return replyErr
 		} else if p.appCtx.Logger != nil {
 			p.appCtx.Logger.Info("search results reply sent", "query", query, "results_count", len(result.Files))
 		}
-		if replyErr == nil && replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+		if replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
 			_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
 		}
-		return replyErr
+		return nil
 	}
 
 	// If no results, try to fetch spelling suggestions
@@ -212,15 +221,24 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
-		if replyErr != nil && p.appCtx.Logger != nil {
-			p.appCtx.Logger.Error("failed to send suggestions reply", "query", query, "error", replyErr)
+		if replyErr != nil {
+			if isIgnorableChatError(replyErr) {
+				if p.appCtx.Logger != nil {
+					p.appCtx.Logger.Debug("cannot send suggestions in chat without permissions", "chat_id", m.ChatID(), "error", replyErr)
+				}
+				return nil
+			}
+			if p.appCtx.Logger != nil {
+				p.appCtx.Logger.Error("failed to send suggestions reply", "query", query, "error", replyErr)
+			}
+			return replyErr
 		} else if p.appCtx.Logger != nil {
 			p.appCtx.Logger.Info("spelling suggestions reply sent", "query", query, "suggestions_count", len(suggestions))
 		}
-		if replyErr == nil && replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+		if replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
 			_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
 		}
-		return replyErr
+		return nil
 	}
 
 	// No results and no suggestions found
@@ -231,15 +249,37 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 	replyMsg, replyErr := m.Reply(notFoundText, &telegram.SendOptions{
 		ParseMode: "html",
 	})
-	if replyErr != nil && p.appCtx.Logger != nil {
-		p.appCtx.Logger.Error("failed to send not-found reply", "query", query, "error", replyErr)
+	if replyErr != nil {
+		if isIgnorableChatError(replyErr) {
+			if p.appCtx.Logger != nil {
+				p.appCtx.Logger.Debug("cannot send not-found reply in chat without permissions", "chat_id", m.ChatID(), "error", replyErr)
+			}
+			return nil
+		}
+		if p.appCtx.Logger != nil {
+			p.appCtx.Logger.Error("failed to send not-found reply", "query", query, "error", replyErr)
+		}
+		return replyErr
 	} else if p.appCtx.Logger != nil {
 		p.appCtx.Logger.Info("not-found reply sent", "query", query)
 	}
-	if replyErr == nil && replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+	if replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
 		_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
 	}
-	return replyErr
+	return nil
+}
+
+func isIgnorableChatError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "CHAT_ADMIN_REQUIRED") ||
+		strings.Contains(msg, "CHAT_WRITE_FORBIDDEN") ||
+		strings.Contains(msg, "USER_BANNED_IN_CHANNEL") ||
+		strings.Contains(msg, "INPUT_USER_DEACTIVATED") ||
+		strings.Contains(msg, "BOT_METHOD_INVALID") ||
+		strings.Contains(msg, "PEER_ID_INVALID")
 }
 
 // HandlePaginationCallback processes next/back navigation buttons.
