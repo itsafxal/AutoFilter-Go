@@ -449,3 +449,46 @@ func TestDelivery_OptionalLegacyBSONFields(t *testing.T) {
 		t.Errorf("expected empty Size, got %q", doc.Size)
 	}
 }
+
+func TestUnpackRealFileID(t *testing.T) {
+	fileIDs := []string{
+		"BQADBQADUSMAAh2okFbVi5c8UqF9IhYE",
+		"BQADBQADUYMAAk5vkVaZsqm_4ZRrBRYE",
+	}
+
+	for _, fid := range fileIDs {
+		parsed, err := UnpackFileID(fid)
+		if err != nil {
+			t.Fatalf("UnpackFileID failed for %s: %v", fid, err)
+		}
+		t.Logf("Unpacked %s: MediaID=%d, AccessHash=%d, FileType=%d, DCID=%d",
+			fid, parsed.MediaID, parsed.AccessHash, parsed.FileType, parsed.DCID)
+
+		if parsed.MediaID == 0 || parsed.AccessHash == 0 {
+			t.Errorf("expected non-zero MediaID and AccessHash, got MediaID=%d, AccessHash=%d", parsed.MediaID, parsed.AccessHash)
+		}
+
+		inputMedia, err := ResolveInputMedia(fid, "")
+		if err != nil {
+			t.Fatalf("ResolveInputMedia failed for %s: %v", fid, err)
+		}
+		if inputMedia == nil {
+			t.Fatalf("expected non-nil InputMedia for %s", fid)
+		}
+		docMedia, ok := inputMedia.(*telegram.InputMediaDocument)
+		if !ok {
+			t.Fatalf("expected *telegram.InputMediaDocument, got %T", inputMedia)
+		}
+		docObj, ok := docMedia.ID.(*telegram.InputDocumentObj)
+		if !ok {
+			t.Fatalf("expected *telegram.InputDocumentObj, got %T", docMedia.ID)
+		}
+		if docObj.ID != parsed.MediaID {
+			t.Errorf("expected docObj.ID == %d, got %d", parsed.MediaID, docObj.ID)
+		}
+		if docObj.AccessHash != parsed.AccessHash {
+			t.Errorf("expected docObj.AccessHash == %d, got %d", parsed.AccessHash, docObj.AccessHash)
+		}
+	}
+}
+

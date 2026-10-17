@@ -236,9 +236,11 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 
 	mediaType := strings.ToLower(strings.TrimSpace(rec.FileType))
 
-	// Resolve the media reference via Gogram's ResolveBotFileID if possible
+	// Resolve the media reference via our comprehensive unpacker or Gogram's ResolveBotFileID
 	var mediaToSend any = rec.FileID
-	if resolved, err := telegram.ResolveBotFileID(rec.FileID); err == nil && resolved != nil {
+	if resolvedMedia, err := ResolveInputMedia(rec.FileID, rec.FileRef); err == nil && resolvedMedia != nil {
+		mediaToSend = resolvedMedia
+	} else if resolved, err := telegram.ResolveBotFileID(rec.FileID); err == nil && resolved != nil {
 		mediaToSend = resolved
 	}
 
