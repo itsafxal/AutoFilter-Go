@@ -41,5 +41,6 @@ type StreamService interface {
 	GetStreamURL(fileID string, fileName string) string
 	GetDownloadURL(fileID string, fileName string) string
 	GetWatchURL(fileID string) string
+	GetPlaylistURL(fileID string, fileName string) string
 	Handler() http.Handler
 }

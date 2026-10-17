@@ -109,6 +109,7 @@ func (p *Plugin) HandleStreamCommand(m *telegram.NewMessage) error {
 	streamURL := p.appCtx.Stream.GetStreamURL(fileID, fileName)
 	downloadURL := p.appCtx.Stream.GetDownloadURL(fileID, fileName)
 	watchURL := p.appCtx.Stream.GetWatchURL(fileID)
+	playlistURL := p.appCtx.Stream.GetPlaylistURL(fileID, fileName)
 
 	text := fmt.Sprintf(
 		"🎬 <b><u>Fast Stream & Download Links</u></b>\n\n"+
@@ -120,25 +121,30 @@ func (p *Plugin) HandleStreamCommand(m *telegram.NewMessage) error {
 			"<a href=\"%s\">🚀 Click to Download (High Speed)</a>\n\n"+
 			"🌐 <b>Web Player:</b>\n"+
 			"<a href=\"%s\">💻 Open Web Player & Controls</a>\n\n"+
+			"🟧 <b>VLC Playlist (.m3u):</b>\n"+
+			"<a href=\"%s\">▶️ Open Directly in VLC Player</a>\n\n"+
 			"ℹ️ <i>Stream link can be played directly in Chrome, VLC, or MX Player!</i>",
 		commands.EscapeHTML(fileName),
 		sizeStr,
 		streamURL,
 		downloadURL,
 		watchURL,
+		playlistURL,
 	)
 
 	var replyMarkup *telegram.ReplyInlineMarkup
 	if commands.IsValidTelegramButtonURL(watchURL) && commands.IsValidTelegramButtonURL(downloadURL) {
-		replyMarkup = telegram.NewKeyboard().
+		kb := telegram.NewKeyboard().
 			AddRow(
 				telegram.Button.URL("📺 Watch Online", watchURL),
 				telegram.Button.URL("⚡ Fast Download", downloadURL),
-			).
-			AddRow(
-				telegram.Button.URL("🌐 Web Player", watchURL),
-			).
-			Build()
+			)
+		if commands.IsValidTelegramButtonURL(playlistURL) {
+			kb.AddRow(
+				telegram.Button.URL("🟧 Stream in VLC (.m3u)", playlistURL),
+			)
+		}
+		replyMarkup = kb.Build()
 	}
 
 	sentMsg, err := m.Reply(text, &telegram.SendOptions{
@@ -195,6 +201,7 @@ func (p *Plugin) HandleStreamLinksCallback(cb *telegram.CallbackQuery) error {
 	streamURL := p.appCtx.Stream.GetStreamURL(fileID, fileName)
 	downloadURL := p.appCtx.Stream.GetDownloadURL(fileID, fileName)
 	watchURL := p.appCtx.Stream.GetWatchURL(fileID)
+	playlistURL := p.appCtx.Stream.GetPlaylistURL(fileID, fileName)
 
 	text := fmt.Sprintf(
 		"🎬 <b><u>Fast Stream & Download Links</u></b>\n\n"+
@@ -202,22 +209,29 @@ func (p *Plugin) HandleStreamLinksCallback(cb *telegram.CallbackQuery) error {
 			"📦 <b>Size:</b> <code>%s</code>\n\n"+
 			"📺 <b>Online Stream:</b> <a href=\"%s\">Stream Now</a>\n"+
 			"⚡ <b>Fast Download:</b> <a href=\"%s\">Download Now</a>\n"+
-			"🌐 <b>Web Player:</b> <a href=\"%s\">Open Web Player</a>",
+			"🌐 <b>Web Player:</b> <a href=\"%s\">Open Web Player</a>\n"+
+			"🟧 <b>VLC Playlist:</b> <a href=\"%s\">Play in VLC (.m3u)</a>",
 		commands.EscapeHTML(fileName),
 		sizeStr,
 		streamURL,
 		downloadURL,
 		watchURL,
+		playlistURL,
 	)
 
 	var replyMarkup *telegram.ReplyInlineMarkup
 	if commands.IsValidTelegramButtonURL(watchURL) && commands.IsValidTelegramButtonURL(downloadURL) {
-		replyMarkup = telegram.NewKeyboard().
+		kb := telegram.NewKeyboard().
 			AddRow(
 				telegram.Button.URL("📺 Stream / Watch", watchURL),
 				telegram.Button.URL("⚡ Fast Download", downloadURL),
-			).
-			Build()
+			)
+		if commands.IsValidTelegramButtonURL(playlistURL) {
+			kb.AddRow(
+				telegram.Button.URL("🟧 Stream in VLC (.m3u)", playlistURL),
+			)
+		}
+		replyMarkup = kb.Build()
 	}
 
 	// Send links to the user in chat

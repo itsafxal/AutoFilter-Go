@@ -13,15 +13,18 @@ type PageData struct {
 	FileSizeRaw   int64
 	MimeType      string
 	FileType      string
-	IsVideo       bool
-	IsAudio       bool
-	StreamURL     string
-	DownloadURL   string
-	WatchURL      string
-	BotUsername   string
-	VLCUrl        string
-	MXPlayerUrl   string
-	PlayItUrl     string
+	IsVideo           bool
+	IsAudio           bool
+	IsMKV             bool
+	IsBrowserPlayable bool
+	StreamURL         string
+	DownloadURL       string
+	WatchURL          string
+	PlaylistURL       string
+	BotUsername       string
+	VLCUrl            string
+	MXPlayerUrl       string
+	PlayItUrl         string
 }
 
 const watchTemplateHTML = `<!DOCTYPE html>
@@ -372,6 +375,108 @@ const watchTemplateHTML = `<!DOCTYPE html>
             transform: translateY(-1px);
         }
 
+        .player-btn-primary {
+            background: rgba(249, 115, 22, 0.15) !important;
+            border-color: rgba(249, 115, 22, 0.45) !important;
+            color: #fb923c !important;
+        }
+
+        .player-btn-primary:hover {
+            background: rgba(249, 115, 22, 0.28) !important;
+            box-shadow: 0 4px 16px rgba(249, 115, 22, 0.35);
+        }
+
+        .format-banner {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px 20px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(234, 88, 12, 0.16) 0%, rgba(245, 158, 11, 0.1) 100%);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        .format-banner.show-banner {
+            display: flex;
+        }
+
+        .format-banner.error-state {
+            display: flex;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.18) 0%, rgba(220, 38, 38, 0.1) 100%);
+            border-color: rgba(239, 68, 68, 0.45);
+        }
+
+        .banner-icon {
+            font-size: 28px;
+            flex-shrink: 0;
+        }
+
+        .banner-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .banner-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #fbbf24;
+        }
+
+        .format-banner.error-state .banner-title {
+            color: #f87171;
+        }
+
+        .banner-text {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .banner-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        .banner-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .banner-btn.vlc-btn {
+            background: #f97316;
+            color: #ffffff;
+            box-shadow: 0 4px 14px rgba(249, 115, 22, 0.4);
+        }
+
+        .banner-btn.vlc-btn:hover {
+            background: #ea580c;
+            transform: translateY(-1px);
+        }
+
+        .banner-btn.copy-btn {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            border: 1px solid var(--border-glass);
+        }
+
+        .banner-btn.copy-btn:hover {
+            background: rgba(255, 255, 255, 0.18);
+        }
+
         /* Direct link copy boxes */
         .url-box {
             display: flex;
@@ -483,10 +588,30 @@ const watchTemplateHTML = `<!DOCTYPE html>
         <section class="player-card">
             {{ if .IsVideo }}
             <div class="media-wrapper">
-                <video id="videoPlayer" controls preload="metadata" playsinline>
-                    <source src="{{ .StreamURL }}" type="{{ .MimeType }}">
-                    Your browser does not support HTML5 video streaming. Please use the Fast Download button below.
+                <video id="videoPlayer" controls preload="metadata" playsinline src="{{ .StreamURL }}">
+                    <source src="{{ .StreamURL }}" {{ if not .IsMKV }}type="{{ .MimeType }}"{{ end }}>
+                    Your browser does not support HTML5 video streaming. Please use the Fast Download or VLC buttons below.
                 </video>
+            </div>
+            <div class="format-banner {{ if .IsMKV }}show-banner{{ end }}" id="formatBanner" style="margin: 16px 20px 20px;">
+                <div class="banner-icon">💡</div>
+                <div class="banner-content">
+                    <div class="banner-title" id="bannerTitle">
+                        {{ if .IsMKV }}MKV / 10-Bit Container Detected{{ else }}External Player Recommended{{ end }}
+                    </div>
+                    <p class="banner-text" id="bannerText">
+                        Web browsers lack native decoders for 10-bit MKV video & multi-channel AAC audio.
+                        Click <b>Stream in VLC</b> for instant 1080p playback, or use <b>Fast Direct Download</b>.
+                    </p>
+                </div>
+                <div class="banner-actions">
+                    <a href="{{ .PlaylistURL }}" class="banner-btn vlc-btn">
+                        <span>🟧</span> Stream in VLC (.m3u)
+                    </a>
+                    <button class="banner-btn copy-btn" onclick="copyVLCCommand('{{ .StreamURL }}')">
+                        <span>📋</span> Copy VLC Link
+                    </button>
+                </div>
             </div>
             {{ else if .IsAudio }}
             <div class="audio-wrapper">
@@ -547,8 +672,14 @@ const watchTemplateHTML = `<!DOCTYPE html>
         <section class="external-players-section">
             <div class="section-title">Play in External App</div>
             <div class="players-grid">
+                <a href="{{ .PlaylistURL }}" class="player-btn player-btn-primary">
+                    <span>🟧</span> VLC Media Player (.m3u)
+                </a>
+                <button class="player-btn" onclick="copyVLCCommand('{{ .StreamURL }}')">
+                    <span>📋</span> Copy Stream Link (Ctrl+N)
+                </button>
                 <a href="{{ .VLCUrl }}" class="player-btn">
-                    <span>🟧</span> VLC Media Player
+                    <span>📱</span> VLC Mobile
                 </a>
                 <a href="{{ .MXPlayerUrl }}" class="player-btn">
                     <span>▶️</span> MX Player (Android)
@@ -616,9 +747,24 @@ const watchTemplateHTML = `<!DOCTYPE html>
             showToast(msg);
         }
 
-        // Keyboard navigation for video player
+        function copyVLCCommand(url) {
+            copyToClipboard(url, 'Stream link copied! Open VLC -> Press Ctrl+N -> Paste & Stream!');
+        }
+
+        // Video Player handling and Error Detection
         const video = document.getElementById('videoPlayer');
+        const banner = document.getElementById('formatBanner');
+
         if (video) {
+            video.addEventListener('error', function() {
+                if (banner) {
+                    banner.classList.add('error-state', 'show-banner');
+                    const title = document.getElementById('bannerTitle');
+                    if (title) title.innerText = 'Browser Cannot Decode This Video Format';
+                    const text = document.getElementById('bannerText');
+                    if (text) text.innerText = 'This browser does not support decoding this video container or codec. Click Stream in VLC or Fast Direct Download!';
+                }
+            });
             document.addEventListener('keydown', (e) => {
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
                 switch (e.key) {

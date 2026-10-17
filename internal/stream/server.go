@@ -39,6 +39,8 @@ func NewServer(cfg Config, provider MediaProvider, downloader TelegramDownloader
 	mux.HandleFunc("/watch/", h.HandleWatch)
 	mux.HandleFunc("/stream/", h.HandleStream)
 	mux.HandleFunc("/dl/", h.HandleDownload)
+	mux.HandleFunc("/playlist/", h.HandlePlaylist)
+	mux.HandleFunc("/m3u/", h.HandlePlaylist)
 	mux.HandleFunc("/", h.HandleRoot)
 
 	srv := &Server{
@@ -161,4 +163,13 @@ func (s *Server) GetDownloadURL(fileID string, fileName string) string {
 // GetWatchURL returns the web video player & details page URL.
 func (s *Server) GetWatchURL(fileID string) string {
 	return fmt.Sprintf("%s/watch/%s", s.config.BaseURL, fileID)
+}
+
+// GetPlaylistURL returns the .m3u external media player playlist URL.
+func (s *Server) GetPlaylistURL(fileID string, fileName string) string {
+	encoded := url.PathEscape(fileName)
+	if encoded == "" {
+		return fmt.Sprintf("%s/playlist/%s/playlist.m3u", s.config.BaseURL, fileID)
+	}
+	return fmt.Sprintf("%s/playlist/%s/%s.m3u", s.config.BaseURL, fileID, encoded)
 }

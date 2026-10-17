@@ -151,6 +151,14 @@ func setupTestServer() (*Server, []byte) {
 				MimeType:  "video/mp4",
 				Size:      "2.0 KB",
 			},
+			"valid_mkv": {
+				FileID:    "valid_mkv",
+				FileName:  "Kurup 2021 Malayalam 1080p 10bit NF WEBDL AAC 5 1 @MNTGX.mkv",
+				FileSize:  int64(len(testBytes)),
+				FileType:  "document",
+				MimeType:  "video/x-matroska",
+				Size:      "1.77 GB",
+			},
 			"valid_doc": {
 				FileID:    "valid_doc",
 				FileName:  "document.pdf",
@@ -334,5 +342,78 @@ func TestServerURLs(t *testing.T) {
 	watchURL := srv.GetWatchURL("file123")
 	if watchURL != "http://localhost:8080/watch/file123" {
 		t.Errorf("unexpected WatchURL: %s", watchURL)
+	}
+
+	playlistURL := srv.GetPlaylistURL("file123", "Iron Man.mp4")
+	if playlistURL != "http://localhost:8080/playlist/file123/Iron%20Man.mp4.m3u" {
+		t.Errorf("unexpected PlaylistURL: %s", playlistURL)
+	}
+}
+
+func TestHandleWatch_MKV(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/watch/valid_mkv", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Kurup 2021") {
+		t.Errorf("expected watch page to include Kurup title, got: %s", body)
+	}
+	if !strings.Contains(body, "MKV / 10-Bit Container Detected") {
+		t.Errorf("expected watch page to include MKV format banner")
+	}
+	if !strings.Contains(body, "Stream in VLC (.m3u)") {
+		t.Errorf("expected watch page to include VLC playlist button")
+	}
+}
+
+func TestHandlePlaylist(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/playlist/valid_mkv/Kurup.m3u", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "audio/x-mpegurl; charset=utf-8" {
+		t.Errorf("unexpected Content-Type: %s", rec.Header().Get("Content-Type"))
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("expected CORS header on playlist endpoint")
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "#EXTM3U") {
+		t.Errorf("expected #EXTM3U header in playlist, got: %s", body)
+	}
+	if !strings.Contains(body, "Kurup 2021") {
+		t.Errorf("expected movie title in playlist, got: %s", body)
+	}
+	if !strings.Contains(body, "/stream/valid_mkv/") {
+		t.Errorf("expected stream URL in playlist, got: %s", body)
+	}
+}
+
+func TestHandleStream_OPTIONS_CORS(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	req := httptest.NewRequest(http.MethodOptions, "/stream/valid_video/Avengers.mp4", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for OPTIONS preflight, got %d", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("expected Access-Control-Allow-Origin header")
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Allow-Methods"), "GET") {
+		t.Error("expected GET in Access-Control-Allow-Methods")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -202,31 +203,39 @@ func (h *Handler) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	isVideo := IsVideoType(fileName, mimeType, rec.FileType)
 	isAudio := IsAudioType(fileName, mimeType, rec.FileType)
 
+	ext := strings.ToLower(filepath.Ext(fileName))
+	isMKV := ext == ".mkv"
+	isBrowserPlayable := isVideo && (ext == ".mp4" || ext == ".webm" || ext == ".ogg" || ext == ".mov")
+
 	encodedFileName := url.PathEscape(fileName)
 	streamURL := fmt.Sprintf("%s/stream/%s/%s", h.config.BaseURL, fileID, encodedFileName)
 	downloadURL := fmt.Sprintf("%s/dl/%s/%s", h.config.BaseURL, fileID, encodedFileName)
 	watchURL := fmt.Sprintf("%s/watch/%s", h.config.BaseURL, fileID)
+	playlistURL := fmt.Sprintf("%s/playlist/%s/%s.m3u", h.config.BaseURL, fileID, encodedFileName)
 
 	vlcURL := fmt.Sprintf("vlc://%s", streamURL)
 	mxPlayerURL := fmt.Sprintf("intent:%s#Intent;package=com.mxtech.videoplayer.ad;type=%s;end", streamURL, mimeType)
 	playItURL := fmt.Sprintf("playit://playit.app/video?url=%s", url.QueryEscape(streamURL))
 
 	pageData := PageData{
-		Title:       fileName + " - Fast Stream & Download",
-		FileName:    fileName,
-		FileSizeStr: sizeStr,
-		FileSizeRaw: rec.FileSize,
-		MimeType:    mimeType,
-		FileType:    strings.ToUpper(rec.FileType),
-		IsVideo:     isVideo,
-		IsAudio:     isAudio,
-		StreamURL:   streamURL,
-		DownloadURL: downloadURL,
-		WatchURL:    watchURL,
-		BotUsername: h.config.BotUsername,
-		VLCUrl:      vlcURL,
-		MXPlayerUrl: mxPlayerURL,
-		PlayItUrl:   playItURL,
+		Title:             fileName + " - Fast Stream & Download",
+		FileName:          fileName,
+		FileSizeStr:       sizeStr,
+		FileSizeRaw:       rec.FileSize,
+		MimeType:          mimeType,
+		FileType:          strings.ToUpper(rec.FileType),
+		IsVideo:           isVideo,
+		IsAudio:           isAudio,
+		IsMKV:             isMKV,
+		IsBrowserPlayable: isBrowserPlayable,
+		StreamURL:         streamURL,
+		DownloadURL:       downloadURL,
+		WatchURL:          watchURL,
+		PlaylistURL:       playlistURL,
+		BotUsername:       h.config.BotUsername,
+		VLCUrl:            vlcURL,
+		MXPlayerUrl:       mxPlayerURL,
+		PlayItUrl:         playItURL,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -234,6 +243,53 @@ func (h *Handler) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	if err := RenderWatchPage(w, pageData); err != nil {
 		h.logger.Error("failed to render watch page template", "error", err)
 	}
+}
+
+// HandlePlaylist generates a downloadable .m3u playlist for 1-click external playback in VLC, PotPlayer, MX Player, etc.
+func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
+	prefix := "/playlist"
+	if strings.HasPrefix(r.URL.Path, "/m3u") {
+		prefix = "/m3u"
+	}
+	fileID, _ := extractFileID(r.URL.Path, prefix)
+	if fileID == "" {
+		http.Error(w, "Missing file identifier", http.StatusBadRequest)
+		return
+	}
+
+	rec, err := h.mediaProvider.GetMedia(r.Context(), fileID)
+	if err != nil {
+		if errors.Is(err, delivery.ErrMediaNotFound) {
+			http.Error(w, "File not found or has been removed", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to resolve media for playlist", "file_id", fileID, "error", err)
+		http.Error(w, "Internal server error resolving file metadata", http.StatusInternalServerError)
+		return
+	}
+
+	fileName := rec.FileName
+	if fileName == "" {
+		fileName = "Media_" + fileID
+	}
+
+	encodedFileName := url.PathEscape(fileName)
+	streamURL := fmt.Sprintf("%s/stream/%s/%s", h.config.BaseURL, fileID, encodedFileName)
+
+	playlist := fmt.Sprintf("#EXTM3U\n#EXTINF:-1,%s\n%s\n", fileName, streamURL)
+
+	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	if baseName == "" {
+		baseName = "stream"
+	}
+	playlistFileName := baseName + ".m3u"
+
+	w.Header().Set("Content-Type", "audio/x-mpegurl; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s",
+		playlistFileName, url.PathEscape(playlistFileName)))
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(playlist))
 }
 
 // HandleStream processes inline media streaming with HTTP Range requests.
@@ -250,6 +306,17 @@ func (h *Handler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 // serveMedia resolves the media and streams the requested byte range.
 func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID string, isAttachment bool) {
+	// Enable CORS for web players and external streaming clients
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Range, Content-Type, Accept, Origin")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if strings.TrimSpace(fileID) == "" {
 		http.Error(w, "Missing file identifier", http.StatusBadRequest)
 		return
