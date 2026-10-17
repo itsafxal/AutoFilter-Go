@@ -178,9 +178,9 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 				mhCopy := mh
 				wrappedMh := r.wrapMessageHandler(mhCopy)
 				if mhCopy.Filter != nil {
-					client.AddMessageHandler(telegram.OnMessage, wrappedMh, telegram.CustomFilter(mhCopy.Filter))
+					client.AddMessageHandler(string(telegram.OnNewMessage), wrappedMh, telegram.CustomFilter(mhCopy.Filter))
 				} else {
-					client.AddMessageHandler(telegram.OnMessage, wrappedMh)
+					client.AddMessageHandler(string(telegram.OnNewMessage), wrappedMh)
 				}
 			}
 		}
@@ -202,7 +202,11 @@ func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 				}
 			}
 		}()
-		return mh.Handler(m)
+		err = mh.Handler(m)
+		if err != nil && r.appCtx != nil && r.appCtx.Logger != nil {
+			r.appCtx.Logger.Error("message handler error", "error", err)
+		}
+		return err
 	}
 }
 

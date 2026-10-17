@@ -110,8 +110,32 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 
 // HandleTextMessage intercepts user movie search queries in PM and group chats.
 func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
+	if m == nil {
+		return nil
+	}
+
 	user := m.Sender
-	if m == nil || user == nil {
+	if user == nil && m.Client != nil {
+		if sender, err := m.GetSender(); err == nil && sender != nil {
+			user = sender
+		}
+	}
+
+	var userID int64
+	var userMention string
+	if user != nil {
+		userID = user.ID
+		userMention = formatUserMention(user)
+	} else {
+		userID = m.SenderID()
+		if userID != 0 {
+			userMention = fmt.Sprintf(`<a href="tg://user?id=%d">User</a>`, userID)
+		} else {
+			userMention = "User"
+		}
+	}
+
+	if userID == 0 {
 		return nil
 	}
 
@@ -124,7 +148,15 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		return nil
 	}
 
-	searchKey := fmt.Sprintf("%d_%d", user.ID, m.ID)
+	if p.appCtx.Logger != nil {
+		p.appCtx.Logger.Info("handling movie search query",
+			"query", query,
+			"user_id", userID,
+			"chat_id", m.ChatID(),
+		)
+	}
+
+	searchKey := fmt.Sprintf("%d_%d", userID, m.ID)
 
 	// Execute search
 	result, err := p.appCtx.Search.Search(context.Background(), query, maxFilesPerPage, 0, search.SearchFilter{})
@@ -135,13 +167,11 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		return nil
 	}
 
-	userMention := formatUserMention(user)
-
 	// If results found, display interactive file list
 	if len(result.Files) > 0 {
 		p.saveSession(searchKey, &searchSession{
 			Query:     query,
-			UserID:    user.ID,
+			UserID:    userID,
 			ChatID:    m.ChatID(),
 			UpdatedAt: time.Now(),
 		})
@@ -153,6 +183,11 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
+		if replyErr != nil && p.appCtx.Logger != nil {
+			p.appCtx.Logger.Error("failed to send search results reply", "query", query, "error", replyErr)
+		} else if p.appCtx.Logger != nil {
+			p.appCtx.Logger.Info("search results reply sent", "query", query, "results_count", len(result.Files))
+		}
 		return replyErr
 	}
 
@@ -161,7 +196,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 	if sugErr == nil && len(suggestions) > 0 {
 		p.saveSession(searchKey, &searchSession{
 			Query:       query,
-			UserID:      user.ID,
+			UserID:      userID,
 			ChatID:      m.ChatID(),
 			Suggestions: suggestions,
 			UpdatedAt:   time.Now(),
@@ -174,6 +209,11 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
+		if replyErr != nil && p.appCtx.Logger != nil {
+			p.appCtx.Logger.Error("failed to send suggestions reply", "query", query, "error", replyErr)
+		} else if p.appCtx.Logger != nil {
+			p.appCtx.Logger.Info("spelling suggestions reply sent", "query", query, "suggestions_count", len(suggestions))
+		}
 		return replyErr
 	}
 
@@ -185,6 +225,11 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 	_, replyErr := m.Reply(notFoundText, &telegram.SendOptions{
 		ParseMode: "html",
 	})
+	if replyErr != nil && p.appCtx.Logger != nil {
+		p.appCtx.Logger.Error("failed to send not-found reply", "query", query, "error", replyErr)
+	} else if p.appCtx.Logger != nil {
+		p.appCtx.Logger.Info("not-found reply sent", "query", query)
+	}
 	return replyErr
 }
 

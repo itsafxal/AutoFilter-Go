@@ -249,3 +249,66 @@ func TestRegistry_CannotRegisterAfterValidation(t *testing.T) {
 		t.Fatal("expected error registering after validation, got nil")
 	}
 }
+
+type mockMessagePlugin struct {
+	mockPlugin
+	msgHandlers []MessageDefinition
+	cbHandlers  []CallbackDefinition
+}
+
+func (m *mockMessagePlugin) MessageHandlers() []MessageDefinition {
+	return m.msgHandlers
+}
+
+func (m *mockMessagePlugin) CallbackHandlers() []CallbackDefinition {
+	return m.cbHandlers
+}
+
+func TestRegistry_AttachToClient_MessageHandlers(t *testing.T) {
+	client, err := telegram.NewClient(telegram.ClientConfig{
+		AppID:         12345,
+		AppHash:       "0123456789abcdef0123456789abcdef",
+		MemorySession: true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	r := NewRegistry(nil)
+	msgPlug := &mockMessagePlugin{
+		mockPlugin: mockPlugin{
+			name: "search_msg",
+			commands: []CommandDefinition{
+				{Name: "search", Description: "search files", Handler: dummyHandler},
+			},
+		},
+		msgHandlers: []MessageDefinition{
+			{
+				Filter: func(m *telegram.NewMessage) bool {
+					return m != nil && m.Text() != ""
+				},
+				Handler: dummyHandler,
+			},
+		},
+		cbHandlers: []CallbackDefinition{
+			{
+				Prefix: "test#",
+				Handler: func(cb *telegram.CallbackQuery) error {
+					return nil
+				},
+			},
+		},
+	}
+
+	if err := r.Register(msgPlug); err != nil {
+		t.Fatalf("failed to register plugin: %v", err)
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("failed to validate: %v", err)
+	}
+
+	if err := r.AttachToClient(client); err != nil {
+		t.Fatalf("AttachToClient failed: %v", err)
+	}
+}
+
