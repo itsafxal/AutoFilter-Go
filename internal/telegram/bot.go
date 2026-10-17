@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/dustin/go-humanize"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -94,9 +96,21 @@ func (s *BotService) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to Telegram MTProto servers: %w", err)
 	}
 
-	s.logger.Info("authenticating bot identity with Telegram...")
-	if err := s.client.LoginBot(s.cfg.BotToken); err != nil {
-		return fmt.Errorf("failed to authenticate Telegram bot token: %w", err)
+	s.logger.Info("authenticating bot identity with Telegram (migrating DC if needed)...")
+	loginDone := make(chan error, 1)
+	go func() {
+		loginDone <- s.client.LoginBot(s.cfg.BotToken)
+	}()
+
+	select {
+	case err := <-loginDone:
+		if err != nil {
+			return fmt.Errorf("failed to authenticate Telegram bot token: %w", err)
+		}
+	case <-time.After(60 * time.Second):
+		return errors.New("authentication timed out after 60s while connecting to Telegram DC")
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	botUser, err := s.client.GetMe()
@@ -113,6 +127,11 @@ func (s *BotService) Start(ctx context.Context) error {
 		"bot_id", botUser.ID,
 		"app_id", s.cfg.AppID,
 	)
+
+	s.logger.Info("🚀 Bot is now fully online, ready, and listening for updates!")
+
+	// Send restart notification to admin(s) in background
+	go s.notifyAdminsOnRestart(botUser)
 
 	s.mu.Lock()
 	s.running = true
@@ -132,6 +151,64 @@ func (s *BotService) Start(ctx context.Context) error {
 
 	s.client.Idle()
 	return nil
+}
+
+// notifyAdminsOnRestart sends a Telegram notification to the owner and configured admins.
+func (s *BotService) notifyAdminsOnRestart(botUser *telegram.UserObj) {
+	if s.client == nil || botUser == nil || s.cfg == nil {
+		return
+	}
+
+	var totalMedia int64
+	if s.appCtx != nil && s.appCtx.DB != nil && s.appCtx.DB.SQLManager() != nil {
+		db := s.appCtx.DB.SQLManager().DB()
+		if db != nil {
+			_ = db.QueryRow("SELECT COUNT(*) FROM media;").Scan(&totalMedia)
+		}
+	}
+
+	timeStr := time.Now().Format("2006-01-02 15:04:05 MST")
+	mediaStr := humanize.Comma(totalMedia)
+
+	msgText := fmt.Sprintf(
+		"⚡ <b>Bot Restarted Successfully!</b>\n\n"+
+			"🤖 <b>Bot:</b> @%s (<code>%d</code>)\n"+
+			"📊 <b>Indexed Media:</b> <code>%s</code> records\n"+
+			"⏰ <b>Restarted At:</b> <code>%s</code>\n"+
+			"🚀 <b>Status:</b> Online &amp; Listening for queries!\n\n"+
+			"<i>Auto-filter and all services are active.</i>",
+		botUser.Username,
+		botUser.ID,
+		mediaStr,
+		timeStr,
+	)
+
+	// Collect unique recipient IDs
+	recipients := make(map[int64]bool)
+	if s.cfg.OwnerID > 0 {
+		recipients[s.cfg.OwnerID] = true
+	}
+	for _, adminID := range s.cfg.Admins {
+		if adminID > 0 {
+			recipients[adminID] = true
+		}
+	}
+
+	for adminID := range recipients {
+		_, err := s.client.SendMessage(adminID, msgText, &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		if err != nil {
+			s.logger.Warn("could not send restart notification to admin (admin might need to /start the bot first)",
+				"admin_id", adminID,
+				"error", err,
+			)
+		} else {
+			s.logger.Info("startup notification sent to admin",
+				"admin_id", adminID,
+			)
+		}
+	}
 }
 
 // Stop gracefully terminates the MTProto connection and stops background routines.
