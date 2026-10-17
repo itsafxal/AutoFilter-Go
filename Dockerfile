@@ -48,5 +48,8 @@ RUN chmod 0755 /app/bot && \
 # Switch to non-root user (UID 10001)
 USER 10001:10001
 
+# Expose HTTP streaming & download server port
+EXPOSE 8080
+
 # Execute standalone bot binary
 ENTRYPOINT ["/app/bot"]
