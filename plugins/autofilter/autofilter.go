@@ -36,7 +36,7 @@ var languages = []struct {
 
 // Quality definitions matching TGxCyberBot
 var qualities = []string{
-	"360P", "480P", "720P", "1080P", "1440P", "2160P", "4K",
+	"480P", "720P", "1080P", "2160P", "4K",
 }
 
 // searchSession stores state for pagination and filtering
@@ -103,6 +103,8 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 		{Prefix: "fl#", Handler: p.HandleFilterLanguageCallback},
 		{Prefix: "qualities#", Handler: p.HandleQualitiesCallback},
 		{Prefix: "fq#", Handler: p.HandleFilterQualityCallback},
+		{Prefix: "back_all#", Handler: p.HandleBackToAllFilesCallback},
+		{Prefix: "back#", Handler: p.HandleBackToFilesCallback},
 		{Prefix: "close_data", Handler: p.HandleCloseCallback},
 		{Prefix: "pages", Handler: p.HandlePagesCallback},
 	}
@@ -180,7 +182,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		})
 
 		text := formatResultText(userMention, query, 1)
-		kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
+		kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, false)
 
 		replyMsg, replyErr := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
@@ -358,8 +360,10 @@ func (p *Plugin) HandlePaginationCallback(cb *telegram.CallbackQuery) error {
 
 	userMention := formatUserMention(cb.Sender)
 	currentPage := (offset / maxFilesPerPage) + 1
-	text := formatResultText(userMention, sess.Query, currentPage)
-	kb := p.buildResultKeyboard(result.Files, searchKey, offset, result.NextOffset)
+	displayQuery := p.getDisplayQuery(sess)
+	text := formatResultText(userMention, displayQuery, currentPage)
+	hasFilter := sess.Language != "" || sess.Quality != ""
+	kb := p.buildResultKeyboard(result.Files, searchKey, offset, result.NextOffset, hasFilter)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -424,7 +428,7 @@ func (p *Plugin) HandleSpellCheckCallback(cb *telegram.CallbackQuery) error {
 
 	userMention := formatUserMention(cb.Sender)
 	text := formatResultText(userMention, selectedQuery, 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
+	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -484,18 +488,21 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 		}
 	}
 
-	// Back to results button (matching TGxCyberBot)
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("next|%s|0", searchKey)))
+	// Back to results button
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
 	markup := kb.Build()
 
-	currentText := ""
-	if msg != nil {
-		currentText = msg.Text()
-	}
-	_, _ = cb.Edit(currentText, &telegram.SendOptions{
+	userMention := formatUserMention(cb.Sender)
+	menuText := formatLanguagesMenuText(userMention, p.getDisplayQuery(sess))
+	_, editErr := cb.Edit(menuText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
 	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(menuText, &telegram.SendOptions{
+			ReplyMarkup: markup,
+		})
+	}
 
 	_, _ = cb.Answer("")
 	return nil
@@ -530,7 +537,10 @@ func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error 
 		return nil
 	}
 
-	sess.Language = langCode
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ This is not your search.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
 
 	filter := search.SearchFilter{
 		Language: langCode,
@@ -539,33 +549,20 @@ func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error 
 
 	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, filter)
 	if err != nil || len(result.Files) == 0 {
-		// Revert to original unfiltered results matching TGxCyberBot behavior
-		sess.Language = ""
-		origRes, _ := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{Quality: sess.Quality})
-		var origFiles []search.MediaFile
-		origNext := 0
-		if origRes != nil {
-			origFiles = origRes.Files
-			origNext = origRes.NextOffset
-		}
-		origKb := p.buildResultKeyboard(origFiles, searchKey, 0, origNext)
-		currentText := ""
-		if msg != nil {
-			currentText = msg.Text()
-		}
-		_, _ = cb.Edit(currentText, &telegram.SendOptions{
-			ParseMode:   "html",
-			ReplyMarkup: origKb,
-		})
-		_, _ = cb.Answer(fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Lᴀɴɢᴜᴀɢᴇ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(langCode)), &telegram.CallbackOptions{
+		_, _ = cb.Answer(fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Lᴀɴɢᴜᴀɢᴇ (%s) 🚫", strings.ToUpper(langCode)), &telegram.CallbackOptions{
 			Alert: true,
 		})
 		return nil
 	}
 
+	sess.Language = langCode
+	sess.UpdatedAt = time.Now()
+	p.saveSession(searchKey, sess)
+
 	userMention := formatUserMention(cb.Sender)
-	text := formatResultText(userMention, fmt.Sprintf("%s (%s)", sess.Query, strings.ToUpper(langCode)), 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
+	displayQuery := p.getDisplayQuery(sess)
+	text := formatResultText(userMention, displayQuery, 1)
+	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -625,18 +622,21 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 		}
 	}
 
-	// Back button (matching TGxCyberBot)
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("next|%s|0", searchKey)))
+	// Back button
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
 	markup := kb.Build()
 
-	currentText := ""
-	if msg != nil {
-		currentText = msg.Text()
-	}
-	_, _ = cb.Edit(currentText, &telegram.SendOptions{
+	userMention := formatUserMention(cb.Sender)
+	menuText := formatQualitiesMenuText(userMention, p.getDisplayQuery(sess))
+	_, editErr := cb.Edit(menuText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
 	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(menuText, &telegram.SendOptions{
+			ReplyMarkup: markup,
+		})
+	}
 
 	_, _ = cb.Answer("")
 	return nil
@@ -671,7 +671,10 @@ func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	sess.Quality = quality
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ This is not your search.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
 
 	filter := search.SearchFilter{
 		Language: sess.Language,
@@ -680,33 +683,20 @@ func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 
 	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, filter)
 	if err != nil || len(result.Files) == 0 {
-		// Revert to original unfiltered results matching TGxCyberBot behavior
-		sess.Quality = ""
-		origRes, _ := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{Language: sess.Language})
-		var origFiles []search.MediaFile
-		origNext := 0
-		if origRes != nil {
-			origFiles = origRes.Files
-			origNext = origRes.NextOffset
-		}
-		origKb := p.buildResultKeyboard(origFiles, searchKey, 0, origNext)
-		currentText := ""
-		if msg != nil {
-			currentText = msg.Text()
-		}
-		_, _ = cb.Edit(currentText, &telegram.SendOptions{
-			ParseMode:   "html",
-			ReplyMarkup: origKb,
-		})
-		_, _ = cb.Answer(fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Qᴜᴀʟɪᴛʏ (%s). Bᴀᴄᴋ ᴛᴏ ᴏʀɪɢɪɴᴀʟ sᴇᴀʀᴄʜ ʀᴇsᴜʟᴛs.", strings.ToUpper(quality)), &telegram.CallbackOptions{
+		_, _ = cb.Answer(fmt.Sprintf("🚫 Nᴏ Fɪʟᴇ Fᴏᴜɴᴅ Wɪᴛʜ Tʜɪs Qᴜᴀʟɪᴛʏ (%s) 🚫", strings.ToUpper(quality)), &telegram.CallbackOptions{
 			Alert: true,
 		})
 		return nil
 	}
 
+	sess.Quality = quality
+	sess.UpdatedAt = time.Now()
+	p.saveSession(searchKey, sess)
+
 	userMention := formatUserMention(cb.Sender)
-	text := formatResultText(userMention, fmt.Sprintf("%s (%s)", sess.Query, strings.ToUpper(quality)), 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset)
+	displayQuery := p.getDisplayQuery(sess)
+	text := formatResultText(userMention, displayQuery, 1)
+	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -719,6 +709,137 @@ func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 	}
 
 	_, _ = cb.Answer("")
+	return nil
+}
+
+// HandleBackToFilesCallback returns from language/quality menu back to the active file list.
+// Format: back#<searchKey>
+func (p *Plugin) HandleBackToFilesCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+
+	parts := strings.Split(cb.DataString(), "#")
+	if len(parts) != 2 {
+		return nil
+	}
+	searchKey := parts[1]
+
+	msg, _ := cb.GetMessage()
+	sess := p.getSession(searchKey)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
+	if sess == nil {
+		_, _ = cb.Answer("Search expired.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
+
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ This is not your search.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
+
+	filter := search.SearchFilter{
+		Language: sess.Language,
+		Quality:  sess.Quality,
+	}
+
+	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, filter)
+	if err != nil || len(result.Files) == 0 {
+		sess.Language = ""
+		sess.Quality = ""
+		p.saveSession(searchKey, sess)
+		result, err = p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{})
+	}
+
+	if err != nil || len(result.Files) == 0 {
+		_, _ = cb.Answer("🚫 No files found.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
+
+	userMention := formatUserMention(cb.Sender)
+	displayQuery := p.getDisplayQuery(sess)
+	text := formatResultText(userMention, displayQuery, 1)
+	hasFilter := sess.Language != "" || sess.Quality != ""
+	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, hasFilter)
+
+	_, editErr := cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(text, &telegram.SendOptions{
+			ReplyMarkup: kb,
+		})
+	}
+
+	_, _ = cb.Answer("")
+	return nil
+}
+
+// HandleBackToAllFilesCallback resets all language/quality filters and returns to unfiltered results.
+// Format: back_all#<searchKey>
+func (p *Plugin) HandleBackToAllFilesCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+
+	parts := strings.Split(cb.DataString(), "#")
+	if len(parts) != 2 {
+		return nil
+	}
+	searchKey := parts[1]
+
+	msg, _ := cb.GetMessage()
+	sess := p.getSession(searchKey)
+	if sess == nil && msg != nil {
+		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
+		if sess != nil {
+			p.saveSession(searchKey, sess)
+		}
+	}
+
+	if sess == nil {
+		_, _ = cb.Answer("Search expired.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
+
+	if cb.SenderID != sess.UserID {
+		_, _ = cb.Answer("✋ This is not your search.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
+
+	sess.Language = ""
+	sess.Quality = ""
+	sess.UpdatedAt = time.Now()
+	p.saveSession(searchKey, sess)
+
+	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{})
+	if err != nil || len(result.Files) == 0 {
+		_, _ = cb.Answer("🚫 No files found.", &telegram.CallbackOptions{Alert: true})
+		return nil
+	}
+
+	userMention := formatUserMention(cb.Sender)
+	text := formatResultText(userMention, sess.Query, 1)
+	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, false)
+
+	_, editErr := cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	if editErr != nil && isMessageNotModified(editErr) {
+		_, _ = cb.Edit(text, &telegram.SendOptions{
+			ReplyMarkup: kb,
+		})
+	}
+
+	_, _ = cb.Answer("🔄 Showing all files")
 	return nil
 }
 
@@ -743,7 +864,7 @@ func (p *Plugin) HandlePagesCallback(cb *telegram.CallbackQuery) error {
 
 // --- Keyboards and Formatting ---
 
-func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, offset, nextOffset int) *telegram.ReplyInlineMarkup {
+func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, offset, nextOffset int, hasFilter bool) *telegram.ReplyInlineMarkup {
 	kb := telegram.NewKeyboard()
 
 	// 1. Languages and Quality header row
@@ -774,7 +895,12 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 
 	if len(navButtons) > 0 {
 		kb.AddRow(navButtons...)
-	} else {
+	}
+
+	// 4. Filter reset or single-page indicator
+	if hasFilter {
+		kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back_all#%s", searchKey)))
+	} else if len(navButtons) == 0 {
 		kb.AddRow(telegram.Button.Data("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", "pages"))
 	}
 
@@ -811,6 +937,22 @@ func formatResultText(userMention, search string, page int) string {
 	)
 }
 
+func formatLanguagesMenuText(userMention, query string) string {
+	return fmt.Sprintf(
+		"𝗛𝗘𝗬 👋 %s 🫶\n    \n📁 <b>Query :</b> %s\n\n🌐 <b><i>Select Desired Language :</i></b>\n\n✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within 15 Mins ❗️\n©ᶜʸᵇᵉʳᵗᵍ 🗡️",
+		userMention,
+		html.EscapeString(query),
+	)
+}
+
+func formatQualitiesMenuText(userMention, query string) string {
+	return fmt.Sprintf(
+		"𝗛𝗘𝗬 👋 %s 🫶\n    \n📁 <b>Query :</b> %s\n\n🎞️ <b><i>Select Desired Quality :</i></b>\n\n✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within 15 Mins ❗️\n©ᶜʸᵇᵉʳᵗᵍ 🗡️",
+		userMention,
+		html.EscapeString(query),
+	)
+}
+
 func formatSpellCheckText(userMention, search string) string {
 	return fmt.Sprintf(
 		"Hᴇʏ %s 💫,\n🔎 <b>Nᴏ ᴇxᴀᴄᴛ ʀᴇsᴜʟᴛ ғᴏᴜɴᴅ ғᴏʀ:</b>\n<code>%s</code>\n\n✨ <b>Cʟᴏsᴇsᴛ ᴍᴀᴛᴄʜᴇs:</b>",
@@ -831,6 +973,29 @@ func formatUserMention(user *telegram.UserObj) string {
 		name = "User"
 	}
 	return fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, user.ID, html.EscapeString(name))
+}
+
+func (p *Plugin) getDisplayQuery(sess *searchSession) string {
+	if sess == nil {
+		return ""
+	}
+	if sess.Language != "" && sess.Quality != "" {
+		return fmt.Sprintf("%s (%s - %s)", sess.Query, strings.ToUpper(sess.Language), strings.ToUpper(sess.Quality))
+	} else if sess.Language != "" {
+		return fmt.Sprintf("%s (%s)", sess.Query, strings.ToUpper(sess.Language))
+	} else if sess.Quality != "" {
+		return fmt.Sprintf("%s (%s)", sess.Query, strings.ToUpper(sess.Quality))
+	}
+	return sess.Query
+}
+
+func isKnownQuality(q string) bool {
+	q = strings.ToLower(strings.TrimSpace(q))
+	switch q {
+	case "480p", "720p", "1080p", "2160p", "4k":
+		return true
+	}
+	return false
 }
 
 // Session helpers
@@ -873,9 +1038,37 @@ func (p *Plugin) recoverSessionFromMessage(msg *telegram.NewMessage, userID int6
 			queryPart := strings.TrimSpace(line[idx+len("Query :"):])
 			queryPart = strings.TrimPrefix(queryPart, "</b>")
 			queryPart = strings.TrimSpace(queryPart)
+			if queryPart == "" {
+				continue
+			}
+
+			// Check for filter tags like (MALAYALAM), (1080P), or (MALAYALAM - 1080P)
+			var lang, qual string
+			if strings.HasSuffix(queryPart, ")") && strings.Contains(queryPart, "(") {
+				openIdx := strings.LastIndex(queryPart, "(")
+				tag := queryPart[openIdx+1 : len(queryPart)-1]
+				cleanQuery := strings.TrimSpace(queryPart[:openIdx])
+
+				tagLower := strings.ToLower(tag)
+				if strings.Contains(tagLower, " - ") {
+					parts := strings.SplitN(tagLower, " - ", 2)
+					lang = strings.TrimSpace(parts[0])
+					qual = strings.TrimSpace(parts[1])
+				} else {
+					if isKnownQuality(tagLower) {
+						qual = tagLower
+					} else {
+						lang = tagLower
+					}
+				}
+				queryPart = cleanQuery
+			}
+
 			if queryPart != "" {
 				return &searchSession{
 					Query:     queryPart,
+					Language:  lang,
+					Quality:   qual,
 					UserID:    userID,
 					ChatID:    chatID,
 					UpdatedAt: time.Now(),

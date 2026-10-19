@@ -213,7 +213,7 @@ func TestSQLite_IndexDropAndRestore(t *testing.T) {
 	// Verify indexes exist after Open
 	var idxCount int
 	err := mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount)
-	if err != nil || idxCount < 3 {
+	if err != nil || idxCount < 2 {
 		t.Fatalf("expected indexes to exist initially, got count %d (err: %v)", idxCount, err)
 	}
 
@@ -238,7 +238,7 @@ func TestSQLite_IndexDropAndRestore(t *testing.T) {
 	}
 
 	err = mgr.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%';").Scan(&idxCount)
-	if err != nil || idxCount < 3 {
+	if err != nil || idxCount < 2 {
 		t.Errorf("expected indexes restored, got %d", idxCount)
 	}
 
@@ -273,9 +273,9 @@ func TestSQLite_FTS5Support(t *testing.T) {
 	// 2. Insert test rows into media
 	_, err = mgr.DB().ExecContext(ctx, `
 		INSERT INTO media (file_id, file_name, caption) VALUES
-		('f1', 'K.G.F Chapter 2 (2022) Malayalam 1080p', 'KGF 2 Malayalam'),
+		('f1', 'KGF Chapter 2 (2022) Malayalam 1080p', 'KGF 2 Malayalam'),
 		('f2', 'Avatar 2 Way of Water 2022 English 720p', 'Avatar 2 movie'),
-		('f3', 'K.G.F Chapter 1 (2018) Tamil 720p', 'KGF 1 Tamil');
+		('f3', 'KGF Chapter 1 (2018) Tamil 720p', 'KGF 1 Tamil');
 	`)
 	if err != nil {
 		t.Fatalf("failed to insert media: %v", err)

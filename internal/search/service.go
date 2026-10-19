@@ -81,14 +81,14 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		records, hasNext, err = s.queryRows(ctx, db, ftsSQL, ftsArgs, limit)
 	}
 
-	// 2. Fallback to LIKE query on file_name if FTS was unavailable or found 0 records
-	if len(records) == 0 {
+	// 2. Only fallback to LIKE query on file_name if FTS could not be used (e.g. short <3 char query)
+	if !canUseFTS && len(records) == 0 {
 		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, false)
 		records, hasNext, err = s.queryRows(ctx, db, likeSQL, likeArgs, limit)
 	}
 
-	// 3. If 0 records found in file_name, check caption as fallback
-	if err == nil && len(records) == 0 {
+	// 3. Fallback to caption ONLY for general searches without specific language/quality filter
+	if err == nil && len(records) == 0 && filter.Language == "" && filter.Quality == "" {
 		capSQL, capArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, true)
 		records, hasNext, _ = s.queryRows(ctx, db, capSQL, capArgs, limit)
 	}
@@ -252,15 +252,15 @@ func (s *Service) buildFTSQuery(tokens []string, filter SearchFilter, limitPlusO
 	}
 
 	if filter.Language != "" {
-		whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.caption LIKE ?)")
-		langPattern := "%" + strings.ToLower(filter.Language) + "%"
-		args = append(args, langPattern, langPattern)
+		cond, cArgs := buildLanguageCondition("m", filter.Language)
+		whereConditions = append(whereConditions, cond)
+		args = append(args, cArgs...)
 	}
 
 	if filter.Quality != "" {
-		whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.caption LIKE ?)")
-		qualPattern := "%" + strings.ToLower(filter.Quality) + "%"
-		args = append(args, qualPattern, qualPattern)
+		cond, cArgs := buildQualityCondition("m", filter.Quality)
+		whereConditions = append(whereConditions, cond)
+		args = append(args, cArgs...)
 	}
 
 	extraWhere := ""
@@ -306,15 +306,15 @@ func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlus
 	}
 
 	if filter.Language != "" {
-		whereConditions = append(whereConditions, "(file_name LIKE ? OR caption LIKE ?)")
-		langPattern := "%" + strings.ToLower(filter.Language) + "%"
-		args = append(args, langPattern, langPattern)
+		cond, cArgs := buildLanguageCondition("", filter.Language)
+		whereConditions = append(whereConditions, cond)
+		args = append(args, cArgs...)
 	}
 
 	if filter.Quality != "" {
-		whereConditions = append(whereConditions, "(file_name LIKE ? OR caption LIKE ?)")
-		qualPattern := "%" + strings.ToLower(filter.Quality) + "%"
-		args = append(args, qualPattern, qualPattern)
+		cond, cArgs := buildQualityCondition("", filter.Quality)
+		whereConditions = append(whereConditions, cond)
+		args = append(args, cArgs...)
 	}
 
 	whereClause := "1=1"
@@ -564,4 +564,81 @@ func (s *Service) GetLatest(ctx context.Context, limit int) ([]MediaFile, error)
 	}
 	return files, nil
 }
+
+func buildLanguageCondition(colPrefix, lang string) (string, []any) {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	var colName, colCap string
+	if colPrefix != "" {
+		colName = colPrefix + ".file_name"
+		colCap = colPrefix + ".caption"
+	} else {
+		colName = "file_name"
+		colCap = "caption"
+	}
+
+	var pats []string
+	switch lang {
+	case "malayalam":
+		pats = []string{"%malayalam%", "%mal.%", "% mal %", "%-mal-%", "%[mal]%"}
+	case "tamil":
+		pats = []string{"%tamil%", "%tam.%", "% tam %", "%-tam-%", "%[tam]%"}
+	case "hindi":
+		pats = []string{"%hindi%", "%hin.%", "% hin %", "%-hin-%", "%[hin]%"}
+	case "telugu":
+		pats = []string{"%telugu%", "%tel.%", "% tel %", "%-tel-%", "%[tel]%"}
+	case "kannada":
+		pats = []string{"%kannada%", "%kan.%", "% kan %", "%-kan-%", "%[kan]%"}
+	case "english":
+		pats = []string{"%english%", "%eng.%", "% eng %", "%-eng-%", "%[eng]%"}
+	case "multi":
+		pats = []string{"%multi%", "%dual%"}
+	default:
+		pats = []string{"%" + lang + "%"}
+	}
+
+	var clauses []string
+	var args []any
+	for _, p := range pats {
+		clauses = append(clauses, fmt.Sprintf("(%s LIKE ? OR %s LIKE ?)", colName, colCap))
+		args = append(args, p, p)
+	}
+
+	return "(" + strings.Join(clauses, " OR ") + ")", args
+}
+
+func buildQualityCondition(colPrefix, qual string) (string, []any) {
+	qual = strings.ToLower(strings.TrimSpace(qual))
+	var colName, colCap string
+	if colPrefix != "" {
+		colName = colPrefix + ".file_name"
+		colCap = colPrefix + ".caption"
+	} else {
+		colName = "file_name"
+		colCap = "caption"
+	}
+
+	var pats []string
+	switch qual {
+	case "480p":
+		pats = []string{"%480p%"}
+	case "720p":
+		pats = []string{"%720p%"}
+	case "1080p":
+		pats = []string{"%1080p%"}
+	case "2160p", "4k":
+		pats = []string{"%2160p%", "%4k%"}
+	default:
+		pats = []string{"%" + qual + "%"}
+	}
+
+	var clauses []string
+	var args []any
+	for _, p := range pats {
+		clauses = append(clauses, fmt.Sprintf("(%s LIKE ? OR %s LIKE ?)", colName, colCap))
+		args = append(args, p, p)
+	}
+
+	return "(" + strings.Join(clauses, " OR ") + ")", args
+}
+
 
