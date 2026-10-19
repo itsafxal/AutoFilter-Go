@@ -43,6 +43,11 @@ func setupTestDB(t *testing.T) (*database.DatabaseManager, *Service) {
 		{"file_3", "KGF.Chapter.2.2022.720p.Hindi.mkv", 1073741824, "1.0 GB", "video", "KGF 2 Hindi Dubbed"},
 		{"file_4", "Leo.2023.1080p.Tamil.mkv", 2147483648, "2.0 GB", "video", "Leo 2023 Vijay"},
 		{"file_5", "Avatar.The.Way.Of.Water.2022.mkv", 3221225472, "3.0 GB", "video", "Avatar 2"},
+		{"file_6", "[CinemaCourt] Vikram (2022) 1080p WEB-DL.mkv", 2147483648, "2.0 GB", "video", "Vikram 2022 CinemaCourt"},
+		{"file_7", "Cinemacourt Vikram 2022 720p.mkv", 1073741824, "1.0 GB", "video", "Vikram 2022 720p"},
+		{"file_8", "Vikramadithyan (2014) Malayalam 720p HDRip.mkv", 1073741824, "1.0 GB", "video", "Vikramadithyan Dulquer"},
+		{"file_9", "Vikram Vedha (2017) Tamil 1080p.mkv", 2147483648, "2.0 GB", "video", "Vikram Vedha Madhavan"},
+		{"file_10", "Hargadimaju Season 3 Episode 6 Vikram Thilak.mkv", 536870912, "500 MB", "video", "Hargadimaju S03E06"},
 	}
 
 	for _, r := range records {
@@ -108,6 +113,55 @@ func TestSearchService_Search(t *testing.T) {
 	}
 	if res4.NextOffset != 1 {
 		t.Errorf("expected NextOffset 1, got %d", res4.NextOffset)
+	}
+
+	// 5. Strict movie matching for "Vikram":
+	// MUST return ONLY the 2 Vikram prints (file_6, file_7).
+	// MUST REJECT Vikramadithyan (file_8), Vikram Vedha (file_9), and Hargadimaju (file_10).
+	resVikram, err := service.Search(ctx, "Vikram", 10, 0, SearchFilter{})
+	if err != nil {
+		t.Fatalf("search error for Vikram: %v", err)
+	}
+	if len(resVikram.Files) != 2 {
+		t.Errorf("expected exactly 2 files for 'Vikram', got %d", len(resVikram.Files))
+		for _, f := range resVikram.Files {
+			t.Logf("unexpected returned file: %s", f.FileName)
+		}
+	}
+	for _, f := range resVikram.Files {
+		if f.FileID != "file_6" && f.FileID != "file_7" {
+			t.Errorf("expected only Vikram files (file_6, file_7), got unexpected file %s (%s)", f.FileID, f.FileName)
+		}
+	}
+
+	// 6. Search for "Vikram Vedha":
+	// MUST return ONLY the Vikram Vedha movie (file_9), and NOT plain Vikram.
+	resVV, err := service.Search(ctx, "Vikram Vedha", 10, 0, SearchFilter{})
+	if err != nil {
+		t.Fatalf("search error for Vikram Vedha: %v", err)
+	}
+	if len(resVV.Files) != 1 || resVV.Files[0].FileID != "file_9" {
+		t.Errorf("expected only file_9 for 'Vikram Vedha', got %v", resVV.Files)
+	}
+
+	// 7. Search for "Vikramadithyan":
+	// MUST return ONLY file_8.
+	resVA, err := service.Search(ctx, "Vikramadithyan", 10, 0, SearchFilter{})
+	if err != nil {
+		t.Fatalf("search error for Vikramadithyan: %v", err)
+	}
+	if len(resVA.Files) != 1 || resVA.Files[0].FileID != "file_8" {
+		t.Errorf("expected only file_8 for 'Vikramadithyan', got %v", resVA.Files)
+	}
+
+	// 8. Search for "Hargadimaju":
+	// MUST return ONLY file_10.
+	resHarg, err := service.Search(ctx, "Hargadimaju", 10, 0, SearchFilter{})
+	if err != nil {
+		t.Fatalf("search error for Hargadimaju: %v", err)
+	}
+	if len(resHarg.Files) != 1 || resHarg.Files[0].FileID != "file_10" {
+		t.Errorf("expected only file_10 for 'Hargadimaju', got %v", resHarg.Files)
 	}
 }
 

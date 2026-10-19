@@ -11,7 +11,7 @@ var genericStopwords = map[string]struct{}{
 	"season": {}, "seasons": {}, "ep": {}, "episode": {}, "episodes": {},
 	"the": {}, "a": {}, "an": {}, "of": {}, "in": {}, "on": {}, "at": {},
 	"and": {}, "or": {}, "to": {}, "for": {}, "with": {}, "by": {}, "from": {},
-	"part": {}, "vol": {}, "volume": {}, "hd": {}, "full": {}, "download": {},
+	"part": {}, "vol": {}, "volume": {}, "chapter": {}, "chapters": {}, "ch": {}, "hd": {}, "full": {}, "download": {},
 	"1080p": {}, "720p": {}, "480p": {}, "360p": {}, "2160p": {}, "4k": {},
 	"bluray": {}, "webrip": {}, "web-dl": {}, "web": {}, "hevc": {},
 	"x264": {}, "x265": {}, "esubs": {}, "esub": {}, "msub": {}, "aac": {},
@@ -22,6 +22,9 @@ var transliterationMap = map[string]string{
 	"പ്രേമം":       "premam",
 	"ജി ഡി നായിഡു": "gd naidu",
 	"വിക്രം":       "vikram",
+	"വിക്രമാദിത്യൻ": "vikramadithyan",
+	"വിക്രം വേധ":   "vikram vedha",
+	"വിക്രം വേദ":   "vikram vedha",
 	"അമരൻ":         "amaran",
 	"ലൂസിഫർ":       "lucifer",
 	"ദൃശ്യം":       "drishyam",
@@ -30,6 +33,8 @@ var transliterationMap = map[string]string{
 	// Tamil
 	"கைதி":          "kaithi",
 	"விக்ரம்":       "vikram",
+	"விக்ரம் வேதா":  "vikram vedha",
+	"விக்ரமாதித்தன்": "vikramadithyan",
 	"ஜி ഡി നായിഡു2": "gd naidu",
 	"லியோ":          "leo",
 	"அமரன்":         "amaran",
@@ -156,13 +161,13 @@ func ComputeSimilarity(query, title string) float64 {
 		return 1.0
 	}
 
-	// Prefix match
-	if strings.HasPrefix(tNorm, qNorm) {
+	// Word-boundary prefix match: only if whole word matches or ends at word boundary
+	if strings.HasPrefix(tNorm, qNorm) && (len(tNorm) == len(qNorm) || tNorm[len(qNorm)] == ' ') {
 		return 0.95
 	}
 
-	// Substring match
-	if strings.Contains(tNorm, qNorm) {
+	// Word-boundary substring match
+	if strings.Contains(" "+tNorm+" ", " "+qNorm+" ") {
 		return 0.90
 	}
 

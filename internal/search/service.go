@@ -71,30 +71,34 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		return nil, fmt.Errorf("sqlite database is not initialized")
 	}
 
-	// 1. Primary ultra-fast query on file_name using FTS5 trigram index
-	var records []MediaFile
-	var hasNext bool
+	const maxCandidates = 1000
+
+	// 1. Primary ultra-fast candidate query on file_name using FTS5 trigram index
+	var candidateRecords []MediaFile
 	var err error
 
-	ftsSQL, ftsArgs, canUseFTS := s.buildFTSQuery(tokens, filter, limit+1, offset)
+	ftsSQL, ftsArgs, canUseFTS := s.buildFTSQuery(tokens, filter, maxCandidates, 0)
 	if canUseFTS {
-		records, hasNext, err = s.queryRows(ctx, db, ftsSQL, ftsArgs, limit)
+		candidateRecords, _, err = s.queryRows(ctx, db, ftsSQL, ftsArgs, maxCandidates)
 	}
 
 	// 2. Only fallback to LIKE query on file_name if FTS could not be used (e.g. short <3 char query)
-	if !canUseFTS && len(records) == 0 {
-		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, false)
-		records, hasNext, err = s.queryRows(ctx, db, likeSQL, likeArgs, limit)
+	if !canUseFTS && len(candidateRecords) == 0 {
+		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, false)
+		candidateRecords, _, err = s.queryRows(ctx, db, likeSQL, likeArgs, maxCandidates)
 	}
 
 	// 3. Fallback to caption ONLY for general searches without specific language/quality filter
-	if err == nil && len(records) == 0 && filter.Language == "" && filter.Quality == "" {
-		capSQL, capArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, true)
-		records, hasNext, _ = s.queryRows(ctx, db, capSQL, capArgs, limit)
+	if err == nil && len(candidateRecords) == 0 && filter.Language == "" && filter.Quality == "" {
+		capSQL, capArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, true)
+		candidateRecords, _, _ = s.queryRows(ctx, db, capSQL, capArgs, maxCandidates)
 	}
 
+	// Apply intelligent release parser and strict movie matching
+	matchedFiles := FilterAndRankStrict(query, candidateRecords)
+
 	// If no records found
-	if len(records) == 0 {
+	if len(matchedFiles) == 0 {
 		emptyRes := &SearchResult{
 			Query:      query,
 			CleanQuery: norm,
@@ -110,36 +114,20 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		return emptyRes, nil
 	}
 
-	// Rank files by title similarity
-	type scoredFile struct {
-		file  MediaFile
-		score float64
-	}
-	scored := make([]scoredFile, len(records))
-	for i, f := range records {
-		score := ComputeSimilarity(norm, f.FileName)
-		scored[i] = scoredFile{file: f, score: score}
-	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-
-	files := make([]MediaFile, len(scored))
-	for i, sf := range scored {
-		files[i] = sf.file
-	}
-
+	total := int64(len(matchedFiles))
+	totalPages := (len(matchedFiles) + limit - 1) / limit
 	page := (offset / limit) + 1
-	var total int64
-	var totalPages int
-	if hasNext {
-		total = int64(offset + limit + 1)
-		totalPages = page + 1
-	} else {
-		total = int64(offset + len(files))
-		totalPages = page
+
+	var files []MediaFile
+	if offset < len(matchedFiles) {
+		end := offset + limit
+		if end > len(matchedFiles) {
+			end = len(matchedFiles)
+		}
+		files = matchedFiles[offset:end]
 	}
 
+	hasNext := (offset + limit) < len(matchedFiles)
 	nextOffset := 0
 	if hasNext {
 		nextOffset = offset + limit
@@ -454,7 +442,11 @@ func (s *Service) rankCandidateSuggestions(rows *sql.Rows, norm string, limit in
 			continue
 		}
 
-		cleanTitle := CleanReleaseName(rawFileName)
+		rel := ParseRelease(rawFileName, norm)
+		cleanTitle := rel.CleanTitle
+		if cleanTitle == "" || len(cleanTitle) < 2 {
+			cleanTitle = CleanReleaseName(rawFileName)
+		}
 		if cleanTitle == "" || len(cleanTitle) < 2 {
 			cleanTitle = strings.TrimSpace(rawFileName)
 		}
