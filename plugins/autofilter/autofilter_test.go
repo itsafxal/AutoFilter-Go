@@ -162,3 +162,70 @@ func TestAutofilter_RecoverSession_WithFilters(t *testing.T) {
 	}
 }
 
+func TestAutofilter_ButtonStyles(t *testing.T) {
+	plugin := &Plugin{}
+
+	files := []search.MediaFile{
+		{FileID: "f1", FileName: "Vikram.2022.mkv", Size: "2.0 GB"},
+	}
+
+	// Result keyboard with offset > 0 and nextOffset > 0 and filter active
+	kb := plugin.buildResultKeyboard(files, "key1", 8, 16, true)
+	if kb == nil || len(kb.Rows) < 4 {
+		t.Fatalf("expected at least 4 rows, got %d", len(kb.Rows))
+	}
+
+	// 1. Row 0: Languages & Quality header -> BgPrimary (Blue)
+	headerRow := kb.Rows[0].Buttons
+	if len(headerRow) != 2 {
+		t.Fatalf("expected 2 buttons in header row, got %d", len(headerRow))
+	}
+	langBtn, ok1 := headerRow[0].(*telegram.KeyboardButtonCallback)
+	qualBtn, ok2 := headerRow[1].(*telegram.KeyboardButtonCallback)
+	if !ok1 || langBtn.Style == nil || !langBtn.Style.BgPrimary {
+		t.Errorf("expected Languages button to have BgPrimary=true")
+	}
+	if !ok2 || qualBtn.Style == nil || !qualBtn.Style.BgPrimary {
+		t.Errorf("expected Quality button to have BgPrimary=true")
+	}
+
+	// 2. Navigation Row: Back (Danger/Red) and Next (Success/Green)
+	navRow := kb.Rows[2].Buttons
+	if len(navRow) != 2 {
+		t.Fatalf("expected 2 nav buttons, got %d", len(navRow))
+	}
+	backBtn, okBack := navRow[0].(*telegram.KeyboardButtonCallback)
+	nextBtn, okNext := navRow[1].(*telegram.KeyboardButtonCallback)
+	if !okBack || backBtn.Style == nil || !backBtn.Style.BgDanger {
+		t.Errorf("expected Back button to have BgDanger=true (Red)")
+	}
+	if !okNext || nextBtn.Style == nil || !nextBtn.Style.BgSuccess {
+		t.Errorf("expected Next button to have BgSuccess=true (Green)")
+	}
+
+	// 3. Filter Reset Row: Back to files (Danger/Red)
+	resetRow := kb.Rows[3].Buttons
+	if len(resetRow) != 1 {
+		t.Fatalf("expected 1 reset button, got %d", len(resetRow))
+	}
+	resetBtn, okReset := resetRow[0].(*telegram.KeyboardButtonCallback)
+	if !okReset || resetBtn.Style == nil || !resetBtn.Style.BgDanger {
+		t.Errorf("expected Back to files button to have BgDanger=true (Red)")
+	}
+
+	// 4. Spellcheck Keyboard
+	spellKb := plugin.buildSpellCheckKeyboard([]string{"Vikram"}, "key2")
+	if len(spellKb.Rows) < 2 {
+		t.Fatalf("expected at least 2 rows in spellKb, got %d", len(spellKb.Rows))
+	}
+	sugBtn, okSug := spellKb.Rows[0].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if !okSug || sugBtn.Style == nil || !sugBtn.Style.BgPrimary {
+		t.Errorf("expected suggestion button to have BgPrimary=true (Blue)")
+	}
+	closeBtn, okClose := spellKb.Rows[1].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if !okClose || closeBtn.Style == nil || !closeBtn.Style.BgDanger {
+		t.Errorf("expected Close button to have BgDanger=true (Red)")
+	}
+}
+
+

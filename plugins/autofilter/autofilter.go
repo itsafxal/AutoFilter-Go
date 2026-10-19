@@ -480,7 +480,7 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 	var currentRow []telegram.KeyboardButton
 
 	for i, lang := range languages {
-		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
+		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey)).Primary()
 		currentRow = append(currentRow, btn)
 		if (i+1)%2 == 0 || i == len(languages)-1 {
 			kb.AddRow(currentRow...)
@@ -488,8 +488,8 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 		}
 	}
 
-	// Back to results button
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
+	// Back to results button (Red)
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
 	markup := kb.Build()
 
 	userMention := formatUserMention(cb.Sender)
@@ -614,7 +614,7 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 	var currentRow []telegram.KeyboardButton
 
 	for i, q := range qualities {
-		btn := telegram.Button.Data(q, fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey))
+		btn := telegram.Button.Data(q, fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey)).Primary()
 		currentRow = append(currentRow, btn)
 		if (i+1)%3 == 0 || i == len(qualities)-1 {
 			kb.AddRow(currentRow...)
@@ -622,8 +622,8 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 		}
 	}
 
-	// Back button
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
+	// Back button (Red)
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
 	markup := kb.Build()
 
 	userMention := formatUserMention(cb.Sender)
@@ -867,10 +867,10 @@ func (p *Plugin) HandlePagesCallback(cb *telegram.CallbackQuery) error {
 func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, offset, nextOffset int, hasFilter bool) *telegram.ReplyInlineMarkup {
 	kb := telegram.NewKeyboard()
 
-	// 1. Languages and Quality header row
+	// 1. Languages and Quality header row (Blue)
 	kb.AddRow(
-		telegram.Button.Data("Lᴀɴɢᴜᴀɢᴇs", fmt.Sprintf("languages#%s", searchKey)),
-		telegram.Button.Data("Qᴜᴀʟɪᴛʏ", fmt.Sprintf("qualities#%s", searchKey)),
+		telegram.Button.Data("Lᴀɴɢᴜᴀɢᴇs", fmt.Sprintf("languages#%s", searchKey)).Primary(),
+		telegram.Button.Data("Qᴜᴀʟɪᴛʏ", fmt.Sprintf("qualities#%s", searchKey)).Primary(),
 	)
 
 	// 2. File list rows (1 button per file)
@@ -879,27 +879,27 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 		kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)))
 	}
 
-	// 3. Navigation row
+	// 3. Navigation row (Back is Red, Next is Green)
 	var navButtons []telegram.KeyboardButton
 	if offset > 0 {
 		prevOffset := offset - maxFilesPerPage
 		if prevOffset < 0 {
 			prevOffset = 0
 		}
-		navButtons = append(navButtons, telegram.Button.Data("◀️ 𝗕𝗮𝗰𝗸", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)))
+		navButtons = append(navButtons, telegram.Button.Data("◀️ 𝗕𝗮𝗰𝗸", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)).Danger())
 	}
 
 	if nextOffset > 0 {
-		navButtons = append(navButtons, telegram.Button.Data("𝗡𝗲𝘅𝘁 ▶️", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)))
+		navButtons = append(navButtons, telegram.Button.Data("𝗡𝗲𝘅𝘁 ▶️", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)).Success())
 	}
 
 	if len(navButtons) > 0 {
 		kb.AddRow(navButtons...)
 	}
 
-	// 4. Filter reset or single-page indicator
+	// 4. Filter reset (Red) or single-page indicator
 	if hasFilter {
-		kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back_all#%s", searchKey)))
+		kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back_all#%s", searchKey)).Danger())
 	} else if len(navButtons) == 0 {
 		kb.AddRow(telegram.Button.Data("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", "pages"))
 	}
@@ -912,7 +912,7 @@ func (p *Plugin) buildSpellCheckKeyboard(suggestions []string, searchKey string)
 
 	var currentRow []telegram.KeyboardButton
 	for i, s := range suggestions {
-		btn := telegram.Button.Data(fmt.Sprintf("🎬 %s", s), fmt.Sprintf("sp#%s#%d", searchKey, i))
+		btn := telegram.Button.Data(fmt.Sprintf("🎬 %s", s), fmt.Sprintf("sp#%s#%d", searchKey, i)).Primary()
 		currentRow = append(currentRow, btn)
 
 		// 2 per row unless text is long
@@ -922,8 +922,8 @@ func (p *Plugin) buildSpellCheckKeyboard(suggestions []string, searchKey string)
 		}
 	}
 
-	// Close button
-	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"))
+	// Close button (Red)
+	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger())
 
 	return kb.Build()
 }
