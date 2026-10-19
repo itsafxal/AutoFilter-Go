@@ -156,7 +156,7 @@ func (r *MediaRepository) Search(ctx context.Context, keyword string, limit, off
 		SELECT file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved
 		FROM media
 		WHERE file_name LIKE ?
-		ORDER BY date_saved DESC, file_name ASC
+		ORDER BY +date_saved DESC, file_name ASC
 		LIMIT ? OFFSET ?;
 	`
 

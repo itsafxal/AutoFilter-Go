@@ -71,11 +71,23 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		return nil, fmt.Errorf("sqlite database is not initialized")
 	}
 
-	// 1. Primary fast query on file_name using index (date_saved DESC, file_name)
-	likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, false)
-	records, hasNext, err := s.queryRows(ctx, db, likeSQL, likeArgs, limit)
+	// 1. Primary ultra-fast query on file_name using FTS5 trigram index
+	var records []MediaFile
+	var hasNext bool
+	var err error
 
-	// 2. If 0 records found in file_name, check caption as fallback
+	ftsSQL, ftsArgs, canUseFTS := s.buildFTSQuery(tokens, filter, limit+1, offset)
+	if canUseFTS {
+		records, hasNext, err = s.queryRows(ctx, db, ftsSQL, ftsArgs, limit)
+	}
+
+	// 2. Fallback to LIKE query on file_name if FTS was unavailable or found 0 records
+	if len(records) == 0 {
+		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, false)
+		records, hasNext, err = s.queryRows(ctx, db, likeSQL, likeArgs, limit)
+	}
+
+	// 3. If 0 records found in file_name, check caption as fallback
 	if err == nil && len(records) == 0 {
 		capSQL, capArgs := s.buildLikeQuery(tokens, filter, limit+1, offset, true)
 		records, hasNext, _ = s.queryRows(ctx, db, capSQL, capArgs, limit)
@@ -201,6 +213,75 @@ func (s *Service) queryRows(ctx context.Context, db *sql.DB, query string, args 
 	return records, hasNext, nil
 }
 
+func (s *Service) buildFTSQuery(tokens []string, filter SearchFilter, limitPlusOne, offset int) (string, []any, bool) {
+	var ftsTokens []string
+	var shortTokens []string
+
+	for _, token := range tokens {
+		clean := strings.TrimSpace(token)
+		if len(clean) >= 3 {
+			escaped := strings.ReplaceAll(clean, `"`, `""`)
+			ftsTokens = append(ftsTokens, fmt.Sprintf("%q", escaped))
+		} else if len(clean) > 0 {
+			shortTokens = append(shortTokens, clean)
+		}
+	}
+
+	if len(ftsTokens) == 0 {
+		return "", nil, false
+	}
+
+	ftsMatchExpr := strings.Join(ftsTokens, " AND ")
+	var whereConditions []string
+	var args []any
+
+	args = append(args, ftsMatchExpr)
+
+	for _, token := range shortTokens {
+		if len(token) == 1 && unicode.IsDigit(rune(token[0])) {
+			whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.file_name LIKE ? OR m.file_name LIKE ?)")
+			args = append(args,
+				"%."+token+".%",
+				"% "+token+" %",
+				"%-"+token+"-%",
+			)
+		} else {
+			whereConditions = append(whereConditions, "m.file_name LIKE ?")
+			args = append(args, "%"+token+"%")
+		}
+	}
+
+	if filter.Language != "" {
+		whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.caption LIKE ?)")
+		langPattern := "%" + strings.ToLower(filter.Language) + "%"
+		args = append(args, langPattern, langPattern)
+	}
+
+	if filter.Quality != "" {
+		whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.caption LIKE ?)")
+		qualPattern := "%" + strings.ToLower(filter.Quality) + "%"
+		args = append(args, qualPattern, qualPattern)
+	}
+
+	extraWhere := ""
+	if len(whereConditions) > 0 {
+		extraWhere = "AND " + strings.Join(whereConditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT m.file_id, m.file_ref, m.file_name, m.file_size, m.size, m.file_type, m.mime_type, m.caption, m.date_saved
+		FROM media_fts f
+		JOIN media m ON m.rowid = f.rowid
+		WHERE media_fts MATCH ?
+		%s
+		ORDER BY +m.date_saved DESC
+		LIMIT ? OFFSET ?;
+	`, extraWhere)
+
+	args = append(args, limitPlusOne, offset)
+	return query, args, true
+}
+
 func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlusOne, offset int, searchCaption bool) (string, []any) {
 	var whereConditions []string
 	var args []any
@@ -245,7 +326,7 @@ func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlus
 		SELECT file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved
 		FROM media
 		WHERE %s
-		ORDER BY date_saved DESC
+		ORDER BY +date_saved DESC
 		LIMIT ? OFFSET ?;
 	`, whereClause)
 
@@ -282,6 +363,40 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 		return nil, nil
 	}
 
+	// 1. Fast FTS5 trigram candidate query
+	var ftsSugs []string
+	for _, tok := range tokens {
+		if len(tok) >= 3 {
+			escaped := strings.ReplaceAll(tok, `"`, `""`)
+			ftsSugs = append(ftsSugs, fmt.Sprintf("%q", escaped))
+		}
+		if len(tok) >= 4 {
+			escaped := strings.ReplaceAll(tok[:3], `"`, `""`)
+			ftsSugs = append(ftsSugs, fmt.Sprintf("%q", escaped))
+		}
+	}
+
+	if len(ftsSugs) > 0 {
+		ftsMatch := strings.Join(ftsSugs, " OR ")
+		ftsQuery := `
+			SELECT DISTINCT m.file_name
+			FROM media_fts f
+			JOIN media m ON m.rowid = f.rowid
+			WHERE media_fts MATCH ?
+			ORDER BY +m.date_saved DESC
+			LIMIT 60;
+		`
+		if rows, err := db.QueryContext(ctx, ftsQuery, ftsMatch); err == nil {
+			suggestions := s.rankCandidateSuggestions(rows, norm, limit)
+			_ = rows.Close()
+			if len(suggestions) > 0 {
+				s.sugCache.set(norm, suggestions)
+				return suggestions, nil
+			}
+		}
+	}
+
+	// 2. Fallback to LIKE candidate query with disabled index on ORDER BY
 	var orClauses []string
 	var candidateArgs []any
 	for _, tok := range tokens {
@@ -309,7 +424,7 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 		SELECT DISTINCT file_name
 		FROM media
 		WHERE %s
-		ORDER BY date_saved DESC
+		ORDER BY +date_saved DESC
 		LIMIT 60;
 	`, strings.Join(orClauses, " OR "))
 
@@ -319,6 +434,12 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 	}
 	defer rows.Close()
 
+	suggestions := s.rankCandidateSuggestions(rows, norm, limit)
+	s.sugCache.set(norm, suggestions)
+	return suggestions, nil
+}
+
+func (s *Service) rankCandidateSuggestions(rows *sql.Rows, norm string, limit int) []string {
 	type scoredSuggestion struct {
 		title string
 		score float64
@@ -362,8 +483,7 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 		}
 	}
 
-	s.sugCache.set(norm, suggestions)
-	return suggestions, nil
+	return suggestions
 }
 
 // --- Thread-Safe In-Memory LRU Cache ---

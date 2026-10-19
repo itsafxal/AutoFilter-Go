@@ -263,6 +263,9 @@ func (s *Syncer) dropSecondaryIndexes(ctx context.Context) error {
 		"DROP INDEX IF EXISTS idx_media_caption;",
 		"DROP INDEX IF EXISTS idx_date_saved;",
 		"DROP INDEX IF EXISTS idx_media_date_name;",
+		"DROP TRIGGER IF EXISTS media_ai;",
+		"DROP TRIGGER IF EXISTS media_ad;",
+		"DROP TRIGGER IF EXISTS media_au;",
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
@@ -274,15 +277,37 @@ func (s *Syncer) dropSecondaryIndexes(ctx context.Context) error {
 
 func (s *Syncer) ensureIndexes(ctx context.Context) error {
 	queries := []string{
+		"DROP INDEX IF EXISTS idx_date_saved;",
 		"CREATE INDEX IF NOT EXISTS idx_media_file_name ON media (file_name);",
-		"CREATE INDEX IF NOT EXISTS idx_date_saved ON media (date_saved);",
 		"CREATE INDEX IF NOT EXISTS idx_media_date_name ON media (date_saved DESC, file_name);",
+		`CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
+			file_name,
+			content='media',
+			content_rowid='rowid',
+			tokenize='trigram'
+		);`,
+		`CREATE TRIGGER IF NOT EXISTS media_ai AFTER INSERT ON media BEGIN
+			INSERT INTO media_fts(rowid, file_name) VALUES (new.rowid, new.file_name);
+		END;`,
+		`CREATE TRIGGER IF NOT EXISTS media_ad AFTER DELETE ON media BEGIN
+			INSERT INTO media_fts(media_fts, rowid, file_name) VALUES('delete', old.rowid, old.file_name);
+		END;`,
+		`CREATE TRIGGER IF NOT EXISTS media_au AFTER UPDATE ON media BEGIN
+			INSERT INTO media_fts(media_fts, rowid, file_name) VALUES('delete', old.rowid, old.file_name);
+			INSERT INTO media_fts(rowid, file_name) VALUES (new.rowid, new.file_name);
+		END;`,
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
+
+	// Rebuild FTS5 trigram search index after bulk sync
+	if _, err := s.dbManager.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');"); err != nil {
+		s.logger.Warn("failed to rebuild FTS5 index", "error", err)
+	}
+
 	return nil
 }
 

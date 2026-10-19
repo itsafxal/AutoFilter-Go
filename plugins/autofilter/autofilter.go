@@ -158,11 +158,14 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 
 	searchKey := fmt.Sprintf("%d_%d", userID, m.ID)
 
+	startSearch := time.Now()
+
 	// Execute search
 	result, err := p.appCtx.Search.Search(context.Background(), query, maxFilesPerPage, 0, search.SearchFilter{})
+	searchDuration := time.Since(startSearch)
 	if err != nil {
 		if p.appCtx.Logger != nil {
-			p.appCtx.Logger.Error("search error", "query", query, "error", err)
+			p.appCtx.Logger.Error("search error", "query", query, "error", err, "search_ms", searchDuration.Milliseconds())
 		}
 		return nil
 	}
@@ -195,7 +198,12 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			}
 			return replyErr
 		} else if p.appCtx.Logger != nil {
-			p.appCtx.Logger.Info("search results reply sent", "query", query, "results_count", len(result.Files))
+			p.appCtx.Logger.Info("search results reply sent",
+				"query", query,
+				"results_count", len(result.Files),
+				"search_ms", searchDuration.Milliseconds(),
+				"total_ms", time.Since(startSearch).Milliseconds(),
+			)
 		}
 		if replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
 			_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
@@ -233,7 +241,12 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			}
 			return replyErr
 		} else if p.appCtx.Logger != nil {
-			p.appCtx.Logger.Info("spelling suggestions reply sent", "query", query, "suggestions_count", len(suggestions))
+			p.appCtx.Logger.Info("spelling suggestions reply sent",
+				"query", query,
+				"suggestions_count", len(suggestions),
+				"search_ms", searchDuration.Milliseconds(),
+				"total_ms", time.Since(startSearch).Milliseconds(),
+			)
 		}
 		if replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
 			_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
@@ -261,7 +274,11 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		}
 		return replyErr
 	} else if p.appCtx.Logger != nil {
-		p.appCtx.Logger.Info("not-found reply sent", "query", query)
+		p.appCtx.Logger.Info("not-found reply sent",
+			"query", query,
+			"search_ms", searchDuration.Milliseconds(),
+			"total_ms", time.Since(startSearch).Milliseconds(),
+		)
 	}
 	if replyMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
 		_ = p.appCtx.AutoDelete.ScheduleFilterDelete(replyMsg.ChatID(), replyMsg.ID)
