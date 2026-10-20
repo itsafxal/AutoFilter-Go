@@ -8,6 +8,7 @@ import (
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/dustin/go-humanize"
+	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -46,7 +47,10 @@ func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
 
 				chatID := extractChatID(m)
 				if !p.appCtx.Config.IsConfiguredChannel(chatID) {
-					return false
+					monitored, _ := isMonitoredChannel(p.appCtx.Config, m)
+					if !monitored {
+						return false
+					}
 				}
 
 				return isMediaMessage(m)
@@ -67,16 +71,26 @@ func (p *Plugin) HandleChannelMedia(m *telegram.NewMessage) error {
 		return nil
 	}
 
+	chatID := extractChatID(m)
+	if p.appCtx.Logger != nil {
+		p.appCtx.Logger.Info("📥 [Live Index] Media message detected in monitored channel",
+			"chat_id", chatID,
+			"file_name", doc.FileName,
+			"size", doc.Size,
+			"file_type", doc.FileType,
+		)
+	}
+
 	ctx := context.Background()
 
 	// 1. Check for duplicates in SQLite (<0.1ms) and MongoDB
 	exists, err := p.appCtx.DB.CheckMediaExists(ctx, doc.FileID)
 	if err == nil && exists {
 		if p.appCtx.Logger != nil {
-			p.appCtx.Logger.Debug("live channel indexing: skipped duplicate file",
+			p.appCtx.Logger.Info("⚠️ [Live Index] Skipped duplicate file",
 				"file_id", doc.FileID,
 				"file_name", doc.FileName,
-				"chat_id", extractChatID(m),
+				"chat_id", chatID,
 			)
 		}
 		return nil
@@ -86,26 +100,58 @@ func (p *Plugin) HandleChannelMedia(m *telegram.NewMessage) error {
 	shard, err := p.appCtx.DB.SaveMediaLiveAlternating(ctx, *doc)
 	if err != nil {
 		if p.appCtx.Logger != nil {
-			p.appCtx.Logger.Error("live channel indexing: failed to save media",
+			p.appCtx.Logger.Error("❌ [Live Index] Failed to save media to database",
 				"file_id", doc.FileID,
 				"file_name", doc.FileName,
 				"error", err,
+				"chat_id", chatID,
 			)
 		}
 		return err
 	}
 
 	if p.appCtx.Logger != nil {
-		p.appCtx.Logger.Info("live channel indexing: successfully indexed new media",
+		p.appCtx.Logger.Info("✅ [Live Index] File successfully saved to database",
 			"file_id", doc.FileID,
 			"file_name", doc.FileName,
 			"size", doc.Size,
-			"shard", shard,
-			"chat_id", extractChatID(m),
+			"database", shard,
+			"chat_id", chatID,
 		)
 	}
 
 	return nil
+}
+
+func isMonitoredChannel(cfg *config.Config, m *telegram.NewMessage) (bool, int64) {
+	if cfg == nil || len(cfg.Channels) == 0 || m == nil {
+		return false, 0
+	}
+	candidates := []int64{
+		m.ChannelID(),
+		m.ChatID(),
+	}
+	if m.Channel != nil && m.Channel.ID != 0 {
+		candidates = append(candidates, m.Channel.ID)
+	}
+	if m.SenderChat != nil && m.SenderChat.ID != 0 {
+		candidates = append(candidates, m.SenderChat.ID)
+	}
+	if m.Message != nil && m.Message.PeerID != nil {
+		switch p := m.Message.PeerID.(type) {
+		case *telegram.PeerChannel:
+			candidates = append(candidates, p.ChannelID, config.NormalizeChannelID(p.ChannelID))
+		case *telegram.PeerChat:
+			candidates = append(candidates, p.ChatID, config.NormalizeChannelID(p.ChatID))
+		}
+	}
+
+	for _, id := range candidates {
+		if id != 0 && cfg.IsConfiguredChannel(id) {
+			return true, id
+		}
+	}
+	return false, 0
 }
 
 func isMediaMessage(m *telegram.NewMessage) bool {
@@ -119,11 +165,11 @@ func extractChatID(m *telegram.NewMessage) int64 {
 	if m == nil {
 		return 0
 	}
-	if m.ChatID() != 0 {
-		return m.ChatID()
-	}
 	if m.ChannelID() != 0 {
 		return m.ChannelID()
+	}
+	if m.ChatID() != 0 {
+		return m.ChatID()
 	}
 	if m.Channel != nil && m.Channel.ID != 0 {
 		return m.Channel.ID

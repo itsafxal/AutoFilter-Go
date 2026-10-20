@@ -381,18 +381,20 @@ func NormalizeChannelID(rawID int64) int64 {
 	if rawID == 0 {
 		return 0
 	}
-	if rawID < 0 {
-		if rawID <= -10000000000 {
-			return rawID
+	s := strconv.FormatInt(rawID, 10)
+	if strings.HasPrefix(s, "-100") {
+		return rawID
+	}
+	if strings.HasPrefix(s, "100") {
+		if id, err := strconv.ParseInt("-" + s, 10, 64); err == nil {
+			return id
 		}
-		rawID = -rawID
 	}
-	s := fmt.Sprintf("-100%d", rawID)
-	id, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return -rawID
+	s = strings.TrimPrefix(s, "-")
+	if id, err := strconv.ParseInt("-100" + s, 10, 64); err == nil {
+		return id
 	}
-	return id
+	return rawID
 }
 
 // parseChannelIDs parses comma-, space-, or newline-separated channel IDs into normalized -100... IDs.
@@ -429,9 +431,15 @@ func (c *Config) IsConfiguredChannel(chatID int64) bool {
 	if c == nil || len(c.Channels) == 0 || chatID == 0 {
 		return false
 	}
-	norm := NormalizeChannelID(chatID)
+	normTarget := NormalizeChannelID(chatID)
+	rawTargetStr := strings.TrimPrefix(strings.TrimPrefix(strconv.FormatInt(chatID, 10), "-"), "100")
+
 	for _, ch := range c.Channels {
-		if ch == norm {
+		if ch == chatID || ch == normTarget || NormalizeChannelID(ch) == normTarget {
+			return true
+		}
+		chStr := strings.TrimPrefix(strings.TrimPrefix(strconv.FormatInt(ch, 10), "-"), "100")
+		if chStr != "" && chStr == rawTargetStr {
 			return true
 		}
 	}

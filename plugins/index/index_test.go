@@ -22,13 +22,18 @@ func TestIndexPlugin_Metadata(t *testing.T) {
 	}
 
 	cmds := p.Commands()
-	if len(cmds) != 2 {
-		t.Fatalf("expected 2 commands (/index, /setskip), got %d", len(cmds))
+	if len(cmds) != 3 {
+		t.Fatalf("expected 3 commands (/index, /indexlink, /setskip), got %d", len(cmds))
 	}
 
 	cbs := p.CallbackHandlers()
 	if len(cbs) != 3 {
 		t.Fatalf("expected 3 callback handlers, got %d", len(cbs))
+	}
+
+	mhs := p.MessageHandlers()
+	if len(mhs) != 1 {
+		t.Fatalf("expected 1 message handler for forwarded channel messages, got %d", len(mhs))
 	}
 }
 
@@ -41,6 +46,59 @@ func TestIndexPlugin_Skip(t *testing.T) {
 	p.SetSkip(500)
 	if p.GetSkip() != 500 {
 		t.Errorf("expected skip 500, got %d", p.GetSkip())
+	}
+}
+
+func TestIndexPlugin_ForwardedMessageFilter(t *testing.T) {
+	appCtx := &plugins.AppContext{
+		Config: &config.Config{
+			OwnerID: 12345,
+			Admins:  []int64{12345},
+		},
+	}
+	p := New(appCtx)
+	handlers := p.MessageHandlers()
+	if len(handlers) == 0 {
+		t.Fatal("no message handlers registered")
+	}
+
+	// 1. Non-private message should be rejected
+	groupMsg := &telegram.NewMessage{
+		Chat: &telegram.ChatObj{ID: -1001234567890},
+	}
+	if handlers[0].Filter(groupMsg) {
+		t.Errorf("expected non-private message to be rejected")
+	}
+
+	// 2. Non-admin private message should be rejected
+	nonAdminMsg := &telegram.NewMessage{
+		Sender: &telegram.UserObj{ID: 99999},
+	}
+	if handlers[0].Filter(nonAdminMsg) {
+		t.Errorf("expected non-admin message to be rejected")
+	}
+
+	// 3. Admin message that is NOT a forward should be rejected
+	adminRegularMsg := &telegram.NewMessage{
+		Sender:  &telegram.UserObj{ID: 12345},
+		Message: &telegram.MessageObj{Message: "hello"},
+	}
+	if handlers[0].Filter(adminRegularMsg) {
+		t.Errorf("expected non-forwarded admin message to be rejected")
+	}
+
+	// 4. Admin message forwarded from a channel should be accepted
+	adminForwardedMsg := &telegram.NewMessage{
+		Sender: &telegram.UserObj{ID: 12345},
+		Message: &telegram.MessageObj{
+			FwdFrom: &telegram.MessageFwdHeader{
+				FromID:      &telegram.PeerChannel{ChannelID: 1234567890},
+				ChannelPost: 42,
+			},
+		},
+	}
+	if !handlers[0].Filter(adminForwardedMsg) {
+		t.Errorf("expected admin forwarded channel message to be accepted")
 	}
 }
 

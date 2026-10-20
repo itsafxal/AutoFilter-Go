@@ -53,12 +53,46 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Handler:     p.HandleIndexCommand,
 		},
 		{
+			Name:        "indexlink",
+			Description: "Index a range of media files between two message links",
+			Usage:       "/indexlink <start_link> <end_link>",
+			Category:    "Admin",
+			AdminOnly:   true,
+			Handler:     p.HandleIndexLinkCommand,
+		},
+		{
 			Name:        "setskip",
 			Description: "Set the starting message ID for the next indexing run",
 			Usage:       "/setskip <message_id>",
 			Category:    "Admin",
 			AdminOnly:   true,
 			Handler:     p.HandleSetSkipCommand,
+		},
+	}
+}
+
+// MessageHandlers registers listener for channel messages forwarded by Admins/Owners in PM.
+func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
+	return []plugins.MessageDefinition{
+		{
+			Filter: func(m *telegram.NewMessage) bool {
+				if m == nil || p.appCtx == nil || p.appCtx.Config == nil {
+					return false
+				}
+				if !m.IsPrivate() {
+					return false
+				}
+				senderID := m.SenderID()
+				if !p.appCtx.Config.IsAdmin(senderID) && !p.appCtx.Config.IsOwner(senderID) {
+					return false
+				}
+				if !m.IsForward() && (m.Message == nil || m.Message.FwdFrom == nil) {
+					return false
+				}
+				chatIDStr, lastMsgID := extractChannelInfo(m, m)
+				return chatIDStr != "" && lastMsgID > 0
+			},
+			Handler: p.HandleForwardedChannelMessage,
 		},
 	}
 }
@@ -100,17 +134,23 @@ func (p *Plugin) HandleSetSkipCommand(m *telegram.NewMessage) error {
 	if m == nil {
 		return nil
 	}
-	args := strings.TrimSpace(m.Args())
-	if args == "" {
-		_, err := m.Reply("🤔 <b>Missing argument!</b> Please provide a skip message ID.\n\n<b>Usage:</b> <code>/setskip &lt;message_id&gt;</code>", &telegram.SendOptions{
+	fields := strings.Fields(m.Text())
+	if len(fields) < 2 {
+		_, err := m.Reply(fmt.Sprintf(
+			"ℹ️ <b>Current Skip Value:</b> <code>%d</code>\n\n"+
+				"To update the skip message ID for indexing, specify a number:\n"+
+				"<b>Usage:</b> <code>/setskip &lt;message_id&gt;</code>\n"+
+				"<b>Example:</b> <code>/setskip 100</code>",
+			p.GetSkip(),
+		), &telegram.SendOptions{
 			ParseMode: "html",
 		})
 		return err
 	}
 
-	skipVal, err := strconv.Atoi(args)
+	skipVal, err := strconv.Atoi(fields[1])
 	if err != nil || skipVal < 0 {
-		_, replyErr := m.Reply("❌ <b>Invalid input!</b> The skip number must be a <b>positive integer</b>.\n\n<b>Usage:</b> <code>/setskip &lt;message_id&gt;</code>", &telegram.SendOptions{
+		_, replyErr := m.Reply("❌ <b>Invalid input!</b> The skip number must be a <b>positive integer</b> (e.g. <code>/setskip 50</code>).", &telegram.SendOptions{
 			ParseMode: "html",
 		})
 		return replyErr
@@ -121,6 +161,18 @@ func (p *Plugin) HandleSetSkipCommand(m *telegram.NewMessage) error {
 		ParseMode: "html",
 	})
 	return replyErr
+}
+
+// HandleForwardedChannelMessage allows Admins/Owners to forward a post from a channel directly to the bot to trigger indexing.
+func (p *Plugin) HandleForwardedChannelMessage(m *telegram.NewMessage) error {
+	if m == nil {
+		return nil
+	}
+	chatIDStr, lastMsgID := extractChannelInfo(m, m)
+	if chatIDStr == "" || lastMsgID <= 0 {
+		return nil
+	}
+	return p.promptIndexConfirmation(m, chatIDStr, lastMsgID)
 }
 
 // HandleIndexCommand initiates the channel indexing confirmation flow.
@@ -144,6 +196,135 @@ func (p *Plugin) HandleIndexCommand(m *telegram.NewMessage) error {
 		return err
 	}
 
+	return p.promptIndexConfirmation(m, chatIDStr, lastMsgID)
+}
+
+// HandleIndexLinkCommand parses start and end links and prompts for indexing in that range.
+func (p *Plugin) HandleIndexLinkCommand(m *telegram.NewMessage) error {
+	if m == nil {
+		return nil
+	}
+	fields := strings.Fields(m.Text())
+	if len(fields) < 3 {
+		_, err := m.Reply(
+			"💡 <b>Usage:</b> <code>/indexlink &lt;first_message_link&gt; &lt;last_message_link&gt;</code>\n\n"+
+				"<b>Example:</b>\n"+
+				"<code>/indexlink https://t.me/c/1234567890/5 https://t.me/c/1234567890/10</code>\n"+
+				"or\n"+
+				"<code>/indexlink https://t.me/mychannel/5 https://t.me/mychannel/10</code>",
+			&telegram.SendOptions{ParseMode: "html"},
+		)
+		return err
+	}
+
+	startLink := fields[1]
+	endLink := fields[2]
+
+	m1 := linkRegex.FindStringSubmatch(startLink)
+	m2 := linkRegex.FindStringSubmatch(endLink)
+
+	if len(m1) != 3 || len(m2) != 3 {
+		_, err := m.Reply("❌ <b>Invalid message link format!</b> Please provide two valid Telegram message links.", &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		return err
+	}
+
+	channel1 := m1[1]
+	msgID1, _ := strconv.Atoi(m1[2])
+	channel2 := m2[1]
+	msgID2, _ := strconv.Atoi(m2[2])
+
+	if channel1 != channel2 {
+		_, err := m.Reply("❌ <b>Channel mismatch!</b> Both message links must belong to the same channel.", &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		return err
+	}
+
+	if msgID1 <= 0 || msgID2 <= 0 {
+		_, err := m.Reply("❌ <b>Invalid message ID(s)!</b> Message IDs in the links must be positive integers.", &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		return err
+	}
+
+	startID := msgID1
+	endID := msgID2
+	if startID > endID {
+		startID, endID = endID, startID
+	}
+
+	chatIDStr := channel1
+	if strings.Contains(startLink, "/c/") || isNumeric(channel1) {
+		norm := config.NormalizeChannelID(parseInt64(channel1))
+		chatIDStr = fmt.Sprintf("%d", norm)
+	}
+
+	var peer any = chatIDStr
+	if parsedInt, err := strconv.ParseInt(chatIDStr, 10, 64); err == nil {
+		peer = parsedInt
+	}
+
+	// Verify channel accessibility with bot client
+	if p.appCtx != nil && p.appCtx.Client != nil {
+		testMsgs, err := p.appCtx.Client.GetMessages(peer, &telegram.SearchOption{
+			IDs: []int32{int32(startID), int32(endID)},
+		})
+		if err != nil {
+			errStr := strings.ToUpper(err.Error())
+			if strings.Contains(errStr, "CHANNEL_INVALID") || strings.Contains(errStr, "CHANNEL_PRIVATE") || strings.Contains(errStr, "CHAT_ADMIN_REQUIRED") {
+				_, rErr := m.Reply("Access Denied 🔒: This channel is private. Please <b>make me an administrator</b> in that chat to enable indexing.", &telegram.SendOptions{
+					ParseMode: "html",
+				})
+				return rErr
+			}
+			_, rErr := m.Reply(fmt.Sprintf("⚠️ An error occurred while verifying chat access: <code>%s</code>", err.Error()), &telegram.SendOptions{
+				ParseMode: "html",
+			})
+			return rErr
+		}
+		if len(testMsgs) == 0 {
+			_, rErr := m.Reply("🔍 <b>Messages Not Found:</b> The specified messages in the links could not be accessed.", &telegram.SendOptions{
+				ParseMode: "html",
+			})
+			return rErr
+		}
+	}
+
+	senderID := m.SenderID()
+	totalMsgs := endID - startID + 1
+
+	kb := telegram.NewKeyboard().
+		AddRow(
+			telegram.Button.Data("💾 Index to DB1", fmt.Sprintf("index#link1#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
+			telegram.Button.Data("🗃️ Index to DB2", fmt.Sprintf("index#link2#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
+		).
+		AddRow(
+			telegram.Button.Data("🔄 Index to Alternating DBs", fmt.Sprintf("index#link5#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
+		).
+		AddRow(
+			telegram.Button.Data("✖️ Close Options", "close_data"),
+		).Build()
+
+	text := fmt.Sprintf(
+		"✨ <b>Range Indexing Request Confirmation</b> ✨\n\n"+
+			"• <b>Channel:</b> <code>%s</code>\n"+
+			"• <b>Start Message ID:</b> <code>%d</code>\n"+
+			"• <b>End Message ID:</b> <code>%d</code>\n"+
+			"• <b>Total Messages to Scan:</b> <code>%d</code>\n\n"+
+			"Please select your preferred database:",
+		chatIDStr, startID, endID, totalMsgs,
+	)
+
+	_, err := m.Reply(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+	return err
+}
+
+func (p *Plugin) promptIndexConfirmation(m *telegram.NewMessage, chatIDStr string, lastMsgID int) error {
 	var peer any = chatIDStr
 	if parsedInt, err := strconv.ParseInt(chatIDStr, 10, 64); err == nil {
 		peer = parsedInt
@@ -182,7 +363,7 @@ func (p *Plugin) HandleIndexCommand(m *telegram.NewMessage) error {
 	}
 
 	senderID := m.SenderID()
-	isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(senderID)
+	isAdmin := p.appCtx != nil && p.appCtx.Config != nil && (p.appCtx.Config.IsAdmin(senderID) || p.appCtx.Config.IsOwner(senderID))
 
 	if isAdmin {
 		kb := telegram.NewKeyboard().
@@ -274,10 +455,29 @@ func (p *Plugin) HandleIndexCallback(cb *telegram.CallbackQuery) error {
 
 	action := parts[1]
 	chatIDStr := parts[2]
-	lastMsgID, _ := strconv.Atoi(parts[3])
-	fromUserID, _ := strconv.ParseInt(parts[4], 10, 64)
+	var startMsgID, endMsgID int
+	var fromUserID int64
 
-	if action == "reject" {
+	if strings.HasPrefix(action, "link") {
+		if len(parts) < 6 {
+			_, err := cb.Answer("🚫 Invalid callback payload.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return err
+		}
+		startMsgID, _ = strconv.Atoi(parts[3])
+		endMsgID, _ = strconv.Atoi(parts[4])
+		fromUserID, _ = strconv.ParseInt(parts[5], 10, 64)
+		switch action {
+		case "link1":
+			action = "accept1"
+		case "link2":
+			action = "accept2"
+		case "link5":
+			action = "accept5"
+		}
+	} else if action == "reject" {
+		fromUserID, _ = strconv.ParseInt(parts[4], 10, 64)
 		_, _ = cb.Delete()
 		if p.appCtx != nil && p.appCtx.Client != nil && fromUserID > 0 {
 			_, _ = p.appCtx.Client.SendMessage(fromUserID, fmt.Sprintf("❌ Your submission for indexing <b>%s</b> has been <b>declined</b> by our moderators.", chatIDStr), &telegram.SendOptions{
@@ -285,6 +485,14 @@ func (p *Plugin) HandleIndexCallback(cb *telegram.CallbackQuery) error {
 			})
 		}
 		return nil
+	} else {
+		lastMsgID, _ := strconv.Atoi(parts[3])
+		fromUserID, _ = strconv.ParseInt(parts[4], 10, 64)
+		startMsgID = p.GetSkip()
+		if startMsgID <= 0 || startMsgID > lastMsgID {
+			startMsgID = 1
+		}
+		endMsgID = lastMsgID
 	}
 
 	if action != "accept1" && action != "accept2" && action != "accept5" {
@@ -335,7 +543,10 @@ func (p *Plugin) HandleIndexCallback(cb *telegram.CallbackQuery) error {
 	// Launch indexing in a background goroutine
 	go func() {
 		defer atomic.StoreInt32(&p.isIndexing, 0)
-		p.runIndexOperation(progressMsg, chatIDStr, lastMsgID, action, fromUserID)
+		p.runIndexRangeOperation(progressMsg, chatIDStr, startMsgID, endMsgID, action, fromUserID)
+		if !strings.HasPrefix(parts[1], "link") {
+			p.SetSkip(0)
+		}
 	}()
 
 	return nil
@@ -363,13 +574,23 @@ func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
 }
 
 func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr string, lastMsgID int, dbType string, fromUserID int64) {
-	startTime := time.Now()
 	startMsgID := p.GetSkip()
 	if startMsgID <= 0 || startMsgID > lastMsgID {
 		startMsgID = 1
 	}
+	p.runIndexRangeOperation(progressMsg, chatIDStr, startMsgID, lastMsgID, dbType, fromUserID)
+}
 
-	totalMessages := lastMsgID - startMsgID + 1
+func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatIDStr string, startMsgID, endMsgID int, dbType string, fromUserID int64) {
+	startTime := time.Now()
+	if startMsgID <= 0 {
+		startMsgID = 1
+	}
+	if endMsgID < startMsgID {
+		startMsgID, endMsgID = endMsgID, startMsgID
+	}
+
+	totalMessages := endMsgID - startMsgID + 1
 	var (
 		messagesFetched int
 		totalSaved      int
@@ -396,7 +617,7 @@ func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr s
 				"<b>Messages to Scan:</b> <code>%d</code> (from ID %d to %d)\n"+
 				"<b>Current Status:</b> Fetching messages... 📥\n"+
 				"<b>Time Elapsed:</b> <code>0s</code>",
-			chatIDStr, totalMessages, startMsgID, lastMsgID,
+			chatIDStr, totalMessages, startMsgID, endMsgID,
 		), &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: cancelKb,
@@ -406,18 +627,18 @@ func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr s
 	lastUIUpdate := time.Now()
 	const chunkSize = 100
 
-	for currentID := startMsgID; currentID <= lastMsgID; currentID += chunkSize {
+	for currentID := startMsgID; currentID <= endMsgID; currentID += chunkSize {
 		if atomic.LoadInt32(&p.cancelFlag) == 1 {
 			break
 		}
 
-		endID := currentID + chunkSize - 1
-		if endID > lastMsgID {
-			endID = lastMsgID
+		chunkEnd := currentID + chunkSize - 1
+		if chunkEnd > endMsgID {
+			chunkEnd = endMsgID
 		}
 
-		ids := make([]int32, 0, endID-currentID+1)
-		for id := currentID; id <= endID; id++ {
+		ids := make([]int32, 0, chunkEnd-currentID+1)
+		for id := currentID; id <= chunkEnd; id++ {
 			ids = append(ids, int32(id))
 		}
 
@@ -489,7 +710,7 @@ func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr s
 
 		// Update UI throttle (every 3 seconds)
 		now := time.Now()
-		if progressMsg != nil && (now.Sub(lastUIUpdate) >= 3*time.Second || endID >= lastMsgID) {
+		if progressMsg != nil && (now.Sub(lastUIUpdate) >= 3*time.Second || chunkEnd >= endMsgID) {
 			lastUIUpdate = now
 			elapsedStr := formatDuration(now.Sub(startTime))
 			_, _ = progressMsg.Edit(fmt.Sprintf(
@@ -503,7 +724,7 @@ func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr s
 					"<b>🚫 No Media:</b> <code>%d</code> skipped\n"+
 					"<b>❌ Errors:</b> <code>%d</code> encountered\n\n"+
 					"<b>Time Elapsed:</b> <code>%s</code>",
-				chatIDStr, startMsgID, lastMsgID, messagesFetched, totalMessages,
+				chatIDStr, startMsgID, endMsgID, messagesFetched, totalMessages,
 				totalSaved, totalDuplicates, totalNoMedia, totalErrors, elapsedStr,
 			), &telegram.SendOptions{
 				ParseMode:   "html",

@@ -68,3 +68,58 @@ func TestExtractMediaFromMessage_Nil(t *testing.T) {
 		t.Errorf("expected nil for nil message, got %+v", res)
 	}
 }
+
+func TestChannelPlugin_IsMonitoredChannel(t *testing.T) {
+	cfg := &config.Config{
+		Channels: []int64{-1001234567890},
+	}
+
+	// Message with PeerChannel
+	m := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			PeerID: &telegram.PeerChannel{
+				ChannelID: 1234567890,
+			},
+		},
+	}
+
+	monitored, id := isMonitoredChannel(cfg, m)
+	if !monitored {
+		t.Errorf("expected message from channel 1234567890 to be monitored")
+	}
+	if id == 0 {
+		t.Errorf("expected non-zero channel ID")
+	}
+
+	// Message from unmonitored channel
+	unmonitored := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			PeerID: &telegram.PeerChannel{
+				ChannelID: 9999999999,
+			},
+		},
+	}
+	mon, _ := isMonitoredChannel(cfg, unmonitored)
+	if mon {
+		t.Errorf("expected unmonitored channel to be rejected")
+	}
+}
+
+func TestChannelPlugin_ExtractChatID(t *testing.T) {
+	if extractChatID(nil) != 0 {
+		t.Errorf("expected 0 for nil message")
+	}
+
+	m := &telegram.NewMessage{
+		Message: &telegram.MessageObj{
+			PeerID: &telegram.PeerChannel{
+				ChannelID: 1234567890,
+			},
+		},
+	}
+	// ChannelID() returns -1001234567890
+	id := extractChatID(m)
+	if id != -1001234567890 {
+		t.Errorf("expected -1001234567890, got %d", id)
+	}
+}
