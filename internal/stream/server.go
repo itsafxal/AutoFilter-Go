@@ -160,6 +160,18 @@ func (s *Server) GetDownloadURL(fileID string, fileName string) string {
 	return fmt.Sprintf("%s/dl/%s/%s", s.config.BaseURL, fileID, encoded)
 }
 
+// GetExpiringDownloadURL returns a direct fast download URL that expires after the specified duration.
+func (s *Server) GetExpiringDownloadURL(fileID string, fileName string, duration time.Duration) string {
+	baseDL := s.GetDownloadURL(fileID, fileName)
+	if duration == 0 || s.handler == nil {
+		return baseDL
+	}
+
+	exp := time.Now().Add(duration).Unix()
+	sig := s.handler.SignExpiry(fileID, exp)
+	return fmt.Sprintf("%s?exp=%d&sig=%s", baseDL, exp, sig)
+}
+
 // GetWatchURL returns the web video player & details page URL.
 func (s *Server) GetWatchURL(fileID string) string {
 	return fmt.Sprintf("%s/watch/%s", s.config.BaseURL, fileID)

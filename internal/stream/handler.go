@@ -1,6 +1,9 @@
 package stream
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -123,6 +126,22 @@ func (h *Handler) SetDownloader(d TelegramDownloader) {
 // SetRefresher updates the on-demand file reference refresher.
 func (h *Handler) SetRefresher(r FileRefRefresher) {
 	h.refresher = r
+}
+
+// SignExpiry produces an HMAC-SHA256 signature for a file ID and expiration timestamp.
+func (h *Handler) SignExpiry(fileID string, exp int64) string {
+	secret := []byte(h.config.BotUsername)
+	if len(secret) == 0 {
+		secret = []byte("mytgbotz-stream-secret")
+	}
+	mac := hmac.New(sha256.New, secret)
+	payload := fmt.Sprintf("%s:%d", fileID, exp)
+	mac.Write([]byte(payload))
+	fullSig := hex.EncodeToString(mac.Sum(nil))
+	if len(fullSig) > 16 {
+		return fullSig[:16]
+	}
+	return fullSig
 }
 
 // HandleHealthz responds with service health status.
@@ -330,6 +349,47 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 		return
 	}
 
+	// Validate download expiration if provided in query parameters
+	expStr := r.URL.Query().Get("exp")
+	var expVal int64
+	if expStr != "" {
+		if val, pErr := strconv.ParseInt(expStr, 10, 64); pErr == nil {
+			expVal = val
+		}
+	}
+
+	if expVal > 0 {
+		sig := r.URL.Query().Get("sig")
+		expectedSig := h.SignExpiry(fileID, expVal)
+		if sig != expectedSig {
+			http.Error(w, "Invalid or tampered download link signature", http.StatusForbidden)
+			return
+		}
+
+		if time.Now().Unix() > expVal {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusGone)
+			_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head><title>410 Link Expired</title>
+<style>
+body { background: #0b0f19; color: #f87171; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.card { background: #131d2e; border: 1px solid #ef4444; border-radius: 12px; padding: 32px; text-align: center; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+h1 { font-size: 22px; margin-bottom: 12px; color: #ef4444; }
+p { color: #94a3b8; font-size: 14px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="card">
+<h1>⏳ Fast Download Link Expired</h1>
+<p>This high-speed download link has expired in accordance with the bot's auto-delete timer.<br><br>Please return to the Telegram bot and click Fast Download to generate a fresh link.</p>
+</div>
+</body>
+</html>`)
+			return
+		}
+	}
+
 	if h.mediaProvider == nil {
 		http.Error(w, "Media service unavailable", http.StatusServiceUnavailable)
 		return
@@ -415,6 +475,11 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 	for offset := start; offset <= end; {
 		if ctx.Err() != nil {
 			// Client disconnected (e.g. paused video, closed tab, seeked to new position)
+			return
+		}
+
+		if expVal > 0 && time.Now().Unix() > expVal {
+			h.logger.Info("download link expired during transfer, terminating stream", "file_id", fileID)
 			return
 		}
 

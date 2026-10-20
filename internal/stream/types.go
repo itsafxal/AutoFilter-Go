@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
@@ -40,6 +41,7 @@ type StreamService interface {
 	Stop(ctx context.Context) error
 	GetStreamURL(fileID string, fileName string) string
 	GetDownloadURL(fileID string, fileName string) string
+	GetExpiringDownloadURL(fileID string, fileName string, duration time.Duration) string
 	GetWatchURL(fileID string) string
 	GetPlaylistURL(fileID string, fileName string) string
 	Handler() http.Handler

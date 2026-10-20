@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
@@ -444,6 +445,63 @@ func TestPrepareUnboundedMedia(t *testing.T) {
 	// Original object must remain unmodified
 	if doc.Size != 1968245678 {
 		t.Errorf("original document size was modified, expected 1968245678, got %d", doc.Size)
+	}
+}
+
+func TestExpiringDownload_Valid(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	expURL := srv.GetExpiringDownloadURL("valid_video", "Avengers.mp4", 10*time.Minute)
+	if !strings.Contains(expURL, "exp=") || !strings.Contains(expURL, "sig=") {
+		t.Fatalf("expected expiring URL to contain exp and sig parameters, got: %s", expURL)
+	}
+
+	// Parse relative path + query for httptest
+	pathAndQuery := strings.TrimPrefix(expURL, "http://localhost:8080")
+	req := httptest.NewRequest(http.MethodGet, pathAndQuery, nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for valid non-expired download, got %d", rec.Code)
+	}
+}
+
+func TestExpiringDownload_Expired(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	// Link expired 5 seconds ago
+	expURL := srv.GetExpiringDownloadURL("valid_video", "Avengers.mp4", -5*time.Second)
+	pathAndQuery := strings.TrimPrefix(expURL, "http://localhost:8080")
+
+	req := httptest.NewRequest(http.MethodGet, pathAndQuery, nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusGone {
+		t.Fatalf("expected 410 Gone for expired link, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Fast Download Link Expired") {
+		t.Errorf("expected expired error message in response body, got: %s", body)
+	}
+}
+
+func TestExpiringDownload_InvalidSignature(t *testing.T) {
+	srv, _ := setupTestServer()
+
+	// Valid timestamp but tampered signature
+	expURL := srv.GetExpiringDownloadURL("valid_video", "Avengers.mp4", 10*time.Minute)
+	pathAndQuery := strings.TrimPrefix(expURL, "http://localhost:8080")
+	// Tamper signature
+	pathAndQuery = pathAndQuery[:len(pathAndQuery)-4] + "dead"
+
+	req := httptest.NewRequest(http.MethodGet, pathAndQuery, nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for tampered signature, got %d", rec.Code)
 	}
 }
 
