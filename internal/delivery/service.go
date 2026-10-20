@@ -337,7 +337,7 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	var sentMsg *telegram.NewMessage
 	var methodUsed string
 
-	// Attach Fast Download & Stream button if enabled
+	// Attach Fast Download button if enabled
 	targetStreamURL := s.streamURL
 	if opts.StreamURL != "" {
 		targetStreamURL = strings.TrimRight(strings.TrimSpace(opts.StreamURL), "/")
@@ -351,7 +351,7 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	if enableBtn {
 		replyMarkup = telegram.NewKeyboard().
 			AddRow(
-				telegram.Button.Data("📺 Watch Online / Fast Download", fmt.Sprintf("stream_links#%s", cleanID)),
+				telegram.Button.Data("⚡ Fast Download", fmt.Sprintf("fast_download#%s", cleanID)),
 			).
 			Build()
 	}

@@ -426,3 +426,24 @@ func TestHandleStream_OPTIONS_CORS(t *testing.T) {
 		t.Error("expected GET in Access-Control-Allow-Methods")
 	}
 }
+
+func TestPrepareUnboundedMedia(t *testing.T) {
+	doc := &telegram.DocumentObj{
+		ID:   123456,
+		Size: 1968245678,
+	}
+
+	stripped := prepareUnboundedMedia(doc)
+	strippedDoc, ok := stripped.(*telegram.DocumentObj)
+	if !ok {
+		t.Fatalf("expected *telegram.DocumentObj, got %T", stripped)
+	}
+	if strippedDoc.Size != 0 {
+		t.Errorf("expected Size == 0, got %d", strippedDoc.Size)
+	}
+	// Original object must remain unmodified
+	if doc.Size != 1968245678 {
+		t.Errorf("original document size was modified, expected 1968245678, got %d", doc.Size)
+	}
+}
+

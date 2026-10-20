@@ -143,13 +143,13 @@ func (h *Handler) HandleRoot(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
-<head><title>Telegram Fast Stream Server</title>
+<head><title>Telegram Fast Download Server</title>
 <style>body{font-family:sans-serif;background:#0b0f19;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}</style>
 </head>
 <body>
 <div style="text-align:center;">
-<h1>⚡ Telegram Fast Stream & Download Server</h1>
-<p style="color:#94a3b8;">High-speed HTTP streaming engine powered by Telegram MTProto.</p>
+<h1>⚡ Telegram Fast Download Server</h1>
+<p style="color:#94a3b8;">High-speed HTTP download engine powered by Telegram MTProto.</p>
 </div>
 </body>
 </html>`)
@@ -423,19 +423,19 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 			reqEnd = end + 1
 		}
 
-		// Align to chunk boundary for Telegram API
+		// Align to chunk boundary for Telegram API. Telegram requires Limit to be a multiple
+		// of 4096 (or 1024). We always request full aligned chunkSize blocks; Telegram safely
+		// returns remaining bytes at EOF without throwing [LIMIT_INVALID].
 		alignedOffset := (offset / int64(chunkSize)) * int64(chunkSize)
-		alignedEnd := ((reqEnd + int64(chunkSize) - 1) / int64(chunkSize)) * int64(chunkSize)
-		if alignedEnd > totalSize {
-			alignedEnd = totalSize
-		}
+		alignedEnd := alignedOffset + int64(chunkSize)
 
 		if h.downloader == nil {
 			h.logger.Error("telegram downloader client not configured")
 			return
 		}
 
-		data, _, err := h.downloader.DownloadChunk(mediaToDownload, int(alignedOffset), int(alignedEnd), chunkSize)
+		mediaForChunk := prepareUnboundedMedia(mediaToDownload)
+		data, _, err := h.downloader.DownloadChunk(mediaForChunk, int(alignedOffset), int(alignedEnd), chunkSize)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -446,7 +446,8 @@ func (h *Handler) serveMedia(w http.ResponseWriter, r *http.Request, fileID stri
 				refreshed, rErr := h.refresher.RefreshFileRef(ctx, fileID)
 				if rErr == nil && refreshed != nil {
 					mediaToDownload = refreshed
-					data, _, err = h.downloader.DownloadChunk(mediaToDownload, int(alignedOffset), int(alignedEnd), chunkSize)
+					mediaForChunk = prepareUnboundedMedia(mediaToDownload)
+					data, _, err = h.downloader.DownloadChunk(mediaForChunk, int(alignedOffset), int(alignedEnd), chunkSize)
 				} else if rErr != nil {
 					h.logger.Warn("file reference refresh failed", "file_id", fileID, "error", rErr)
 				}
@@ -499,3 +500,22 @@ func isFileRefExpired(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "FILE_REFERENCE_EXPIRED") || strings.Contains(msg, "FILE_REFERENCE_INVALID")
 }
+
+// prepareUnboundedMedia strips the Size constraint from media so that Gogram's DownloadChunk
+// does not truncate the final chunk request to an unaligned byte count, which causes Telegram's
+// UploadGetFile to reject the request with [LIMIT_INVALID].
+func prepareUnboundedMedia(media any) any {
+	switch m := media.(type) {
+	case *telegram.DocumentObj:
+		cp := *m
+		cp.Size = 0
+		return &cp
+	case *telegram.PhotoObj:
+		cp := *m
+		cp.Sizes = nil
+		return &cp
+	default:
+		return media
+	}
+}
+

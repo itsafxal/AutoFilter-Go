@@ -18,27 +18,33 @@ func TestStreamPlugin_Registration(t *testing.T) {
 		t.Fatal("expected at least 1 command")
 	}
 
-	hasStream := false
+	hasFastDL := false
 	for _, cmd := range cmds {
-		if cmd.Name == "stream" {
-			hasStream = true
+		if cmd.Name == "fastdl" || cmd.Name == "stream" {
+			hasFastDL = true
 			if len(cmd.Aliases) == 0 {
-				t.Error("expected aliases for /stream command")
+				t.Error("expected aliases for command")
 			}
 			break
 		}
 	}
-	if !hasStream {
-		t.Error("expected 'stream' command to be registered")
+	if !hasFastDL {
+		t.Error("expected 'fastdl' command to be registered")
 	}
 
 	cbs := plugin.CallbackHandlers()
+	hasFastDLCb := false
 	hasStreamLinksCb := false
 	for _, cb := range cbs {
+		if cb.Prefix == "fast_download#" {
+			hasFastDLCb = true
+		}
 		if cb.Prefix == "stream_links#" {
 			hasStreamLinksCb = true
-			break
 		}
+	}
+	if !hasFastDLCb {
+		t.Error("expected 'fast_download#' callback handler to be registered")
 	}
 	if !hasStreamLinksCb {
 		t.Error("expected 'stream_links#' callback handler to be registered")
