@@ -490,3 +490,53 @@ func TestConfig_Channels(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("OWNER_ID", "99887766")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("OWNER_ID")
+		os.Unsetenv("ENABLE_PREMIUM_EMOJI")
+		os.Unsetenv("PREV_BUTTON_EMOJI_ID")
+		os.Unsetenv("NEXT_BUTTON_EMOJI_ID")
+	}()
+
+	// Defaults
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.EnablePremiumEmoji {
+		t.Errorf("expected EnablePremiumEmoji to default to true")
+	}
+	if cfg.PrevButtonEmojiID != 5989806303474618304 {
+		t.Errorf("expected default PrevButtonEmojiID 5989806303474618304, got %d", cfg.PrevButtonEmojiID)
+	}
+	if cfg.NextButtonEmojiID != 5992261405565260004 {
+		t.Errorf("expected default NextButtonEmojiID 5992261405565260004, got %d", cfg.NextButtonEmojiID)
+	}
+
+	// Custom values
+	os.Setenv("ENABLE_PREMIUM_EMOJI", "false")
+	os.Setenv("PREV_BUTTON_EMOJI_ID", "12345")
+	os.Setenv("NEXT_BUTTON_EMOJI_ID", "67890")
+
+	cfg2, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg2.EnablePremiumEmoji {
+		t.Errorf("expected EnablePremiumEmoji to be false")
+	}
+	if cfg2.PrevButtonEmojiID != 12345 {
+		t.Errorf("expected PrevButtonEmojiID 12345, got %d", cfg2.PrevButtonEmojiID)
+	}
+	if cfg2.NextButtonEmojiID != 67890 {
+		t.Errorf("expected NextButtonEmojiID 67890, got %d", cfg2.NextButtonEmojiID)
+	}
+}
+

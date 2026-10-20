@@ -1091,6 +1091,40 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
 }
 
+func (p *Plugin) isPremiumEmojiEnabled() bool {
+	return p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.EnablePremiumEmoji
+}
+
+func (p *Plugin) getPrevEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.PrevButtonEmojiID != 0 {
+		return p.appCtx.Config.PrevButtonEmojiID
+	}
+	return 5989806303474618304
+}
+
+func (p *Plugin) getNextEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.NextButtonEmojiID != 0 {
+		return p.appCtx.Config.NextButtonEmojiID
+	}
+	return 5992261405565260004
+}
+
+func (p *Plugin) buildPrevButton(searchKey string, prevOffset int) *telegram.KeyboardButtonCallback {
+	data := fmt.Sprintf("next|%s|%d", searchKey, prevOffset)
+	if p.isPremiumEmojiEnabled() {
+		return telegram.Button.Data("", data).Icon(p.getPrevEmojiID()).Success()
+	}
+	return telegram.Button.Data("◀ Previous", data).Success()
+}
+
+func (p *Plugin) buildNextButton(searchKey string, nextOffset int) *telegram.KeyboardButtonCallback {
+	data := fmt.Sprintf("next|%s|%d", searchKey, nextOffset)
+	if p.isPremiumEmojiEnabled() {
+		return telegram.Button.Data("", data).Icon(p.getNextEmojiID()).Success()
+	}
+	return telegram.Button.Data("Next ▶", data).Success()
+}
+
 func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, currentPage, totalPages int, hasFilter bool) *telegram.ReplyInlineMarkup {
 	kb := telegram.NewKeyboard()
 
@@ -1122,7 +1156,7 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 		if prevOffset < 0 {
 			prevOffset = 0
 		}
-		navButtons = append(navButtons, telegram.Button.Data("◀ Previous", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)).Success())
+		navButtons = append(navButtons, p.buildPrevButton(searchKey, prevOffset))
 	}
 
 	// Page indicator button: always present
@@ -1137,7 +1171,7 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 	// Next button: only when currentPage < totalPages (Green color)
 	if currentPage < totalPages {
 		nextOffset := currentPage * maxFilesPerPage
-		navButtons = append(navButtons, telegram.Button.Data("Next ▶", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)).Success())
+		navButtons = append(navButtons, p.buildNextButton(searchKey, nextOffset))
 	}
 
 	if len(navButtons) > 0 {

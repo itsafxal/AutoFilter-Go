@@ -120,6 +120,15 @@ type Config struct {
 
 	// EnableFastDownloadButton specifies whether the "⚡ Get Fast Download" button is added to delivered media (default: true).
 	EnableFastDownloadButton bool
+
+	// EnablePremiumEmoji specifies whether custom emoji IDs are used for search pagination buttons (default: true).
+	EnablePremiumEmoji bool
+
+	// PrevButtonEmojiID defines the Telegram custom emoji ID for the Previous button (default: 5989806303474618304).
+	PrevButtonEmojiID int64
+
+	// NextButtonEmojiID defines the Telegram custom emoji ID for the Next button (default: 5992261405565260004).
+	NextButtonEmojiID int64
 }
 
 
@@ -315,6 +324,27 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
+	enablePremiumEmoji := true
+	if peStr := strings.TrimSpace(os.Getenv("ENABLE_PREMIUM_EMOJI")); peStr != "" {
+		if val, err := strconv.ParseBool(peStr); err == nil {
+			enablePremiumEmoji = val
+		}
+	}
+
+	prevEmojiID := int64(5989806303474618304)
+	if pEmojiStr := strings.TrimSpace(os.Getenv("PREV_BUTTON_EMOJI_ID")); pEmojiStr != "" {
+		if val, err := strconv.ParseInt(pEmojiStr, 10, 64); err == nil && val != 0 {
+			prevEmojiID = val
+		}
+	}
+
+	nextEmojiID := int64(5992261405565260004)
+	if nEmojiStr := strings.TrimSpace(os.Getenv("NEXT_BUTTON_EMOJI_ID")); nEmojiStr != "" {
+		if val, err := strconv.ParseInt(nEmojiStr, 10, 64); err == nil && val != 0 {
+			nextEmojiID = val
+		}
+	}
+
 	cfg := &Config{
 		BotToken:                 token,
 		AppID:                    apiID,
@@ -347,6 +377,9 @@ func LoadFromEnv() (*Config, error) {
 		StreamPort:               streamPort,
 		StreamBindAddr:           streamBindAddr,
 		EnableFastDownloadButton: enableFastDownloadBtn,
+		EnablePremiumEmoji:       enablePremiumEmoji,
+		PrevButtonEmojiID:        prevEmojiID,
+		NextButtonEmojiID:        nextEmojiID,
 		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
 	}
 

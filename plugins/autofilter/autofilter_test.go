@@ -319,6 +319,90 @@ func TestAutofilter_Pagination_SinglePage(t *testing.T) {
 	}
 }
 
+func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
+	appCtx := &plugins.AppContext{
+		Config: &config.Config{
+			EnablePremiumEmoji: true,
+			PrevButtonEmojiID:  5989806303474618304,
+			NextButtonEmojiID:  5992261405565260004,
+		},
+	}
+	plugin := New(appCtx)
+	files := []search.MediaFile{
+		{FileID: "f1", FileName: "Vikram.2022.Tamil.1080p.mkv", Size: "1.4 GB"},
+	}
+
+	// Page 2 of 8: should have Previous (with Icon and empty text) + Page + Next (with Icon and empty text)
+	kb := plugin.buildResultKeyboard(files, "key1", 2, 8, false)
+	if kb == nil || len(kb.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(kb.Rows))
+	}
+
+	navRow := kb.Rows[2].Buttons
+	if len(navRow) != 3 {
+		t.Fatalf("expected 3 nav buttons on middle page, got %d", len(navRow))
+	}
+	prevBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	pageBtn := navRow[1].(*telegram.KeyboardButtonCallback)
+	nextBtn := navRow[2].(*telegram.KeyboardButtonCallback)
+
+	// Previous button: empty text, custom emoji ID, Success style (Green)
+	if prevBtn.Text != "" {
+		t.Errorf("expected empty text for premium Previous button, got %q", prevBtn.Text)
+	}
+	if prevBtn.Style == nil || !prevBtn.Style.BgSuccess {
+		t.Errorf("expected Previous button to be Success (Green)")
+	}
+	if prevBtn.Style == nil || prevBtn.Style.Icon != 5989806303474618304 {
+		t.Errorf("expected Previous button Icon to be 5989806303474618304, got %v", prevBtn.Style.Icon)
+	}
+
+	// Page button: normal text, Danger style
+	if pageBtn.Text != "📄 Page 2 / 8" {
+		t.Errorf("expected '📄 Page 2 / 8', got %q", pageBtn.Text)
+	}
+	if pageBtn.Style == nil || !pageBtn.Style.BgDanger {
+		t.Errorf("expected page indicator on page > 1 to be Danger (Red)")
+	}
+
+	// Next button: empty text, custom emoji ID, Success style (Green)
+	if nextBtn.Text != "" {
+		t.Errorf("expected empty text for premium Next button, got %q", nextBtn.Text)
+	}
+	if nextBtn.Style == nil || !nextBtn.Style.BgSuccess {
+		t.Errorf("expected Next button to be Success (Green)")
+	}
+	if nextBtn.Style == nil || nextBtn.Style.Icon != 5992261405565260004 {
+		t.Errorf("expected Next button Icon to be 5992261405565260004, got %v", nextBtn.Style.Icon)
+	}
+}
+
+func TestAutofilter_Pagination_PremiumEmoji_Disabled(t *testing.T) {
+	appCtx := &plugins.AppContext{
+		Config: &config.Config{
+			EnablePremiumEmoji: false,
+			PrevButtonEmojiID:  5989806303474618304,
+			NextButtonEmojiID:  5992261405565260004,
+		},
+	}
+	plugin := New(appCtx)
+	files := []search.MediaFile{
+		{FileID: "f1", FileName: "Vikram.2022.Tamil.1080p.mkv", Size: "1.4 GB"},
+	}
+
+	kb := plugin.buildResultKeyboard(files, "key1", 2, 8, false)
+	navRow := kb.Rows[2].Buttons
+	prevBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	nextBtn := navRow[2].(*telegram.KeyboardButtonCallback)
+
+	if prevBtn.Text != "◀ Previous" {
+		t.Errorf("expected fallback '◀ Previous' when disabled, got %q", prevBtn.Text)
+	}
+	if nextBtn.Text != "Next ▶" {
+		t.Errorf("expected fallback 'Next ▶' when disabled, got %q", nextBtn.Text)
+	}
+}
+
 func TestAutofilter_FileButtonLabel_Format(t *testing.T) {
 	testCases := []struct {
 		name     string
