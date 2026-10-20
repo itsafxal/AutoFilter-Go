@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
+	appsql "github.com/itsafxal/MYTGBOTZ/internal/database/sql"
 )
 
 // SearchService defines the contract for movie search and suggestion queries.
@@ -82,8 +83,8 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		candidateRecords, _, err = s.queryRows(ctx, db, ftsSQL, ftsArgs, maxCandidates)
 	}
 
-	// 2. Only fallback to LIKE query on file_name if FTS could not be used (e.g. short <3 char query)
-	if !canUseFTS && len(candidateRecords) == 0 {
+	// 2. Fallback to LIKE query on file_name if FTS returned no candidates
+	if len(candidateRecords) == 0 {
 		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, false)
 		candidateRecords, _, err = s.queryRows(ctx, db, likeSQL, likeArgs, maxCandidates)
 	}
@@ -96,6 +97,44 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 
 	// Apply intelligent release parser and strict movie matching
 	matchedFiles := FilterAndRankStrict(query, candidateRecords)
+
+	// 4. Fallback to authoritative MongoDB media shards if SQLite returned no matches
+	// (e.g. during background migration, when sync is disabled, or for newly indexed media)
+	if len(matchedFiles) == 0 && s.dbManager != nil && s.dbManager.MongoMediaRepo() != nil {
+		mongoDocs, mErr := s.dbManager.MongoMediaRepo().Search(ctx, query, 100)
+		if mErr == nil && len(mongoDocs) > 0 {
+			var mongoCandidates []MediaFile
+			for _, doc := range mongoDocs {
+				mf := MediaFile{
+					FileID:    doc.FileID,
+					FileRef:   doc.FileRef,
+					FileName:  doc.FileName,
+					FileSize:  doc.FileSize,
+					Size:      doc.Size,
+					FileType:  doc.FileType,
+					MimeType:  doc.MimeType,
+					Caption:   doc.Caption,
+					DateSaved: doc.Date,
+				}
+				mongoCandidates = append(mongoCandidates, mf)
+				// Opportunistically cache to SQLite so future queries are instant
+				go func(rec MediaFile) {
+					_ = s.dbManager.SaveMedia(context.Background(), appsql.MediaRecord{
+						FileID:    rec.FileID,
+						FileRef:   rec.FileRef,
+						FileName:  rec.FileName,
+						FileSize:  rec.FileSize,
+						Size:      rec.Size,
+						FileType:  rec.FileType,
+						MimeType:  rec.MimeType,
+						Caption:   rec.Caption,
+						DateSaved: rec.DateSaved,
+					})
+				}(mf)
+			}
+			matchedFiles = FilterAndRankStrict(query, mongoCandidates)
+		}
+	}
 
 	// If no records found
 	if len(matchedFiles) == 0 {
@@ -423,6 +462,44 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 	defer rows.Close()
 
 	suggestions := s.rankCandidateSuggestions(rows, norm, limit)
+
+	// Fallback to authoritative MongoDB candidate titles if SQLite produced no suggestions
+	if len(suggestions) == 0 && s.dbManager != nil && s.dbManager.MongoMediaRepo() != nil && len(tokens) > 0 {
+		candTitles, _ := s.dbManager.MongoMediaRepo().SearchCandidateTitles(ctx, tokens[0], 50)
+		if len(candTitles) > 0 {
+			type scoredSuggestion struct {
+				title string
+				score float64
+			}
+			seen := make(map[string]struct{})
+			var candList []scoredSuggestion
+			for _, rawName := range candTitles {
+				cleanTitle := CleanReleaseName(rawName)
+				if cleanTitle == "" || len(cleanTitle) < 2 {
+					cleanTitle = strings.TrimSpace(rawName)
+				}
+				key := strings.ToLower(cleanTitle)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				seen[key] = struct{}{}
+				score := ComputeSimilarity(norm, cleanTitle)
+				if score >= 0.45 {
+					candList = append(candList, scoredSuggestion{title: cleanTitle, score: score})
+				}
+			}
+			sort.SliceStable(candList, func(i, j int) bool {
+				return candList[i].score > candList[j].score
+			})
+			for _, c := range candList {
+				suggestions = append(suggestions, c.title)
+				if len(suggestions) >= limit {
+					break
+				}
+			}
+		}
+	}
+
 	s.sugCache.set(norm, suggestions)
 	return suggestions, nil
 }

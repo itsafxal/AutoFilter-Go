@@ -104,7 +104,9 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 		// 3. Perform media synchronization from MongoDB to SQLite
 		m.syncer = sql.NewSyncer(m.sqlManager, m.mongoMediaRepo, m.logger, m.cfg.SyncBatchSize)
 
-		if m.cfg.BackgroundSync {
+		if !m.cfg.EnableSync {
+			m.logger.Info("⚡ Media synchronization disabled (ENABLE_SYNC=false); running in high-speed zero-sync MongoDB direct mode")
+		} else if m.cfg.BackgroundSync {
 			// Check if already populated to skip immediately
 			isComplete, _ := m.syncer.IsSyncComplete(ctx)
 			hasData, _ := m.syncer.HasData(ctx)

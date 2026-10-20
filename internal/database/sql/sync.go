@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -321,33 +322,51 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 }
 
 func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongodb.MediaDoc) error {
+	if len(docs) == 0 {
+		return nil
+	}
 	return s.dbManager.ExecWrite(func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, insertSQL)
-		if err != nil {
-			return fmt.Errorf("prepare error: %w", err)
-		}
-		defer stmt.Close()
-
+		const chunkSize = 200
 		now := time.Now()
-		for _, doc := range docs {
-			var dateSaved interface{} = now
-			if !doc.Date.IsZero() {
-				dateSaved = doc.Date
-			}
 
-			_, err := stmt.ExecContext(ctx,
-				doc.FileID,
-				doc.FileRef,
-				doc.FileName,
-				doc.FileSize,
-				doc.Size,
-				doc.FileType,
-				doc.MimeType,
-				doc.Caption,
-				dateSaved,
-			)
-			if err != nil {
-				return fmt.Errorf("insert error for file %s: %w", doc.FileID, err)
+		for i := 0; i < len(docs); i += chunkSize {
+			end := i + chunkSize
+			if end > len(docs) {
+				end = len(docs)
+			}
+			chunk := docs[i:end]
+
+			var b strings.Builder
+			b.WriteString("INSERT OR IGNORE INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved) VALUES ")
+			args := make([]interface{}, 0, len(chunk)*9)
+
+			for j, doc := range chunk {
+				if j > 0 {
+					b.WriteString(",")
+				}
+				b.WriteString("(?,?,?,?,?,?,?,?,?)")
+
+				var dateSaved interface{} = now
+				if !doc.Date.IsZero() {
+					dateSaved = doc.Date
+				}
+
+				args = append(args,
+					doc.FileID,
+					doc.FileRef,
+					doc.FileName,
+					doc.FileSize,
+					doc.Size,
+					doc.FileType,
+					doc.MimeType,
+					doc.Caption,
+					dateSaved,
+				)
+			}
+			b.WriteString(";")
+
+			if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
+				return fmt.Errorf("chunk insert error: %w", err)
 			}
 		}
 		return nil
@@ -355,14 +374,10 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 }
 
 func (s *Syncer) dropSecondaryIndexes(ctx context.Context) error {
+	// Preserve media_ai triggers and idx_media_file_name so that SQLite remains indexed and searchable in real-time
 	queries := []string{
-		"DROP INDEX IF EXISTS idx_media_file_name;",
 		"DROP INDEX IF EXISTS idx_media_caption;",
 		"DROP INDEX IF EXISTS idx_date_saved;",
-		"DROP INDEX IF EXISTS idx_media_date_name;",
-		"DROP TRIGGER IF EXISTS media_ai;",
-		"DROP TRIGGER IF EXISTS media_ad;",
-		"DROP TRIGGER IF EXISTS media_au;",
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {

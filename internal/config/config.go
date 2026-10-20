@@ -71,6 +71,11 @@ type Config struct {
 	// BackgroundSync specifies whether media synchronization runs asynchronously in the background, allowing the bot to boot immediately (default: true).
 	BackgroundSync bool
 
+	// EnableSync specifies whether MongoDB media documents are synchronized to local SQLite (default: true).
+	// If set to false (via ENABLE_SYNC=false or DISABLE_SYNC=true), startup synchronization is completely bypassed
+	// and the bot boots in ~1 second, querying authoritative MongoDB directly.
+	EnableSync bool
+
 	// CustomCaption defines the default media caption template when none is overridden by an admin.
 	CustomCaption string
 
@@ -278,6 +283,17 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
+	enableSync := true
+	if esStr := strings.TrimSpace(os.Getenv("ENABLE_SYNC")); esStr != "" {
+		if val, err := strconv.ParseBool(esStr); err == nil {
+			enableSync = val
+		}
+	} else if dsStr := strings.TrimSpace(os.Getenv("DISABLE_SYNC")); dsStr != "" {
+		if val, err := strconv.ParseBool(dsStr); err == nil {
+			enableSync = !val
+		}
+	}
+
 	cfg := &Config{
 		BotToken:                 token,
 		AppID:                    apiID,
@@ -295,6 +311,7 @@ func LoadFromEnv() (*Config, error) {
 		SQLiteDBPath:             sqlitePath,
 		SyncBatchSize:            batchSize,
 		BackgroundSync:           backgroundSync,
+		EnableSync:               enableSync,
 		CustomCaption:            customCaption,
 		FSubChannelDescription:   fsubDesc,
 		AutoDeleteFilterTime:     filterDelTime,

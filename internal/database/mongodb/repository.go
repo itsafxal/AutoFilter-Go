@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -431,4 +433,189 @@ func (r *MediaRepository) GetFileDetails(ctx context.Context, fileID string) (*M
 	}
 
 	return nil, nil
+}
+
+// Search executes a fast concurrent search across all media shards for documents matching the query.
+func (r *MediaRepository) Search(ctx context.Context, query string, limit int) ([]MediaDoc, error) {
+	if r == nil || len(r.shards) == 0 {
+		return nil, nil
+	}
+
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	words := strings.Fields(trimmed)
+	if len(words) == 0 {
+		return nil, nil
+	}
+
+	var andConds []bson.M
+	for _, w := range words {
+		cleaned := strings.TrimSpace(w)
+		if cleaned == "" {
+			continue
+		}
+		andConds = append(andConds, bson.M{
+			"file_name": bson.M{
+				"$regex":   regexp.QuoteMeta(cleaned),
+				"$options": "i",
+			},
+		})
+	}
+
+	if len(andConds) == 0 {
+		return nil, nil
+	}
+
+	var filter bson.M
+	if len(andConds) == 1 {
+		filter = andConds[0]
+	} else {
+		filter = bson.M{"$and": andConds}
+	}
+
+	opts := options.Find().
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "date", Value: -1}}).
+		SetProjection(bson.M{
+			"_id":       1,
+			"file_ref":  1,
+			"file_name": 1,
+			"file_size": 1,
+			"size":      1,
+			"file_type": 1,
+			"mime_type": 1,
+			"caption":   1,
+			"date":      1,
+		})
+
+	searchCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	var (
+		mu      sync.Mutex
+		results []MediaDoc
+		seen    = make(map[string]struct{})
+		wg      sync.WaitGroup
+	)
+
+	for _, shard := range r.shards {
+		if shard.Col == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(sh MediaShard) {
+			defer wg.Done()
+			cur, err := sh.Col.Find(searchCtx, filter, opts)
+			if err != nil {
+				return
+			}
+			defer cur.Close(context.Background())
+
+			var docs []MediaDoc
+			for cur.Next(searchCtx) {
+				var d MediaDoc
+				if err := cur.Decode(&d); err == nil && d.FileID != "" {
+					docs = append(docs, d)
+				}
+			}
+
+			if len(docs) > 0 {
+				mu.Lock()
+				for _, d := range docs {
+					if _, exists := seen[d.FileID]; !exists {
+						seen[d.FileID] = struct{}{}
+						results = append(results, d)
+					}
+				}
+				mu.Unlock()
+			}
+		}(shard)
+	}
+
+	wg.Wait()
+	return results, nil
+}
+
+// SearchCandidateTitles fetches candidate file names from MongoDB shards for spell check suggestions.
+func (r *MediaRepository) SearchCandidateTitles(ctx context.Context, prefix string, limit int) ([]string, error) {
+	if r == nil || len(r.shards) == 0 {
+		return nil, nil
+	}
+	trimmed := strings.TrimSpace(prefix)
+	if len(trimmed) < 2 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+
+	filter := bson.M{
+		"file_name": bson.M{
+			"$regex":   regexp.QuoteMeta(trimmed),
+			"$options": "i",
+		},
+	}
+
+	opts := options.Find().
+		SetLimit(int64(limit)).
+		SetSort(bson.D{{Key: "date", Value: -1}}).
+		SetProjection(bson.M{
+			"file_name": 1,
+		})
+
+	searchCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	var (
+		mu     sync.Mutex
+		titles []string
+		seen   = make(map[string]struct{})
+		wg     sync.WaitGroup
+	)
+
+	for _, shard := range r.shards {
+		if shard.Col == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(sh MediaShard) {
+			defer wg.Done()
+			cur, err := sh.Col.Find(searchCtx, filter, opts)
+			if err != nil {
+				return
+			}
+			defer cur.Close(context.Background())
+
+			var shardTitles []string
+			for cur.Next(searchCtx) {
+				var doc struct {
+					FileName string `bson:"file_name"`
+				}
+				if err := cur.Decode(&doc); err == nil && doc.FileName != "" {
+					shardTitles = append(shardTitles, doc.FileName)
+				}
+			}
+
+			if len(shardTitles) > 0 {
+				mu.Lock()
+				for _, t := range shardTitles {
+					if _, exists := seen[t]; !exists {
+						seen[t] = struct{}{}
+						titles = append(titles, t)
+					}
+				}
+				mu.Unlock()
+			}
+		}(shard)
+	}
+
+	wg.Wait()
+	return titles, nil
 }
