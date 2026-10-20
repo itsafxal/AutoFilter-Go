@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
@@ -331,4 +332,190 @@ func (m *DatabaseManager) Syncer() *sql.Syncer {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.syncer
+}
+
+// MediaDocToRecord converts a MongoDB MediaDoc to a SQLite MediaRecord.
+func MediaDocToRecord(doc mongodb.MediaDoc) sql.MediaRecord {
+	dateSaved := doc.Date
+	if dateSaved.IsZero() {
+		dateSaved = time.Now().UTC()
+	}
+	return sql.MediaRecord{
+		FileID:    doc.FileID,
+		FileRef:   doc.FileRef,
+		FileName:  doc.FileName,
+		FileSize:  doc.FileSize,
+		Size:      doc.Size,
+		FileType:  doc.FileType,
+		MimeType:  doc.MimeType,
+		Caption:   doc.Caption,
+		DateSaved: dateSaved,
+	}
+}
+
+// CheckMediaExists checks if a media document already exists in SQLite or MongoDB.
+func (m *DatabaseManager) CheckMediaExists(ctx context.Context, fileID string) (bool, error) {
+	if fileID == "" {
+		return false, nil
+	}
+	m.mu.RLock()
+	sqlRepo := m.sqlMediaRepo
+	mongoRepo := m.mongoMediaRepo
+	m.mu.RUnlock()
+
+	// 1. Fast SQLite primary-key index lookup (<0.1ms)
+	if sqlRepo != nil {
+		rec, err := sqlRepo.GetFileDetails(ctx, fileID)
+		if err == nil && rec != nil && rec.FileID != "" {
+			return true, nil
+		}
+	}
+
+	// 2. Fallback to MongoDB check across shards
+	if mongoRepo != nil {
+		return mongoRepo.CheckFileExists(ctx, fileID)
+	}
+
+	return false, nil
+}
+
+// BulkCheckMediaExists checks a slice of file IDs across SQLite and MongoDB.
+func (m *DatabaseManager) BulkCheckMediaExists(ctx context.Context, fileIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(fileIDs))
+	for _, id := range fileIDs {
+		result[id] = false
+	}
+	if len(fileIDs) == 0 {
+		return result, nil
+	}
+
+	m.mu.RLock()
+	sqlRepo := m.sqlMediaRepo
+	mongoRepo := m.mongoMediaRepo
+	m.mu.RUnlock()
+
+	var remaining []string
+	if sqlRepo != nil {
+		sqlMap, err := sqlRepo.BulkCheckFiles(ctx, fileIDs)
+		if err == nil {
+			for id, exists := range sqlMap {
+				if exists {
+					result[id] = true
+				} else {
+					remaining = append(remaining, id)
+				}
+			}
+		} else {
+			remaining = fileIDs
+		}
+	} else {
+		remaining = fileIDs
+	}
+
+	if len(remaining) > 0 && mongoRepo != nil {
+		mongoMap, err := mongoRepo.BulkCheckFiles(ctx, remaining)
+		if err == nil {
+			for id, exists := range mongoMap {
+				if exists {
+					result[id] = true
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// SaveMediaLiveAlternating saves a media item atomically alternating across MongoDB clusters
+// (DB2 and DB3) and immediately inserts it into SQLite so it is instantly searchable.
+func (m *DatabaseManager) SaveMediaLiveAlternating(ctx context.Context, doc mongodb.MediaDoc) (string, error) {
+	m.mu.RLock()
+	mongoRepo := m.mongoMediaRepo
+	sqlRepo := m.sqlMediaRepo
+	m.mu.RUnlock()
+
+	var shardLabel string
+	if mongoRepo != nil {
+		lbl, err := mongoRepo.SaveMediaAlternating(ctx, doc)
+		if err != nil {
+			return "", err
+		}
+		shardLabel = lbl
+	}
+
+	if sqlRepo != nil {
+		_ = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+	}
+
+	return shardLabel, nil
+}
+
+// SaveMediaLive saves a media item to a specific MongoDB shard and to SQLite.
+func (m *DatabaseManager) SaveMediaLive(ctx context.Context, doc mongodb.MediaDoc, shardIndex int) error {
+	m.mu.RLock()
+	mongoRepo := m.mongoMediaRepo
+	sqlRepo := m.sqlMediaRepo
+	m.mu.RUnlock()
+
+	if mongoRepo != nil {
+		if err := mongoRepo.SaveMedia(ctx, doc, shardIndex); err != nil {
+			return err
+		}
+	}
+
+	if sqlRepo != nil {
+		_ = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+	}
+
+	return nil
+}
+
+// BulkSaveMedia saves a batch of documents to MongoDB and SQLite.
+func (m *DatabaseManager) BulkSaveMedia(ctx context.Context, docs []mongodb.MediaDoc, shardIndex int) (saved int, duplicates int, err error) {
+	m.mu.RLock()
+	mongoRepo := m.mongoMediaRepo
+	sqlRepo := m.sqlMediaRepo
+	m.mu.RUnlock()
+
+	if mongoRepo != nil {
+		saved, duplicates, err = mongoRepo.BulkSaveMedia(ctx, docs, shardIndex)
+		if err != nil {
+			return saved, duplicates, err
+		}
+	}
+
+	if sqlRepo != nil {
+		records := make([]sql.MediaRecord, 0, len(docs))
+		for _, d := range docs {
+			records = append(records, MediaDocToRecord(d))
+		}
+		_ = sqlRepo.BulkSaveMedia(ctx, records)
+	}
+
+	return saved, duplicates, nil
+}
+
+// BulkSaveMediaAlternating saves docs in alternating batches (100 to DB2, 100 to DB3, etc.) and to SQLite.
+func (m *DatabaseManager) BulkSaveMediaAlternating(ctx context.Context, docs []mongodb.MediaDoc, chunkSize int) (saved int, duplicates int, err error) {
+	m.mu.RLock()
+	mongoRepo := m.mongoMediaRepo
+	sqlRepo := m.sqlMediaRepo
+	m.mu.RUnlock()
+
+	if mongoRepo != nil {
+		saved, duplicates, err = mongoRepo.BulkSaveMediaAlternating(ctx, docs, chunkSize)
+		if err != nil {
+			return saved, duplicates, err
+		}
+	}
+
+	if sqlRepo != nil {
+		records := make([]sql.MediaRecord, 0, len(docs))
+		for _, d := range docs {
+			records = append(records, MediaDocToRecord(d))
+		}
+		_ = sqlRepo.BulkSaveMedia(ctx, records)
+	}
+
+	return saved, duplicates, nil
 }

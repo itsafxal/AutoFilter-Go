@@ -117,3 +117,32 @@ func TestShardedMediaRepository(t *testing.T) {
 		t.Errorf("unexpected shard labels: %+v", repo.Shards())
 	}
 }
+
+func TestMediaRepository_EdgeCases(t *testing.T) {
+	var repo *MediaRepository
+	exists, err := repo.CheckFileExists(nil, "abc")
+	if err != nil || exists {
+		t.Errorf("expected false, nil for nil repo")
+	}
+
+	res, err := repo.BulkCheckFiles(nil, []string{"abc"})
+	if err != nil || res["abc"] {
+		t.Errorf("expected false for nil repo BulkCheckFiles")
+	}
+
+	err = repo.SaveMedia(nil, MediaDoc{FileID: "abc"}, 0)
+	if err == nil {
+		t.Error("expected error for nil repo SaveMedia")
+	}
+
+	saved, dups, err := repo.BulkSaveMedia(nil, nil, 0)
+	if err != nil || saved != 0 || dups != 0 {
+		t.Errorf("expected 0, 0, nil for nil repo BulkSaveMedia")
+	}
+
+	saved, dups, err = repo.BulkSaveMediaAlternating(nil, nil, 100)
+	if err != nil || saved != 0 || dups != 0 {
+		t.Errorf("expected 0, 0, nil for nil repo BulkSaveMediaAlternating")
+	}
+}
+

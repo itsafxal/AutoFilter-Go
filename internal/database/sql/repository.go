@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -206,9 +207,108 @@ func (r *MediaRepository) SaveMedia(ctx context.Context, rec MediaRecord) error 
 	if r.dbManager == nil || r.dbManager.DB() == nil || rec.FileID == "" {
 		return nil
 	}
+	if rec.DateSaved.IsZero() {
+		rec.DateSaved = time.Now().UTC()
+	}
 	query := `INSERT OR REPLACE INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`
 	_, err := r.dbManager.DB().ExecContext(ctx, query,
 		rec.FileID, rec.FileRef, rec.FileName, rec.FileSize, rec.Size, rec.FileType, rec.MimeType, rec.Caption, rec.DateSaved)
 	return err
+}
+
+// BulkSaveMedia efficiently inserts or replaces a batch of media records in SQLite
+// using a single atomic transaction.
+func (r *MediaRepository) BulkSaveMedia(ctx context.Context, records []MediaRecord) error {
+	if r.dbManager == nil || r.dbManager.DB() == nil || len(records) == 0 {
+		return nil
+	}
+
+	tx, err := r.dbManager.DB().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for BulkSaveMedia: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR REPLACE INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement for BulkSaveMedia: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, rec := range records {
+		if rec.FileID == "" {
+			continue
+		}
+		if rec.DateSaved.IsZero() {
+			rec.DateSaved = now
+		}
+		if _, err := stmt.ExecContext(ctx,
+			rec.FileID,
+			rec.FileRef,
+			rec.FileName,
+			rec.FileSize,
+			rec.Size,
+			rec.FileType,
+			rec.MimeType,
+			rec.Caption,
+			rec.DateSaved,
+		); err != nil {
+			return fmt.Errorf("failed executing BulkSaveMedia insert for %s: %w", rec.FileID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit BulkSaveMedia transaction: %w", err)
+	}
+
+	return nil
+}
+
+// BulkCheckFiles checks which fileIDs exist in SQLite.
+func (r *MediaRepository) BulkCheckFiles(ctx context.Context, fileIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(fileIDs))
+	for _, id := range fileIDs {
+		result[id] = false
+	}
+	if r.dbManager == nil || r.dbManager.DB() == nil || len(fileIDs) == 0 {
+		return result, nil
+	}
+
+	const chunkSize = 500
+	for i := 0; i < len(fileIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(fileIDs) {
+			end = len(fileIDs)
+		}
+		chunk := fileIDs[i:end]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			placeholders[j] = "?"
+			args[j] = id
+		}
+
+		query := fmt.Sprintf("SELECT file_id FROM media WHERE file_id IN (%s);", strings.Join(placeholders, ","))
+		rows, err := r.dbManager.DB().QueryContext(ctx, query, args...)
+		if err != nil {
+			return result, err
+		}
+		for rows.Next() {
+			var fid string
+			if err := rows.Scan(&fid); err == nil && fid != "" {
+				result[fid] = true
+			}
+		}
+		rows.Close()
+	}
+
+	return result, nil
 }

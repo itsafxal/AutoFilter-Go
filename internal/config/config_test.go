@@ -464,3 +464,48 @@ func TestLoadFromEnv_StreamConfig(t *testing.T) {
 		t.Errorf("expected masked StreamBotToken in String(), got: %s", str)
 	}
 }
+
+func TestConfig_Channels(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("OWNER_ID", "99887766")
+	os.Setenv("CHANNELS", "-1001234567890, 1009876543210, -1005555555555")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("OWNER_ID")
+		os.Unsetenv("CHANNELS")
+	}()
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.Channels) != 3 {
+		t.Fatalf("expected 3 channels, got %d", len(cfg.Channels))
+	}
+
+	// Channel -1001234567890 should match directly
+	if !cfg.IsConfiguredChannel(-1001234567890) {
+		t.Errorf("expected -1001234567890 to be configured")
+	}
+
+	// Positive channel ID 1234567890 should normalize and match -1001234567890
+	if !cfg.IsConfiguredChannel(1234567890) {
+		t.Errorf("expected positive ID 1234567890 to match configured channel")
+	}
+
+	// Negative ID without -100 prefix should also normalize and match
+	if !cfg.IsConfiguredChannel(-1234567890) {
+		t.Errorf("expected -1234567890 to normalize and match configured channel")
+	}
+
+	// Unrelated channel
+	if cfg.IsConfiguredChannel(-1009999999999) {
+		t.Errorf("expected unrelated channel not to match")
+	}
+}
+

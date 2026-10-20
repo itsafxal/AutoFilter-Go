@@ -1,0 +1,645 @@
+package index
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
+	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/MYTGBOTZ/plugins/channel"
+)
+
+var linkRegex = regexp.MustCompile(`(?:https?://)?(?:t\.me|telegram\.me|telegram\.dog)/(?:c/)?([a-zA-Z0-9_]+)/(\d+)`)
+
+// Plugin implements channel bulk indexing via /index and /setskip commands.
+type Plugin struct {
+	appCtx     *plugins.AppContext
+	skipMu     sync.RWMutex
+	skip       int
+	indexMu    sync.Mutex
+	isIndexing int32
+	cancelFlag int32
+}
+
+// New creates a new index plugin instance.
+func New(appCtx *plugins.AppContext) *Plugin {
+	return &Plugin{
+		appCtx: appCtx,
+		skip:   0,
+	}
+}
+
+// Name returns the unique plugin name.
+func (p *Plugin) Name() string {
+	return "index"
+}
+
+// Commands returns the command definitions for bulk indexing.
+func (p *Plugin) Commands() []plugins.CommandDefinition {
+	return []plugins.CommandDefinition{
+		{
+			Name:        "index",
+			Description: "Index media files from a channel or forwarded message",
+			Usage:       "/index [message_link]",
+			Category:    "Admin",
+			Handler:     p.HandleIndexCommand,
+		},
+		{
+			Name:        "setskip",
+			Description: "Set the starting message ID for the next indexing run",
+			Usage:       "/setskip <message_id>",
+			Category:    "Admin",
+			AdminOnly:   true,
+			Handler:     p.HandleSetSkipCommand,
+		},
+	}
+}
+
+// CallbackHandlers registers interactive callback query handlers for database selection and cancellation.
+func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
+	return []plugins.CallbackDefinition{
+		{
+			Prefix:  "index#",
+			Handler: p.HandleIndexCallback,
+		},
+		{
+			Prefix:  "index_cancel",
+			Handler: p.HandleCancelCallback,
+		},
+		{
+			Prefix:  "close_data",
+			Handler: p.HandleCloseCallback,
+		},
+	}
+}
+
+// SetSkip sets the starting message ID for indexing.
+func (p *Plugin) SetSkip(skip int) {
+	p.skipMu.Lock()
+	defer p.skipMu.Unlock()
+	p.skip = skip
+}
+
+// GetSkip gets the starting message ID for indexing.
+func (p *Plugin) GetSkip() int {
+	p.skipMu.RLock()
+	defer p.skipMu.RUnlock()
+	return p.skip
+}
+
+// HandleSetSkipCommand configures the starting skip message ID.
+func (p *Plugin) HandleSetSkipCommand(m *telegram.NewMessage) error {
+	if m == nil {
+		return nil
+	}
+	args := strings.TrimSpace(m.Args())
+	if args == "" {
+		_, err := m.Reply("🤔 <b>Missing argument!</b> Please provide a skip message ID.\n\n<b>Usage:</b> <code>/setskip &lt;message_id&gt;</code>", &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		return err
+	}
+
+	skipVal, err := strconv.Atoi(args)
+	if err != nil || skipVal < 0 {
+		_, replyErr := m.Reply("❌ <b>Invalid input!</b> The skip number must be a <b>positive integer</b>.\n\n<b>Usage:</b> <code>/setskip &lt;message_id&gt;</code>", &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		return replyErr
+	}
+
+	p.SetSkip(skipVal)
+	_, replyErr := m.Reply(fmt.Sprintf("✅ <b>Success!</b> The <b>SKIP number</b> has been set to <code>%d</code>.\n\nThe next indexing operation will commence from this message ID.", skipVal), &telegram.SendOptions{
+		ParseMode: "html",
+	})
+	return replyErr
+}
+
+// HandleIndexCommand initiates the channel indexing confirmation flow.
+func (p *Plugin) HandleIndexCommand(m *telegram.NewMessage) error {
+	if m == nil {
+		return nil
+	}
+
+	targetMsg := m
+	if m.IsReply() {
+		if reply, err := m.GetReplyMessage(); err == nil && reply != nil {
+			targetMsg = reply
+		}
+	}
+
+	chatIDStr, lastMsgID := extractChannelInfo(m, targetMsg)
+	if chatIDStr == "" || lastMsgID <= 0 {
+		_, err := m.Reply("💡 To initiate indexing, please forward the <b>last message</b> from the desired channel/group, reply to a forwarded message with <code>/index</code>, or provide a <b>valid Telegram message link</b> (e.g. <code>https://t.me/channel_username/123</code>).", &telegram.SendOptions{
+			ParseMode: "html",
+		})
+		return err
+	}
+
+	var peer any = chatIDStr
+	if parsedInt, err := strconv.ParseInt(chatIDStr, 10, 64); err == nil {
+		peer = parsedInt
+	}
+
+	// Verify chat and message accessibility
+	if p.appCtx != nil && p.appCtx.Client != nil {
+		testMsgs, err := p.appCtx.Client.GetMessages(peer, &telegram.SearchOption{
+			IDs: []int32{int32(lastMsgID)},
+		})
+		if err != nil {
+			errStr := strings.ToUpper(err.Error())
+			if strings.Contains(errStr, "CHANNEL_INVALID") || strings.Contains(errStr, "CHANNEL_PRIVATE") || strings.Contains(errStr, "CHAT_ADMIN_REQUIRED") {
+				_, rErr := m.Reply("Access Denied 🔒: This appears to be a private channel/group. Please <b>make me an administrator</b> in that chat to enable indexing.", &telegram.SendOptions{
+					ParseMode: "html",
+				})
+				return rErr
+			}
+			if strings.Contains(errStr, "USERNAME_INVALID") || strings.Contains(errStr, "USERNAME_NOT_MODIFIED") {
+				_, rErr := m.Reply("❌ <b>Invalid Link/Username:</b> The specified channel username or link is incorrect or not found. Double-check and try again.", &telegram.SendOptions{
+					ParseMode: "html",
+				})
+				return rErr
+			}
+			_, rErr := m.Reply(fmt.Sprintf("⚠️ An error occurred while verifying chat access or message availability: <code>%s</code>", err.Error()), &telegram.SendOptions{
+				ParseMode: "html",
+			})
+			return rErr
+		}
+		if len(testMsgs) == 0 {
+			_, rErr := m.Reply("🔍 <b>Message Not Found:</b> The specified message ID is invalid or inaccessible.", &telegram.SendOptions{
+				ParseMode: "html",
+			})
+			return rErr
+		}
+	}
+
+	senderID := m.SenderID()
+	isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(senderID)
+
+	if isAdmin {
+		kb := telegram.NewKeyboard().
+			AddRow(
+				telegram.Button.Data("💾 Index to DB1", fmt.Sprintf("index#accept1#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+				telegram.Button.Data("🗃️ Index to DB2", fmt.Sprintf("index#accept2#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+			).
+			AddRow(
+				telegram.Button.Data("🔄 Index to Alternating DBs", fmt.Sprintf("index#accept5#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+			).
+			AddRow(
+				telegram.Button.Data("✖️ Close Options", "close_data"),
+			).Build()
+
+		text := fmt.Sprintf(
+			"✨ <b>Indexing Request Confirmation</b> ✨\n\n"+
+				"You are about to initiate indexing for:\n"+
+				"• <b>Chat ID/Username:</b> <code>%s</code>\n"+
+				"• <b>Last Message ID:</b> <code>%d</code>\n\n"+
+				"Please select your preferred database for indexing:",
+			chatIDStr, lastMsgID,
+		)
+		_, err := m.Reply(text, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: kb,
+		})
+		return err
+	}
+
+	// Non-admin submission: send to bot admins
+	userMention := fmt.Sprintf("<a href=\"tg://user?id=%d\">User</a>", senderID)
+	if m.Sender != nil && m.Sender.FirstName != "" {
+		userMention = fmt.Sprintf("<a href=\"tg://user?id=%d\">%s</a>", senderID, m.Sender.FirstName)
+	}
+
+	adminNotice := fmt.Sprintf(
+		"🚨 <b>New Indexing Request</b> 🚨\n\n"+
+			"<b>Initiated By:</b> %s (ID: <code>%d</code>)\n"+
+			"<b>Target Chat:</b> <code>%s</code>\n"+
+			"<b>Last Message ID:</b> <code>%d</code>\n\n"+
+			"Please review and decide:",
+		userMention, senderID, chatIDStr, lastMsgID,
+	)
+
+	reqKb := telegram.NewKeyboard().
+		AddRow(
+			telegram.Button.Data("✅ Accept (DB1)", fmt.Sprintf("index#accept1#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+			telegram.Button.Data("✅ Accept (DB2)", fmt.Sprintf("index#accept2#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+		).
+		AddRow(
+			telegram.Button.Data("🔄 Accept (Alternating DBs)", fmt.Sprintf("index#accept5#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+		).
+		AddRow(
+			telegram.Button.Data("❌ Decline Request", fmt.Sprintf("index#reject#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+		).Build()
+
+	if p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Client != nil {
+		for _, admin := range p.appCtx.Config.Admins {
+			_, _ = p.appCtx.Client.SendMessage(admin, adminNotice, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: reqKb,
+			})
+		}
+	}
+
+	_, err := m.Reply("🌟 <b>Request Submitted!</b> 🌟\n\n"+
+		"Thank you for contributing! Your indexing request has been sent to our moderators for review.\n"+
+		"You will receive a notification once your request is accepted or declined.\n\n"+
+		"Appreciate your patience! 🙏", &telegram.SendOptions{
+		ParseMode: "html",
+	})
+	return err
+}
+
+// HandleIndexCallback processes index acceptance and rejection button clicks.
+func (p *Plugin) HandleIndexCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+
+	data := cb.DataString()
+	parts := strings.Split(data, "#")
+	if len(parts) < 5 {
+		_, err := cb.Answer("🚫 Invalid callback payload.", &telegram.CallbackOptions{
+			Alert: true,
+		})
+		return err
+	}
+
+	action := parts[1]
+	chatIDStr := parts[2]
+	lastMsgID, _ := strconv.Atoi(parts[3])
+	fromUserID, _ := strconv.ParseInt(parts[4], 10, 64)
+
+	if action == "reject" {
+		_, _ = cb.Delete()
+		if p.appCtx != nil && p.appCtx.Client != nil && fromUserID > 0 {
+			_, _ = p.appCtx.Client.SendMessage(fromUserID, fmt.Sprintf("❌ Your submission for indexing <b>%s</b> has been <b>declined</b> by our moderators.", chatIDStr), &telegram.SendOptions{
+				ParseMode: "html",
+			})
+		}
+		return nil
+	}
+
+	if action != "accept1" && action != "accept2" && action != "accept5" {
+		_, err := cb.Answer("🚫 Unknown action.", &telegram.CallbackOptions{
+			Alert: true,
+		})
+		return err
+	}
+
+	// Verify indexing lock
+	if !atomic.CompareAndSwapInt32(&p.isIndexing, 0, 1) {
+		_, err := cb.Answer("⚠️ An indexing process is already active. Please wait for it to complete.", &telegram.CallbackOptions{
+			Alert: true,
+		})
+		return err
+	}
+
+	_, _ = cb.Answer("🚀 Initiating indexing process...", &telegram.CallbackOptions{
+		Alert: false,
+	})
+
+	if p.appCtx != nil && p.appCtx.Config != nil && !p.appCtx.Config.IsAdmin(fromUserID) && p.appCtx.Client != nil {
+		_, _ = p.appCtx.Client.SendMessage(fromUserID, fmt.Sprintf("✅ Your request to index <b>%s</b> has been <b>accepted</b> by our moderators and will commence shortly!", chatIDStr), &telegram.SendOptions{
+			ParseMode: "html",
+		})
+	}
+
+	cancelKb := telegram.NewKeyboard().
+		AddRow(
+			telegram.Button.Data("🛑 Cancel Indexing", "index_cancel"),
+		).Build()
+
+	progressMsg, editErr := cb.Edit(
+		"✨ <b>Indexing Operation Commencing!</b> ✨\n\n"+
+			"Please monitor this message for real-time progress updates.\n\n"+
+			"To halt the process at any time, tap the 'Cancel Indexing' button.",
+		&telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: cancelKb,
+		},
+	)
+	if editErr != nil {
+		progressMsg, _ = cb.GetMessage()
+	}
+
+	atomic.StoreInt32(&p.cancelFlag, 0)
+
+	// Launch indexing in a background goroutine
+	go func() {
+		defer atomic.StoreInt32(&p.isIndexing, 0)
+		p.runIndexOperation(progressMsg, chatIDStr, lastMsgID, action, fromUserID)
+	}()
+
+	return nil
+}
+
+// HandleCancelCallback signals cancellation to the active indexing operation.
+func (p *Plugin) HandleCancelCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+	atomic.StoreInt32(&p.cancelFlag, 1)
+	_, err := cb.Answer("🛑 Indexing cancellation requested. Stopping gracefully...", &telegram.CallbackOptions{
+		Alert: true,
+	})
+	return err
+}
+
+// HandleCloseCallback closes an options dialog.
+func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+	_, err := cb.Delete()
+	return err
+}
+
+func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr string, lastMsgID int, dbType string, fromUserID int64) {
+	startTime := time.Now()
+	startMsgID := p.GetSkip()
+	if startMsgID <= 0 || startMsgID > lastMsgID {
+		startMsgID = 1
+	}
+
+	totalMessages := lastMsgID - startMsgID + 1
+	var (
+		messagesFetched int
+		totalSaved      int
+		totalDuplicates int
+		totalNoMedia    int
+		totalErrors     int
+	)
+
+	var peer any = chatIDStr
+	if parsedInt, err := strconv.ParseInt(chatIDStr, 10, 64); err == nil {
+		peer = parsedInt
+	}
+
+	cancelKb := telegram.NewKeyboard().
+		AddRow(
+			telegram.Button.Data("🛑 Cancel Indexing", "index_cancel"),
+		).Build()
+
+	// Initial progress notification
+	if progressMsg != nil {
+		_, _ = progressMsg.Edit(fmt.Sprintf(
+			"✨ <b>Indexing Initialized!</b> ✨\n\n"+
+				"<b>Channel:</b> <code>%s</code>\n"+
+				"<b>Messages to Scan:</b> <code>%d</code> (from ID %d to %d)\n"+
+				"<b>Current Status:</b> Fetching messages... 📥\n"+
+				"<b>Time Elapsed:</b> <code>0s</code>",
+			chatIDStr, totalMessages, startMsgID, lastMsgID,
+		), &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: cancelKb,
+		})
+	}
+
+	lastUIUpdate := time.Now()
+	const chunkSize = 100
+
+	for currentID := startMsgID; currentID <= lastMsgID; currentID += chunkSize {
+		if atomic.LoadInt32(&p.cancelFlag) == 1 {
+			break
+		}
+
+		endID := currentID + chunkSize - 1
+		if endID > lastMsgID {
+			endID = lastMsgID
+		}
+
+		ids := make([]int32, 0, endID-currentID+1)
+		for id := currentID; id <= endID; id++ {
+			ids = append(ids, int32(id))
+		}
+
+		fetched, err := p.appCtx.Client.GetMessages(peer, &telegram.SearchOption{
+			IDs: ids,
+		})
+		if err != nil {
+			totalErrors += len(ids)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		messagesFetched += len(fetched)
+
+		// Extract media items
+		var mediaDocs []mongodb.MediaDoc
+		var fileIDs []string
+
+		for _, m := range fetched {
+			doc := channel.ExtractMediaFromMessage(&m)
+			if doc == nil || doc.FileID == "" {
+				totalNoMedia++
+				continue
+			}
+			mediaDocs = append(mediaDocs, *doc)
+			fileIDs = append(fileIDs, doc.FileID)
+		}
+
+		if len(mediaDocs) > 0 {
+			// Check duplicates in bulk
+			ctx := context.Background()
+			existMap, err := p.appCtx.DB.BulkCheckMediaExists(ctx, fileIDs)
+			if err != nil {
+				existMap = make(map[string]bool)
+			}
+
+			var newDocs []mongodb.MediaDoc
+			for _, doc := range mediaDocs {
+				if existMap[doc.FileID] {
+					totalDuplicates++
+				} else {
+					newDocs = append(newDocs, doc)
+				}
+			}
+
+			if len(newDocs) > 0 {
+				var saved, dups int
+				var saveErr error
+
+				switch dbType {
+				case "accept1":
+					saved, dups, saveErr = p.appCtx.DB.BulkSaveMedia(ctx, newDocs, 0)
+				case "accept2":
+					saved, dups, saveErr = p.appCtx.DB.BulkSaveMedia(ctx, newDocs, 1)
+				case "accept5":
+					saved, dups, saveErr = p.appCtx.DB.BulkSaveMediaAlternating(ctx, newDocs, 100)
+				default:
+					saved, dups, saveErr = p.appCtx.DB.BulkSaveMediaAlternating(ctx, newDocs, 100)
+				}
+
+				if saveErr != nil {
+					totalErrors += len(newDocs)
+				} else {
+					totalSaved += saved
+					totalDuplicates += dups
+				}
+			}
+		}
+
+		// Update UI throttle (every 3 seconds)
+		now := time.Now()
+		if progressMsg != nil && (now.Sub(lastUIUpdate) >= 3*time.Second || endID >= lastMsgID) {
+			lastUIUpdate = now
+			elapsedStr := formatDuration(now.Sub(startTime))
+			_, _ = progressMsg.Edit(fmt.Sprintf(
+				"📊 <b>Indexing Progress Update</b> 📊\n\n"+
+					"<b>Channel:</b> <code>%s</code>\n"+
+					"<b>Target Range:</b> <code>%d</code> to <code>%d</code>\n\n"+
+					"<b>Messages Fetched:</b> <code>%d</code> / <code>%d</code>\n\n"+
+					"--- <b>Current Stats</b> ---\n"+
+					"<b>✅ Saved:</b> <code>%d</code> files\n"+
+					"<b>⚠️ Duplicates:</b> <code>%d</code> skipped\n"+
+					"<b>🚫 No Media:</b> <code>%d</code> skipped\n"+
+					"<b>❌ Errors:</b> <code>%d</code> encountered\n\n"+
+					"<b>Time Elapsed:</b> <code>%s</code>",
+				chatIDStr, startMsgID, lastMsgID, messagesFetched, totalMessages,
+				totalSaved, totalDuplicates, totalNoMedia, totalErrors, elapsedStr,
+			), &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: cancelKb,
+			})
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	totalDuration := formatDuration(time.Since(startTime))
+	var finalReport string
+
+	if atomic.LoadInt32(&p.cancelFlag) == 1 {
+		finalReport = fmt.Sprintf(
+			"🛑 <b>Indexing Operation Cancelled for</b> <code>%s</code> 🛑\n\n"+
+				"The process was interrupted by user request.\n\n"+
+				"<b>Total Messages Scanned:</b> <code>%d</code>\n"+
+				"<b>Successfully Saved Files:</b> <code>%d</code>\n"+
+				"<b>Skipped (Duplicates):</b> <code>%d</code>\n"+
+				"<b>Skipped (No Media/Invalid):</b> <code>%d</code>\n"+
+				"<b>Errors during processing:</b> <code>%d</code>\n"+
+				"<b>Elapsed Time:</b> <code>%s</code>\n\n"+
+				"The indexing can be resumed later using <code>/setskip</code>.",
+			chatIDStr, messagesFetched, totalSaved, totalDuplicates, totalNoMedia, totalErrors, totalDuration,
+		)
+	} else {
+		finalReport = fmt.Sprintf(
+			"✅ <b>Indexing Completed Successfully for</b> <code>%s</code> ✅\n\n"+
+				"<b>Total Messages Scanned:</b> <code>%d</code>\n"+
+				"<b>Successfully Saved Files:</b> <code>%d</code>\n"+
+				"<b>Skipped (Duplicates):</b> <code>%d</code>\n"+
+				"<b>Skipped (No Media/Invalid):</b> <code>%d</code>\n"+
+				"<b>Errors during processing:</b> <code>%d</code>\n"+
+				"<b>Total Time Taken:</b> <code>%s</code>\n\n"+
+				"All available content within the specified range has been indexed.",
+			chatIDStr, messagesFetched, totalSaved, totalDuplicates, totalNoMedia, totalErrors, totalDuration,
+		)
+	}
+
+	if progressMsg != nil {
+		_, _ = progressMsg.Edit(finalReport, &telegram.SendOptions{
+			ParseMode: "html",
+		})
+	}
+
+	if p.appCtx != nil && p.appCtx.Client != nil && fromUserID != 0 && (progressMsg == nil || progressMsg.ChatID() != fromUserID) {
+		_, _ = p.appCtx.Client.SendMessage(fromUserID, finalReport, &telegram.SendOptions{
+			ParseMode: "html",
+		})
+	}
+}
+
+func extractChannelInfo(m *telegram.NewMessage, target *telegram.NewMessage) (string, int) {
+	// 1. Check message text and caption for telegram links
+	for _, text := range []string{m.Text(), m.MessageText(), target.Text(), target.MessageText()} {
+		if text == "" {
+			continue
+		}
+		if match := linkRegex.FindStringSubmatch(text); len(match) == 3 {
+			channelPart := match[1]
+			msgID, _ := strconv.Atoi(match[2])
+			if msgID > 0 {
+				if strings.Contains(text, "/c/") || isNumeric(channelPart) {
+					norm := config.NormalizeChannelID(parseInt64(channelPart))
+					return fmt.Sprintf("%d", norm), msgID
+				}
+				return channelPart, msgID
+			}
+		}
+	}
+
+	// 2. Check forwarded info
+	if target.Message != nil && target.Message.FwdFrom != nil {
+		fwd := target.Message.FwdFrom
+		var lastID int
+		if fwd.ChannelPost != 0 {
+			lastID = int(fwd.ChannelPost)
+		} else {
+			lastID = int(target.ID)
+		}
+
+		if peerCh, ok := fwd.FromID.(*telegram.PeerChannel); ok && peerCh.ChannelID != 0 {
+			norm := config.NormalizeChannelID(peerCh.ChannelID)
+			return fmt.Sprintf("%d", norm), lastID
+		}
+		if peerCh, ok := fwd.SavedFromPeer.(*telegram.PeerChannel); ok && peerCh.ChannelID != 0 {
+			norm := config.NormalizeChannelID(peerCh.ChannelID)
+			return fmt.Sprintf("%d", norm), lastID
+		}
+		if peerCh, ok := fwd.SavedFromID.(*telegram.PeerChannel); ok && peerCh.ChannelID != 0 {
+			norm := config.NormalizeChannelID(peerCh.ChannelID)
+			return fmt.Sprintf("%d", norm), lastID
+		}
+	}
+
+	// 3. Fallback: executed inside a channel
+	if m.IsChannel() && m.ChatID() != 0 {
+		return fmt.Sprintf("%d", m.ChatID()), int(m.ID)
+	}
+
+	return "", 0
+}
+
+func isNumeric(s string) bool {
+	_, err := strconv.ParseInt(s, 10, 64)
+	return err == nil
+}
+
+func parseInt64(s string) int64 {
+	val, _ := strconv.ParseInt(s, 10, 64)
+	return val
+}
+
+func formatDuration(d time.Duration) string {
+	seconds := int64(d.Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	days := seconds / 86400
+	hours := (seconds % 86400) / 3600
+	minutes := (seconds % 3600) / 60
+	secs := seconds % 60
+
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if secs > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%ds", secs))
+	}
+	return strings.Join(parts, " ")
+}

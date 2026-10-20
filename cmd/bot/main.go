@@ -21,6 +21,8 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/plugins/latest"
 	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
 	"github.com/itsafxal/MYTGBOTZ/plugins/start"
+	"github.com/itsafxal/MYTGBOTZ/plugins/channel"
+	"github.com/itsafxal/MYTGBOTZ/plugins/index"
 	streamPlugin "github.com/itsafxal/MYTGBOTZ/plugins/stream"
 )
 
@@ -75,6 +77,8 @@ func run() error {
 		latest.New(application.AppContext),
 		autodelete.New(application.AppContext, application.AutoDeleteService),
 		streamPlugin.New(application.AppContext),
+		channel.New(application.AppContext),
+		index.New(application.AppContext),
 	)
 	if err != nil {
 		return fmt.Errorf("plugin registration failure: %w", err)

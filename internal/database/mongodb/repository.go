@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -247,7 +248,8 @@ type ShardCount struct {
 // MediaRepository provides read access to the authoritative MongoDB media collections
 // across sharded database clusters (e.g. DB2, DB3).
 type MediaRepository struct {
-	shards []MediaShard
+	shards  []MediaShard
+	counter uint64
 }
 
 // NewMediaRepository creates a new MediaRepository referencing configured databases with DB1..DBn labels.
@@ -679,3 +681,208 @@ func (r *MediaRepository) SearchCandidateTitles(ctx context.Context, prefix stri
 	wg.Wait()
 	return titles, nil
 }
+
+// CheckFileExists checks if a document with fileID exists in any media shard.
+func (r *MediaRepository) CheckFileExists(ctx context.Context, fileID string) (bool, error) {
+	if r == nil || len(r.shards) == 0 || fileID == "" {
+		return false, nil
+	}
+
+	for _, shard := range r.shards {
+		if shard.Col == nil {
+			continue
+		}
+		count, err := shard.Col.CountDocuments(ctx, bson.M{"_id": fileID}, options.Count().SetLimit(1))
+		if err != nil {
+			return false, fmt.Errorf("failed to check file existence in shard %s: %w", shard.Label, err)
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// BulkCheckFiles concurrently checks if the given file IDs exist in any media shard.
+// Returns a map indicating existence (true = exists, false = new).
+func (r *MediaRepository) BulkCheckFiles(ctx context.Context, fileIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(fileIDs))
+	for _, id := range fileIDs {
+		result[id] = false
+	}
+	if r == nil || len(r.shards) == 0 || len(fileIDs) == 0 {
+		return result, nil
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	filter := bson.M{"_id": bson.M{"$in": fileIDs}}
+	opts := options.Find().SetProjection(bson.M{"_id": 1})
+
+	for _, shard := range r.shards {
+		if shard.Col == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(sh MediaShard) {
+			defer wg.Done()
+			cur, err := sh.Col.Find(ctx, filter, opts)
+			if err != nil {
+				return
+			}
+			defer cur.Close(context.Background())
+
+			for cur.Next(ctx) {
+				var doc struct {
+					ID string `bson:"_id"`
+				}
+				if err := cur.Decode(&doc); err == nil && doc.ID != "" {
+					mu.Lock()
+					result[doc.ID] = true
+					mu.Unlock()
+				}
+			}
+		}(shard)
+	}
+
+	wg.Wait()
+	return result, nil
+}
+
+// SaveMedia saves or upserts a MediaDoc document to the specified shard index.
+// If shardIndex is out of range, it defaults to shard 0.
+func (r *MediaRepository) SaveMedia(ctx context.Context, doc MediaDoc, shardIndex int) error {
+	if r == nil || len(r.shards) == 0 {
+		return errors.New("no media shards configured")
+	}
+	if doc.FileID == "" {
+		return errors.New("cannot save media document with empty file_id")
+	}
+	if doc.Date.IsZero() {
+		doc.Date = time.Now().UTC()
+	}
+
+	idx := shardIndex
+	if idx < 0 || idx >= len(r.shards) {
+		idx = 0
+	}
+	shard := r.shards[idx]
+	if shard.Col == nil {
+		return fmt.Errorf("shard %s collection is nil", shard.Label)
+	}
+
+	opts := options.Replace().SetUpsert(true)
+	_, err := shard.Col.ReplaceOne(ctx, bson.M{"_id": doc.FileID}, doc, opts)
+	if err != nil {
+		return fmt.Errorf("failed to save media %s to shard %s: %w", doc.FileID, shard.Label, err)
+	}
+	return nil
+}
+
+// SaveMediaAlternating atomically alternates saves between media shards (DB2, DB3, etc.)
+// Returns the label of the shard where the document was saved.
+func (r *MediaRepository) SaveMediaAlternating(ctx context.Context, doc MediaDoc) (string, error) {
+	if r == nil || len(r.shards) == 0 {
+		return "", errors.New("no media shards configured")
+	}
+
+	idx := 0
+	if len(r.shards) > 1 {
+		idx = int((atomic.AddUint64(&r.counter, 1) - 1) % uint64(len(r.shards)))
+	}
+	err := r.SaveMedia(ctx, doc, idx)
+	if err != nil {
+		return "", err
+	}
+	return r.shards[idx].Label, nil
+}
+
+// BulkSaveMedia performs high-performance bulk insertion of MediaDocs to the specified shard index.
+// Duplicate key errors are counted and skipped cleanly.
+func (r *MediaRepository) BulkSaveMedia(ctx context.Context, docs []MediaDoc, shardIndex int) (saved int, duplicates int, err error) {
+	if r == nil || len(r.shards) == 0 || len(docs) == 0 {
+		return 0, 0, nil
+	}
+
+	idx := shardIndex
+	if idx < 0 || idx >= len(r.shards) {
+		idx = 0
+	}
+	shard := r.shards[idx]
+	if shard.Col == nil {
+		return 0, 0, fmt.Errorf("shard %s collection is nil", shard.Label)
+	}
+
+	models := make([]mongo.WriteModel, 0, len(docs))
+	now := time.Now().UTC()
+	for _, doc := range docs {
+		if doc.FileID == "" {
+			continue
+		}
+		if doc.Date.IsZero() {
+			doc.Date = now
+		}
+		models = append(models, mongo.NewInsertOneModel().SetDocument(doc))
+	}
+	if len(models) == 0 {
+		return 0, 0, nil
+	}
+
+	opts := options.BulkWrite().SetOrdered(false)
+	res, bErr := shard.Col.BulkWrite(ctx, models, opts)
+	if res != nil {
+		saved = int(res.InsertedCount)
+	}
+
+	if bErr != nil {
+		var bwe mongo.BulkWriteException
+		if errors.As(bErr, &bwe) {
+			hasOtherError := false
+			for _, we := range bwe.WriteErrors {
+				if we.Code == 11000 {
+					duplicates++
+				} else {
+					hasOtherError = true
+				}
+			}
+			if hasOtherError {
+				return saved, duplicates, bErr
+			}
+			return saved, duplicates, nil
+		}
+		return saved, duplicates, bErr
+	}
+
+	return saved, duplicates, nil
+}
+
+// BulkSaveMediaAlternating saves docs in alternating batches (e.g. 100 to DB2, 100 to DB3).
+func (r *MediaRepository) BulkSaveMediaAlternating(ctx context.Context, docs []MediaDoc, chunkSize int) (saved int, duplicates int, err error) {
+	if r == nil || len(r.shards) == 0 || len(docs) == 0 {
+		return 0, 0, nil
+	}
+	if chunkSize <= 0 {
+		chunkSize = 100
+	}
+
+	numShards := len(r.shards)
+	for i := 0; i < len(docs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(docs) {
+			end = len(docs)
+		}
+		chunk := docs[i:end]
+		shardIdx := (i / chunkSize) % numShards
+
+		s, d, cErr := r.BulkSaveMedia(ctx, chunk, shardIdx)
+		saved += s
+		duplicates += d
+		if cErr != nil {
+			return saved, duplicates, cErr
+		}
+	}
+
+	return saved, duplicates, nil
+}
+

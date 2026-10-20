@@ -44,6 +44,9 @@ type Config struct {
 	// Always includes OwnerID.
 	Admins []int64
 
+	// Channels contains Telegram channel IDs monitored for live media indexing.
+	Channels []int64
+
 	// LogLevel defines the application logging verbosity (DEBUG, INFO, WARN, ERROR).
 	LogLevel LogLevel
 
@@ -324,6 +327,7 @@ func LoadFromEnv() (*Config, error) {
 		StreamBindAddr:           streamBindAddr,
 		StreamBotToken:           streamBotToken,
 		EnableFastDownloadButton: enableFastDownloadBtn,
+		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
 	}
 
 	return cfg, nil
@@ -374,6 +378,69 @@ func (c *Config) IsAdmin(userID int64) bool {
 	}
 	for _, adminID := range c.Admins {
 		if adminID == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeChannelID converts any channel ID format (e.g. 1234567890, -1001234567890)
+// into standard Telegram supergroup/channel ID format (-1001234567890).
+func NormalizeChannelID(rawID int64) int64 {
+	if rawID == 0 {
+		return 0
+	}
+	if rawID < 0 {
+		if rawID <= -10000000000 {
+			return rawID
+		}
+		rawID = -rawID
+	}
+	s := fmt.Sprintf("-100%d", rawID)
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return -rawID
+	}
+	return id
+}
+
+// parseChannelIDs parses comma-, space-, or newline-separated channel IDs into normalized -100... IDs.
+func parseChannelIDs(raw string) []int64 {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == ';'
+	})
+
+	var channels []int64
+	seen := make(map[int64]struct{})
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(f, 10, 64)
+		if err != nil {
+			continue
+		}
+		norm := NormalizeChannelID(id)
+		if _, exists := seen[norm]; !exists {
+			seen[norm] = struct{}{}
+			channels = append(channels, norm)
+		}
+	}
+	return channels
+}
+
+// IsConfiguredChannel checks if the given chat ID matches any monitored channel.
+func (c *Config) IsConfiguredChannel(chatID int64) bool {
+	if c == nil || len(c.Channels) == 0 || chatID == 0 {
+		return false
+	}
+	norm := NormalizeChannelID(chatID)
+	for _, ch := range c.Channels {
+		if ch == norm {
 			return true
 		}
 	}
