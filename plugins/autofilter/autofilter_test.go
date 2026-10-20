@@ -325,27 +325,27 @@ func TestAutofilter_FileButtonLabel_Format(t *testing.T) {
 		{
 			name:     "Movie with Year, Language, and Quality",
 			file:     search.MediaFile{FileName: "KGF.Chapter.2.2022.Malayalam.HDRip.x264.mkv", Size: "402 MB"},
-			expected: "🎬 402 MB · KGF Chapter 2 · Malayalam · HDRip",
+			expected: "🔸 402 MB ▫️ KGF Chapter 2 Malayalam HDRip",
 		},
 		{
 			name:     "Movie with Year, Language, and Multi-word Quality",
 			file:     search.MediaFile{FileName: "Vikram.2022.Tamil.1080p.WEBRip.mkv", Size: "1.4 GB"},
-			expected: "🎬 1.4 GB · Vikram · Tamil · 1080p WEBRip",
+			expected: "🔸 1.4 GB ▫️ Vikram Tamil 1080p WEBRip",
 		},
 		{
 			name:     "Movie with Year and Quality (No Language)",
 			file:     search.MediaFile{FileName: "Inception.2010.720p.mkv", Size: "700 MB"},
-			expected: "🎬 700 MB · Inception · 720p",
+			expected: "🔸 700 MB ▫️ Inception 720p",
 		},
 		{
 			name:     "File with Title Only (No Language or Quality)",
 			file:     search.MediaFile{FileName: "Documentary.mp4", Size: "350 MB"},
-			expected: "🎬 350 MB · Documentary",
+			expected: "🔸 350 MB ▫️ Documentary",
 		},
 		{
 			name:     "Movie with Language and Quality without Year",
 			file:     search.MediaFile{FileName: "Premam.Malayalam.HDRip.mkv", Size: "900 MB"},
-			expected: "🎬 900 MB · Premam · Malayalam · HDRip",
+			expected: "🔸 900 MB ▫️ Premam Malayalam HDRip",
 		},
 	}
 
@@ -355,8 +355,8 @@ func TestAutofilter_FileButtonLabel_Format(t *testing.T) {
 			if strings.Contains(label, "🌷") {
 				t.Errorf("file label %q must not contain flower emoji 🌷", label)
 			}
-			if !strings.HasPrefix(label, "🎬") {
-				t.Errorf("file label %q should start with 🎬", label)
+			if !strings.HasPrefix(label, "🔸") {
+				t.Errorf("file label %q should start with 🔸", label)
 			}
 			cleanLabel := strings.TrimRight(label, "\u2800")
 			if cleanLabel != tc.expected {
@@ -366,6 +366,62 @@ func TestAutofilter_FileButtonLabel_Format(t *testing.T) {
 				t.Errorf("expected button label to be padded to at least 50 runes for left-alignment, got %d", len([]rune(label)))
 			}
 		})
+	}
+}
+
+func TestAutofilter_LanguagesKeyboard(t *testing.T) {
+	kb := buildLanguagesKeyboard("testkey")
+	if kb == nil || len(kb.Rows) == 0 {
+		t.Fatalf("expected non-empty languages keyboard")
+	}
+	lastRow := kb.Rows[len(kb.Rows)-1].Buttons
+	if len(lastRow) != 1 {
+		t.Fatalf("expected 1 button in last row, got %d", len(lastRow))
+	}
+	backBtn := lastRow[0].(*telegram.KeyboardButtonCallback)
+	if backBtn.Text != "↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭" {
+		t.Errorf("expected back button text '↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭', got %q", backBtn.Text)
+	}
+	if backBtn.Style == nil || !backBtn.Style.BgDanger {
+		t.Errorf("expected back button in languages menu to have Danger (Red) style")
+	}
+}
+
+func TestAutofilter_QualitiesKeyboard(t *testing.T) {
+	kb := buildQualitiesKeyboard("testkey")
+	if kb == nil || len(kb.Rows) != 4 {
+		t.Fatalf("expected 4 rows in qualities keyboard (2 qualities, 2 qualities, 1 quality, 1 back), got %d", len(kb.Rows))
+	}
+
+	// Row 1: 480P, 720P
+	r1 := kb.Rows[0].Buttons
+	if len(r1) != 2 || r1[0].(*telegram.KeyboardButtonCallback).Text != "480P" || r1[1].(*telegram.KeyboardButtonCallback).Text != "720P" {
+		t.Errorf("row 1 expected [480P, 720P], got %+v", r1)
+	}
+
+	// Row 2: 1080P, 2160P
+	r2 := kb.Rows[1].Buttons
+	if len(r2) != 2 || r2[0].(*telegram.KeyboardButtonCallback).Text != "1080P" || r2[1].(*telegram.KeyboardButtonCallback).Text != "2160P" {
+		t.Errorf("row 2 expected [1080P, 2160P], got %+v", r2)
+	}
+
+	// Row 3: 4K
+	r3 := kb.Rows[2].Buttons
+	if len(r3) != 1 || r3[0].(*telegram.KeyboardButtonCallback).Text != "4K" {
+		t.Errorf("row 3 expected [4K], got %+v", r3)
+	}
+
+	// Row 4: Back button (Red / Danger)
+	r4 := kb.Rows[3].Buttons
+	if len(r4) != 1 {
+		t.Fatalf("row 4 expected 1 button, got %d", len(r4))
+	}
+	backBtn := r4[0].(*telegram.KeyboardButtonCallback)
+	if backBtn.Text != "↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭" {
+		t.Errorf("expected back button text '↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭', got %q", backBtn.Text)
+	}
+	if backBtn.Style == nil || !backBtn.Style.BgDanger {
+		t.Errorf("expected back button in qualities menu to have Danger (Red) style")
 	}
 }
 

@@ -477,21 +477,7 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	kb := telegram.NewKeyboard()
-	var currentRow []telegram.KeyboardButton
-
-	for i, lang := range languages {
-		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
-		currentRow = append(currentRow, btn)
-		if (i+1)%2 == 0 || i == len(languages)-1 {
-			kb.AddRow(currentRow...)
-			currentRow = nil
-		}
-	}
-
-	// Back to results button
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
-	markup := kb.Build()
+	markup := buildLanguagesKeyboard(searchKey)
 
 	botName := p.getBotName(cb.Client)
 	menuText := formatLanguagesMenuText(p.getDisplayQuery(sess), botName)
@@ -611,21 +597,7 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	kb := telegram.NewKeyboard()
-	var currentRow []telegram.KeyboardButton
-
-	for i, q := range qualities {
-		btn := telegram.Button.Data(q, fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey))
-		currentRow = append(currentRow, btn)
-		if (i+1)%3 == 0 || i == len(qualities)-1 {
-			kb.AddRow(currentRow...)
-			currentRow = nil
-		}
-	}
-
-	// Back button
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
-	markup := kb.Build()
+	markup := buildQualitiesKeyboard(searchKey)
 
 	botName := p.getBotName(cb.Client)
 	menuText := formatQualitiesMenuText(p.getDisplayQuery(sess), botName)
@@ -1006,44 +978,42 @@ func formatFileButtonLabel(f search.MediaFile) string {
 		cleanTitle = strings.TrimSpace(f.FileName)
 	}
 
-	// Desired order: Size (MB), Movie Name, Language, Quality
-	// Example: 🎬 402 MB · KGF Chapter 2 · Malayalam · HDRip
-	var parts []string
-	sizePart := "🎬 " + size
-	parts = append(parts, sizePart)
+	// Format: 🔸 {file_size} ▫️ {name} {quality}
+	prefix := "🔸 " + size + " ▫️ "
 
-	// Keep movie name reasonable so it does not crowd out language and quality
-	extraLen := len([]rune(sizePart))
-	if lang != "" {
-		extraLen += 3 + len([]rune(lang)) // " · " + lang
-	}
-	if qual != "" {
-		extraLen += 3 + len([]rune(qual)) // " · " + qual
-	}
-	extraLen += 3 // " · " before movie name
+	var details []string
+	if cleanTitle != "" {
+		extraLen := len([]rune(prefix))
+		if lang != "" {
+			extraLen += 1 + len([]rune(lang))
+		}
+		if qual != "" {
+			extraLen += 1 + len([]rune(qual))
+		}
 
-	maxTitleLen := 60 - extraLen
-	if maxTitleLen < 15 {
-		maxTitleLen = 15
-	}
+		maxTitleLen := 56 - extraLen
+		if maxTitleLen < 12 {
+			maxTitleLen = 12
+		}
 
-	titleRunes := []rune(cleanTitle)
-	if len(titleRunes) > maxTitleLen {
-		cleanTitle = string(titleRunes[:maxTitleLen-3]) + "..."
+		titleRunes := []rune(cleanTitle)
+		if len(titleRunes) > maxTitleLen {
+			cleanTitle = string(titleRunes[:maxTitleLen-3]) + "..."
+		}
+		details = append(details, cleanTitle)
 	}
-	parts = append(parts, cleanTitle)
 
 	if lang != "" {
-		parts = append(parts, lang)
+		details = append(details, lang)
 	}
 	if qual != "" {
-		parts = append(parts, qual)
+		details = append(details, qual)
 	}
 
-	label := strings.Join(parts, " · ")
+	label := prefix + strings.Join(details, " ")
 	labelRunes := []rune(label)
-	if len(labelRunes) > 60 {
-		label = string(labelRunes[:57]) + "..."
+	if len(labelRunes) > 56 {
+		label = string(labelRunes[:53]) + "..."
 		labelRunes = []rune(label)
 	}
 
@@ -1056,6 +1026,45 @@ func formatFileButtonLabel(f search.MediaFile) string {
 	}
 
 	return label
+}
+
+func buildLanguagesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
+	kb := telegram.NewKeyboard()
+	var currentRow []telegram.KeyboardButton
+
+	for i, lang := range languages {
+		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
+		currentRow = append(currentRow, btn)
+		if (i+1)%2 == 0 || i == len(languages)-1 {
+			kb.AddRow(currentRow...)
+			currentRow = nil
+		}
+	}
+
+	// Back to results button (Danger / Red)
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
+	return kb.Build()
+}
+
+func buildQualitiesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
+	kb := telegram.NewKeyboard()
+	// Row 1: 480P, 720P
+	kb.AddRow(
+		telegram.Button.Data("480P", fmt.Sprintf("fq#480p#%s", searchKey)),
+		telegram.Button.Data("720P", fmt.Sprintf("fq#720p#%s", searchKey)),
+	)
+	// Row 2: 1080P, 2160P
+	kb.AddRow(
+		telegram.Button.Data("1080P", fmt.Sprintf("fq#1080p#%s", searchKey)),
+		telegram.Button.Data("2160P", fmt.Sprintf("fq#2160p#%s", searchKey)),
+	)
+	// Row 3: 4K
+	kb.AddRow(
+		telegram.Button.Data("4K", fmt.Sprintf("fq#4k#%s", searchKey)),
+	)
+	// Back button (Danger / Red)
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
+	return kb.Build()
 }
 
 func formatBytes(bytes int64) string {
