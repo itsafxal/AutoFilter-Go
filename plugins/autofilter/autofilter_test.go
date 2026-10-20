@@ -105,6 +105,9 @@ func TestAutofilter_RecoverSession(t *testing.T) {
 	if sess.ChatID != -10012345 {
 		t.Errorf("expected chat id -10012345, got %d", sess.ChatID)
 	}
+	if sess.UserMention != "User" {
+		t.Errorf("expected user mention 'User', got %q", sess.UserMention)
+	}
 }
 
 func TestAutofilter_IsMessageNotModified(t *testing.T) {
@@ -447,33 +450,39 @@ func TestAutofilter_FileButtonLabel_LongTitlePreservesMetadata(t *testing.T) {
 
 func TestAutofilter_MessageText_FormattingAndBotIdentity(t *testing.T) {
 	// Bot A
-	textA := formatResultText("KGF", 1, 8, 24, "PandaBot")
-	if !strings.Contains(textA, "🎬 <b>KGF</b>") {
-		t.Errorf("expected header '🎬 <b>KGF</b>', got:\n%s", textA)
+	textA := formatResultText("User", "KGF", 1, 8, 24, "PandaBot", 15)
+	if !strings.Contains(textA, "𝗛𝗘𝗬 👋 User 🫶") {
+		t.Errorf("expected greeting, got:\n%s", textA)
 	}
-	if !strings.Contains(textA, "🔎 <b>Query:</b> KGF") {
+	if !strings.Contains(textA, "📁 Query : KGF") {
 		t.Errorf("expected query line, got:\n%s", textA)
 	}
-	if !strings.Contains(textA, "📄 <b>Page:</b> 1 / 8") {
+	if !strings.Contains(textA, "🗓️ Page No › 1") {
 		t.Errorf("expected page line, got:\n%s", textA)
 	}
-	if !strings.Contains(textA, "📦 <b>Results:</b> 24 files") {
-		t.Errorf("expected results line, got:\n%s", textA)
+	if !strings.Contains(textA, "<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within 15 Mins ❗️</blockquote>") {
+		t.Errorf("expected auto delete blockquote note, got:\n%s", textA)
 	}
-	if !strings.Contains(textA, "⏳ <i>This result expires in 15 minutes.</i>") {
-		t.Errorf("expected expiry note, got:\n%s", textA)
-	}
-	if !strings.Contains(textA, "© PandaBot") {
-		t.Errorf("expected bot signature '© PandaBot', got:\n%s", textA)
+	if !strings.Contains(textA, "©PandaBot 🗡️") {
+		t.Errorf("expected bot signature '©PandaBot 🗡️', got:\n%s", textA)
 	}
 
-	// Bot B with single file result
-	textB := formatResultText("Vikram", 2, 5, 1, "CinemaTG")
-	if !strings.Contains(textB, "📦 <b>Results:</b> 1 file") {
-		t.Errorf("expected singular '1 file', got:\n%s", textB)
+	// Bot B with single file result & custom time & user mention
+	textB := formatResultText(`<a href="tg://user?id=123">Afsal</a>`, "Vikram", 2, 5, 1, "CinemaTG", 30)
+	if !strings.Contains(textB, `𝗛𝗘𝗬 👋 <a href="tg://user?id=123">Afsal</a> 🫶`) {
+		t.Errorf("expected mention link, got:\n%s", textB)
 	}
-	if !strings.Contains(textB, "© CinemaTG") {
-		t.Errorf("expected bot signature '© CinemaTG', got:\n%s", textB)
+	if !strings.Contains(textB, "📁 Query : Vikram") {
+		t.Errorf("expected query line, got:\n%s", textB)
+	}
+	if !strings.Contains(textB, "🗓️ Page No › 2") {
+		t.Errorf("expected page 2, got:\n%s", textB)
+	}
+	if !strings.Contains(textB, "Within 30 Mins") {
+		t.Errorf("expected within 30 mins, got:\n%s", textB)
+	}
+	if !strings.Contains(textB, "©CinemaTG 🗡️") {
+		t.Errorf("expected bot signature '©CinemaTG 🗡️', got:\n%s", textB)
 	}
 
 	// Verify no hardcoded Panda or CyberTG

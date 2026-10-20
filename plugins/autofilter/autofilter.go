@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/autodelete"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 )
@@ -44,6 +45,7 @@ var qualities = []string{
 type searchSession struct {
 	Query       string
 	UserID      int64
+	UserMention string
 	ChatID      int64
 	Language    string
 	Quality     string
@@ -176,14 +178,15 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 	// If results found, display interactive file list
 	if len(result.Files) > 0 {
 		p.saveSession(searchKey, &searchSession{
-			Query:     query,
-			UserID:    userID,
-			ChatID:    m.ChatID(),
-			UpdatedAt: time.Now(),
+			Query:       query,
+			UserID:      userID,
+			UserMention: userMention,
+			ChatID:      m.ChatID(),
+			UpdatedAt:   time.Now(),
 		})
 
 		botName := p.getBotName(m.Client)
-		text := p.formatResultText(query, result.Page, result.TotalPages, result.Total, botName)
+		text := p.formatResultText(userMention, query, result.Page, result.TotalPages, result.Total, botName)
 		kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 		replyMsg, replyErr := m.Reply(text, &telegram.SendOptions{
@@ -221,6 +224,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		p.saveSession(searchKey, &searchSession{
 			Query:       query,
 			UserID:      userID,
+			UserMention: userMention,
 			ChatID:      m.ChatID(),
 			Suggestions: suggestions,
 			UpdatedAt:   time.Now(),
@@ -362,7 +366,8 @@ func (p *Plugin) HandlePaginationCallback(cb *telegram.CallbackQuery) error {
 
 	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	userMention := p.getUserMentionForSession(sess, cb.Sender)
+	text := p.formatResultText(userMention, displayQuery, result.Page, result.TotalPages, result.Total, botName)
 	hasFilter := sess.Language != "" || sess.Quality != ""
 	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, hasFilter)
 
@@ -428,7 +433,8 @@ func (p *Plugin) HandleSpellCheckCallback(cb *telegram.CallbackQuery) error {
 	}
 
 	botName := p.getBotName(cb.Client)
-	text := p.formatResultText(selectedQuery, result.Page, result.TotalPages, result.Total, botName)
+	userMention := p.getUserMentionForSession(sess, cb.Sender)
+	text := p.formatResultText(userMention, selectedQuery, result.Page, result.TotalPages, result.Total, botName)
 	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
@@ -480,7 +486,7 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 	markup := buildLanguagesKeyboard(searchKey)
 
 	botName := p.getBotName(cb.Client)
-	menuText := formatLanguagesMenuText(p.getDisplayQuery(sess), botName)
+	menuText := p.formatLanguagesMenuText(p.getDisplayQuery(sess), botName)
 	_, editErr := cb.Edit(menuText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
@@ -548,7 +554,8 @@ func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error 
 
 	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	userMention := p.getUserMentionForSession(sess, cb.Sender)
+	text := p.formatResultText(userMention, displayQuery, result.Page, result.TotalPages, result.Total, botName)
 	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
@@ -600,7 +607,7 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 	markup := buildQualitiesKeyboard(searchKey)
 
 	botName := p.getBotName(cb.Client)
-	menuText := formatQualitiesMenuText(p.getDisplayQuery(sess), botName)
+	menuText := p.formatQualitiesMenuText(p.getDisplayQuery(sess), botName)
 	_, editErr := cb.Edit(menuText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
@@ -668,7 +675,8 @@ func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 
 	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	userMention := p.getUserMentionForSession(sess, cb.Sender)
+	text := p.formatResultText(userMention, displayQuery, result.Page, result.TotalPages, result.Total, botName)
 	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
@@ -737,8 +745,9 @@ func (p *Plugin) HandleBackToFilesCallback(cb *telegram.CallbackQuery) error {
 
 	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
+	userMention := p.getUserMentionForSession(sess, cb.Sender)
 	hasFilter := sess.Language != "" || sess.Quality != ""
-	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	text := p.formatResultText(userMention, displayQuery, result.Page, result.TotalPages, result.Total, botName)
 	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, hasFilter)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
@@ -799,7 +808,8 @@ func (p *Plugin) HandleBackToAllFilesCallback(cb *telegram.CallbackQuery) error 
 	}
 
 	botName := p.getBotName(cb.Client)
-	text := p.formatResultText(sess.Query, result.Page, result.TotalPages, result.Total, botName)
+	userMention := p.getUserMentionForSession(sess, cb.Sender)
+	text := p.formatResultText(userMention, sess.Query, result.Page, result.TotalPages, result.Total, botName)
 	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
@@ -1185,66 +1195,112 @@ func (p *Plugin) getBotName(client *telegram.Client) string {
 	return "Bot"
 }
 
-func (p *Plugin) formatResultText(query string, page, totalPages int, totalResults int64, botName string) string {
-	return formatResultText(query, page, totalPages, totalResults, botName)
+func (p *Plugin) getFilterDeleteMinutes() int {
+	if p != nil && p.appCtx != nil {
+		if p.appCtx.AutoDelete != nil {
+			dur := p.appCtx.AutoDelete.GetSettings().FilterDeleteDuration
+			if dur > 0 {
+				mins := int(dur.Minutes())
+				if mins > 0 {
+					return mins
+				}
+			}
+		}
+		if p.appCtx.Config != nil && p.appCtx.Config.AutoDeleteFilterTime != "" {
+			if dur, err := autodelete.ParseDuration(p.appCtx.Config.AutoDeleteFilterTime); err == nil && dur > 0 {
+				mins := int(dur.Minutes())
+				if mins > 0 {
+					return mins
+				}
+			}
+		}
+	}
+	return 15
 }
 
-func formatResultText(query string, page, totalPages int, totalResults int64, botName string) string {
-	if totalPages < 1 {
-		totalPages = 1
+func (p *Plugin) getUserMentionForSession(sess *searchSession, sender *telegram.UserObj) string {
+	if sess != nil && sess.UserMention != "" {
+		return sess.UserMention
+	}
+	if sender != nil {
+		return formatUserMention(sender)
+	}
+	if sess != nil && sess.UserID != 0 {
+		return fmt.Sprintf(`<a href="tg://user?id=%d">User</a>`, sess.UserID)
+	}
+	return "User"
+}
+
+func (p *Plugin) formatResultText(userMention, query string, page, totalPages int, totalResults int64, botName string) string {
+	deleteMins := p.getFilterDeleteMinutes()
+	return formatResultText(userMention, query, page, totalPages, totalResults, botName, deleteMins)
+}
+
+func formatResultText(userMention, query string, page, totalPages int, totalResults int64, botName string, deleteMins int) string {
+	if userMention == "" {
+		userMention = "User"
 	}
 	if page < 1 {
 		page = 1
 	}
-
-	resultsStr := "files"
-	if totalResults == 1 {
-		resultsStr = "file"
+	if deleteMins <= 0 {
+		deleteMins = 15
 	}
-
-	title := strings.TrimSpace(query)
-	if openIdx := strings.LastIndex(title, "("); openIdx != -1 && strings.HasSuffix(title, ")") {
-		title = strings.TrimSpace(title[:openIdx])
-	}
-	if title == "" {
-		title = strings.TrimSpace(query)
+	if botName == "" {
+		botName = "Bot"
 	}
 
 	return fmt.Sprintf(
-		"🎬 <b>%s</b>\n\n"+
-			"🔎 <b>Query:</b> %s\n"+
-			"📄 <b>Page:</b> %d / %d\n"+
-			"📦 <b>Results:</b> %d %s\n"+
-			"⏳ <i>This result expires in 15 minutes.</i>\n\n"+
-			"© %s",
-		html.EscapeString(title),
+		"𝗛𝗘𝗬 👋 %s 🫶\n"+
+			"    \n"+
+			"📁 Query : %s\n\n"+
+			"🗓️ Page No › %d\n\n"+
+			"<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
+			"©%s 🗡️",
+		userMention,
 		html.EscapeString(query),
 		page,
-		totalPages,
-		totalResults,
-		resultsStr,
+		deleteMins,
 		html.EscapeString(botName),
 	)
 }
 
-func formatLanguagesMenuText(query string, botName string) string {
+func (p *Plugin) formatLanguagesMenuText(query string, botName string) string {
+	deleteMins := p.getFilterDeleteMinutes()
+	return formatLanguagesMenuText(query, botName, deleteMins)
+}
+
+func formatLanguagesMenuText(query string, botName string, deleteMins int) string {
+	if deleteMins <= 0 {
+		deleteMins = 15
+	}
 	return fmt.Sprintf(
 		"🌐 <b>Select Desired Language</b>\n\n"+
-			"🔎 <b>Query:</b> %s\n\n"+
-			"⏳ <i>This message expires in 15 minutes.</i>\n\n"+
-			"© %s",
+			"📁 Query : %s\n\n"+
+			"<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
+			"©%s 🗡️",
 		html.EscapeString(query),
+		deleteMins,
 		html.EscapeString(botName),
 	)
 }
 
-func formatQualitiesMenuText(query string, botName string) string {
+func (p *Plugin) formatQualitiesMenuText(query string, botName string) string {
+	deleteMins := p.getFilterDeleteMinutes()
+	return formatQualitiesMenuText(query, botName, deleteMins)
+}
+
+func formatQualitiesMenuText(query string, botName string, deleteMins int) string {
+	if deleteMins <= 0 {
+		deleteMins = 15
+	}
 	return fmt.Sprintf(
 		"🎞 <b>Select Desired Quality</b>\n\n"+
-			"🔎 <b>Query:</b> %s\n\n"+
-			"⏳ <i>This message expires in 15 minutes.</i>\n\n"+
-			"© %s",
+			"📁 Query : %s\n\n"+
+			"<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
+			"©%s 🗡️",
 		html.EscapeString(query),
+		deleteMins,
 		html.EscapeString(botName),
 	)
 }
@@ -1327,6 +1383,16 @@ func (p *Plugin) recoverSessionFromMessage(msg *telegram.NewMessage, userID int6
 		}
 	}
 	lines := strings.Split(msg.Text(), "\n")
+	var recoveredUserMention string
+	for _, rawLine := range lines {
+		trimmed := strings.TrimSpace(rawLine)
+		if strings.HasPrefix(trimmed, "𝗛𝗘𝗬 👋") && strings.HasSuffix(trimmed, "🫶") {
+			mention := strings.TrimPrefix(trimmed, "𝗛𝗘𝗬 👋")
+			mention = strings.TrimSuffix(mention, "🫶")
+			recoveredUserMention = strings.TrimSpace(mention)
+			break
+		}
+	}
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		var queryPart string
@@ -1368,12 +1434,13 @@ func (p *Plugin) recoverSessionFromMessage(msg *telegram.NewMessage, userID int6
 
 			if queryPart != "" {
 				return &searchSession{
-					Query:     queryPart,
-					Language:  lang,
-					Quality:   qual,
-					UserID:    userID,
-					ChatID:    chatID,
-					UpdatedAt: time.Now(),
+					Query:       queryPart,
+					Language:    lang,
+					Quality:     qual,
+					UserID:      userID,
+					UserMention: recoveredUserMention,
+					ChatID:      chatID,
+					UpdatedAt:   time.Now(),
 				}
 			}
 		}
