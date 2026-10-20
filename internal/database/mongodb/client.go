@@ -100,9 +100,6 @@ func (m *ClientManager) Connect(ctx context.Context) error {
 }
 
 func (m *ClientManager) connectClient(ctx context.Context, uri string) (*mongo.Client, error) {
-	connectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
 	opts := options.Client().
 		ApplyURI(uri).
 		SetConnectTimeout(15 * time.Second).
@@ -112,13 +109,15 @@ func (m *ClientManager) connectClient(ctx context.Context, uri string) (*mongo.C
 		SetMinPoolSize(5).
 		SetRetryReads(true)
 
-	client, err := mongo.Connect(connectCtx, opts)
+	// mongo.Connect binds to this context for the lifecycle of its background monitoring goroutines and connection pool.
+	// Using a temporary context that is cancelled on function return breaks active pooled connections with 'context canceled'.
+	client, err := mongo.Connect(context.Background(), opts)
 	if err != nil {
 		return nil, fmt.Errorf("connection error: %w", err)
 	}
 
-	// Verify connectivity
-	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+	// Verify connectivity with a scoped timeout
+	pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer pingCancel()
 	if err := client.Ping(pingCtx, readpref.Primary()); err != nil {
 		_ = client.Disconnect(context.Background())
