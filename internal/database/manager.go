@@ -24,6 +24,9 @@ type DatabaseManager struct {
 	sqlMediaRepo   *sql.MediaRepository
 	syncer         *sql.Syncer
 	ready          bool
+	syncDone       chan struct{}
+	syncResult     *sql.SyncResult
+	syncErr        error
 	mu             sync.RWMutex
 }
 
@@ -37,7 +40,24 @@ func NewDatabaseManager(cfg *config.Config, logger *slog.Logger) *DatabaseManage
 		logger:       logger,
 		mongoManager: mongoMgr,
 		sqlManager:   sqlMgr,
+		syncDone:     make(chan struct{}),
 	}
+}
+
+func (m *DatabaseManager) completeSyncLocked(res *sql.SyncResult, err error) {
+	m.syncResult = res
+	m.syncErr = err
+	select {
+	case <-m.syncDone:
+	default:
+		close(m.syncDone)
+	}
+}
+
+func (m *DatabaseManager) completeSync(res *sql.SyncResult, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.completeSyncLocked(res, err)
 }
 
 // Init initializes MongoDB, opens SQLite, and executes initial media synchronization.
@@ -48,6 +68,7 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 
 	// 1. Initialize temporary SQLite runtime
 	if err := m.sqlManager.Open(ctx); err != nil {
+		m.completeSyncLocked(nil, err)
 		return fmt.Errorf("failed to initialize runtime SQLite database: %w", err)
 	}
 	m.sqlMediaRepo = sql.NewMediaRepository(m.sqlManager)
@@ -61,6 +82,7 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 
 		if err := m.mongoManager.Connect(ctx); err != nil {
 			_ = m.sqlManager.Close()
+			m.completeSyncLocked(nil, err)
 			return fmt.Errorf("fatal MongoDB initialization failure: %w", err)
 		}
 
@@ -106,6 +128,7 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 
 		if !m.cfg.EnableSync {
 			m.logger.Info("⚡ Media synchronization disabled (ENABLE_SYNC=false); running in high-speed zero-sync MongoDB direct mode")
+			m.completeSyncLocked(&sql.SyncResult{Skipped: true}, nil)
 		} else if m.cfg.BackgroundSync {
 			// Check if already populated to skip immediately
 			isComplete, _ := m.syncer.IsSyncComplete(ctx)
@@ -115,6 +138,7 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 				m.logger.Info("SQLite media table is already populated and synchronized; skipping full migration",
 					"existing_records", count,
 				)
+				m.completeSyncLocked(&sql.SyncResult{Skipped: true, TotalInserted: count}, nil)
 			} else {
 				m.logger.Info("⚡ Launching concurrent media migration in background to enable instant bot boot and rapid deployment...")
 				go func() {
@@ -122,6 +146,7 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 					syncRes, err := m.syncer.Sync(bgCtx)
 					if err != nil {
 						m.logger.Error("background synchronization from MongoDB to SQLite failed", "error", err)
+						m.completeSync(nil, err)
 						return
 					}
 					m.logger.Info("🎉 Background media synchronization completed successfully",
@@ -129,12 +154,14 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 						"skipped", syncRes.Skipped,
 						"duration", syncRes.Duration.String(),
 					)
+					m.completeSync(syncRes, nil)
 				}()
 			}
 		} else {
 			syncRes, err := m.syncer.Sync(ctx)
 			if err != nil {
 				m.logger.Error("synchronization from MongoDB to SQLite failed", "error", err)
+				m.completeSyncLocked(nil, err)
 				_ = m.Close()
 				return fmt.Errorf("runtime database synchronization failed: %w", err)
 			}
@@ -144,9 +171,11 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 				"skipped", syncRes.Skipped,
 				"duration", syncRes.Duration.String(),
 			)
+			m.completeSyncLocked(syncRes, nil)
 		}
 	} else {
 		m.logger.Warn("DATABASE_URI not configured: running in standalone mode without authoritative MongoDB")
+		m.completeSyncLocked(&sql.SyncResult{Skipped: true}, nil)
 	}
 
 	m.ready = true
@@ -157,6 +186,12 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 func (m *DatabaseManager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	select {
+	case <-m.syncDone:
+	default:
+		close(m.syncDone)
+	}
 
 	m.ready = false
 	var errs []error
@@ -177,6 +212,44 @@ func (m *DatabaseManager) Close() error {
 		return fmt.Errorf("errors closing database manager: %v", errs)
 	}
 	return nil
+}
+
+// WaitForSync blocks until SQLite synchronization from MongoDB completes, or ctx is cancelled.
+func (m *DatabaseManager) WaitForSync(ctx context.Context) (*sql.SyncResult, error) {
+	if m == nil {
+		return nil, nil
+	}
+	select {
+	case <-m.syncDone:
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		return m.syncResult, m.syncErr
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// IsSyncDone returns whether synchronization has completed.
+func (m *DatabaseManager) IsSyncDone() bool {
+	if m == nil {
+		return true
+	}
+	select {
+	case <-m.syncDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// SyncResult returns the last synchronization result, if completed.
+func (m *DatabaseManager) SyncResult() (*sql.SyncResult, error) {
+	if m == nil {
+		return nil, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.syncResult, m.syncErr
 }
 
 // IsReady reports whether the databases have completed initialization and synchronization.

@@ -286,40 +286,72 @@ func TestAutofilter_Pagination_SinglePage(t *testing.T) {
 	}
 }
 
-func TestAutofilter_FileButtonLabel_NoFlowerEmoji(t *testing.T) {
+func TestAutofilter_FileButtonLabel_Format(t *testing.T) {
 	testCases := []struct {
+		name     string
 		file     search.MediaFile
 		expected string
 	}{
 		{
+			name:     "Movie with Year, Language, and Quality",
 			file:     search.MediaFile{FileName: "KGF.Chapter.2.2022.Malayalam.HDRip.x264.mkv", Size: "402 MB"},
-			expected: "🎬 402 MB · Malayalam · HDRip",
+			expected: "🎬 402 MB · KGF Chapter 2 · Malayalam · HDRip",
 		},
 		{
+			name:     "Movie with Year, Language, and Multi-word Quality",
 			file:     search.MediaFile{FileName: "Vikram.2022.Tamil.1080p.WEBRip.mkv", Size: "1.4 GB"},
-			expected: "🎬 1.4 GB · Tamil · 1080p WEBRip",
+			expected: "🎬 1.4 GB · Vikram · Tamil · 1080p WEBRip",
 		},
 		{
+			name:     "Movie with Year and Quality (No Language)",
 			file:     search.MediaFile{FileName: "Inception.2010.720p.mkv", Size: "700 MB"},
 			expected: "🎬 700 MB · Inception · 720p",
 		},
 		{
+			name:     "File with Title Only (No Language or Quality)",
 			file:     search.MediaFile{FileName: "Documentary.mp4", Size: "350 MB"},
 			expected: "🎬 350 MB · Documentary",
+		},
+		{
+			name:     "Movie with Language and Quality without Year",
+			file:     search.MediaFile{FileName: "Premam.Malayalam.HDRip.mkv", Size: "900 MB"},
+			expected: "🎬 900 MB · Premam · Malayalam · HDRip",
 		},
 	}
 
 	for _, tc := range testCases {
-		label := formatFileButtonLabel(tc.file)
-		if strings.Contains(label, "🌷") {
-			t.Errorf("file label %q must not contain flower emoji 🌷", label)
-		}
-		if !strings.HasPrefix(label, "🎬") {
-			t.Errorf("file label %q should start with 🎬", label)
-		}
-		if label != tc.expected {
-			t.Errorf("expected %q, got %q", tc.expected, label)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			label := formatFileButtonLabel(tc.file)
+			if strings.Contains(label, "🌷") {
+				t.Errorf("file label %q must not contain flower emoji 🌷", label)
+			}
+			if !strings.HasPrefix(label, "🎬") {
+				t.Errorf("file label %q should start with 🎬", label)
+			}
+			if label != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, label)
+			}
+		})
+	}
+}
+
+func TestAutofilter_FileButtonLabel_LongTitlePreservesMetadata(t *testing.T) {
+	file := search.MediaFile{
+		FileName: "Spider-Man.Across.the.Spider-Verse.2023.English.1080p.mkv",
+		Size:     "2.4 GB",
+	}
+	label := formatFileButtonLabel(file)
+	if !strings.Contains(label, "English") {
+		t.Errorf("label %q should retain language 'English'", label)
+	}
+	if !strings.Contains(label, "1080p") {
+		t.Errorf("label %q should retain quality '1080p'", label)
+	}
+	if !strings.Contains(label, "Spider-Man") {
+		t.Errorf("label %q should retain movie title prefix", label)
+	}
+	if len([]rune(label)) > 60 {
+		t.Errorf("label length %d exceeds max 60 runes: %q", len([]rune(label)), label)
 	}
 }
 

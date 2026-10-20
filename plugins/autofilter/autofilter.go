@@ -968,17 +968,25 @@ func extractFileMetadata(fileName, caption string) (lang string, qual string, cl
 	// 3. Clean Title
 	clean := reFileExtStrip.ReplaceAllString(fileName, "")
 	clean = reBrackets.ReplaceAllString(clean, " ")
-	if loc := reYearFind.FindStringIndex(clean); loc != nil {
-		clean = clean[:loc[0]]
-	} else if loc := reResolution.FindStringIndex(clean); loc != nil {
-		clean = clean[:loc[0]]
-	} else if loc := reRip.FindStringIndex(clean); loc != nil {
-		clean = clean[:loc[0]]
-	} else if loc := reLangMatch.FindStringIndex(clean); loc != nil {
-		clean = clean[:loc[0]]
+
+	// Find the earliest cut point among year, resolution, rip, and language tags
+	firstCut := len(clean)
+	for _, re := range []*regexp.Regexp{reYearFind, reResolution, reRip, reLangMatch} {
+		if loc := re.FindStringIndex(clean); loc != nil && loc[0] < firstCut && loc[0] > 0 {
+			firstCut = loc[0]
+		}
 	}
+	if firstCut < len(clean) {
+		clean = clean[:firstCut]
+	}
+
 	clean = reCleanChars.ReplaceAllString(clean, " ")
 	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		fallback := reFileExtStrip.ReplaceAllString(fileName, "")
+		fallback = reCleanChars.ReplaceAllString(fallback, " ")
+		clean = strings.TrimSpace(fallback)
+	}
 	cleanTitle = clean
 
 	return lang, qual, cleanTitle
@@ -994,35 +1002,48 @@ func formatFileButtonLabel(f search.MediaFile) string {
 	}
 
 	lang, qual, cleanTitle := extractFileMetadata(f.FileName, f.Caption)
+	if cleanTitle == "" {
+		cleanTitle = strings.TrimSpace(f.FileName)
+	}
 
+	// Desired order: Size (MB), Movie Name, Language, Quality
+	// Example: 🎬 402 MB · KGF Chapter 2 · Malayalam · HDRip
 	var parts []string
-	parts = append(parts, "🎬 "+size)
+	sizePart := "🎬 " + size
+	parts = append(parts, sizePart)
 
-	if lang != "" && qual != "" {
-		parts = append(parts, lang, qual)
-	} else if lang != "" {
+	// Keep movie name reasonable so it does not crowd out language and quality
+	extraLen := len([]rune(sizePart))
+	if lang != "" {
+		extraLen += 3 + len([]rune(lang)) // " · " + lang
+	}
+	if qual != "" {
+		extraLen += 3 + len([]rune(qual)) // " · " + qual
+	}
+	extraLen += 3 // " · " before movie name
+
+	maxTitleLen := 60 - extraLen
+	if maxTitleLen < 15 {
+		maxTitleLen = 15
+	}
+
+	titleRunes := []rune(cleanTitle)
+	if len(titleRunes) > maxTitleLen {
+		cleanTitle = string(titleRunes[:maxTitleLen-3]) + "..."
+	}
+	parts = append(parts, cleanTitle)
+
+	if lang != "" {
 		parts = append(parts, lang)
-		if cleanTitle != "" && len(cleanTitle) <= 15 {
-			parts = append(parts, cleanTitle)
-		}
-	} else if qual != "" {
-		if cleanTitle != "" && len(cleanTitle) <= 15 {
-			parts = append(parts, cleanTitle)
-		}
+	}
+	if qual != "" {
 		parts = append(parts, qual)
-	} else if cleanTitle != "" {
-		parts = append(parts, cleanTitle)
-	} else {
-		name := strings.TrimSpace(f.FileName)
-		if len(name) > 30 {
-			name = name[:27] + "..."
-		}
-		parts = append(parts, name)
 	}
 
 	label := strings.Join(parts, " · ")
-	if len(label) > 60 {
-		label = label[:57] + "..."
+	labelRunes := []rune(label)
+	if len(labelRunes) > 60 {
+		label = string(labelRunes[:57]) + "..."
 	}
 	return label
 }

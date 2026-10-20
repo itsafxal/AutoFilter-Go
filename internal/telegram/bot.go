@@ -11,6 +11,7 @@ import (
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/dustin/go-humanize"
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	dbsql "github.com/itsafxal/MYTGBOTZ/internal/database/sql"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -158,10 +159,26 @@ func (s *BotService) Start(ctx context.Context) error {
 	return nil
 }
 
-// notifyAdminsOnRestart sends a Telegram notification to the owner and configured admins.
+// notifyAdminsOnRestart sends a Telegram notification to the owner and configured admins
+// only after the SQL migration has completed and the database is verified ready.
 func (s *BotService) notifyAdminsOnRestart(botUser *telegram.UserObj) {
 	if s.client == nil || botUser == nil || s.cfg == nil {
 		return
+	}
+
+	// Wait for SQL migration to complete before notifying admins
+	var syncRes *dbsql.SyncResult
+	var syncErr error
+	if s.appCtx != nil && s.appCtx.DB != nil {
+		s.logger.Info("waiting for SQL media migration to complete before sending admin notification...")
+		waitCtx, cancel := context.WithTimeout(context.Background(), 1*time.Hour)
+		syncRes, syncErr = s.appCtx.DB.WaitForSync(waitCtx)
+		cancel()
+		if syncErr != nil {
+			s.logger.Warn("SQL migration finished with error or wait timeout before admin notification", "error", syncErr)
+		} else {
+			s.logger.Info("SQL media migration verified complete, preparing admin notification")
+		}
 	}
 
 	var totalMedia int64
@@ -175,18 +192,45 @@ func (s *BotService) notifyAdminsOnRestart(botUser *telegram.UserObj) {
 	timeStr := time.Now().Format("2006-01-02 15:04:05 MST")
 	mediaStr := humanize.Comma(totalMedia)
 
-	msgText := fmt.Sprintf(
-		"⚡ <b>Bot Restarted Successfully!</b>\n\n"+
-			"🤖 <b>Bot:</b> @%s (<code>%d</code>)\n"+
-			"📊 <b>Indexed Media:</b> <code>%s</code> records\n"+
-			"⏰ <b>Restarted At:</b> <code>%s</code>\n"+
-			"🚀 <b>Status:</b> Online &amp; Listening for queries!\n\n"+
-			"<i>Auto-filter and all services are active.</i>",
-		botUser.Username,
-		botUser.ID,
-		mediaStr,
-		timeStr,
-	)
+	var msgText string
+	if syncErr != nil {
+		msgText = fmt.Sprintf(
+			"⚠️ <b>Bot Online (SQL Notice)</b>\n\n"+
+				"🤖 <b>Bot:</b> @%s (<code>%d</code>)\n"+
+				"⚠️ <b>SQL Status:</b> Migration issue: <code>%s</code>\n"+
+				"📊 <b>Indexed Media:</b> <code>%s</code> records\n"+
+				"⏰ <b>Time:</b> <code>%s</code>\n"+
+				"🚀 <b>Status:</b> Online &amp; Listening for queries!\n\n"+
+				"<i>Bot is operational, but SQL synchronization reported an issue.</i>",
+			botUser.Username,
+			botUser.ID,
+			syncErr.Error(),
+			mediaStr,
+			timeStr,
+		)
+	} else {
+		sqlStatus := "Synchronized &amp; Ready"
+		if syncRes != nil && !syncRes.Skipped && syncRes.Duration > 0 {
+			sqlStatus = fmt.Sprintf("Synchronized (%s)", syncRes.Duration.Round(time.Second).String())
+		} else if syncRes != nil && syncRes.Skipped {
+			sqlStatus = "Verified &amp; Ready"
+		}
+
+		msgText = fmt.Sprintf(
+			"⚡ <b>Bot Restarted Successfully!</b>\n\n"+
+				"🤖 <b>Bot:</b> @%s (<code>%d</code>)\n"+
+				"📊 <b>Indexed Media:</b> <code>%s</code> records\n"+
+				"💾 <b>SQL Database:</b> %s\n"+
+				"⏰ <b>Restarted At:</b> <code>%s</code>\n"+
+				"🚀 <b>Status:</b> Online &amp; Listening for queries!\n\n"+
+				"<i>SQL migration completed successfully and all services are active.</i>",
+			botUser.Username,
+			botUser.ID,
+			mediaStr,
+			sqlStatus,
+			timeStr,
+		)
+	}
 
 	// Collect unique recipient IDs
 	recipients := make(map[int64]bool)
@@ -209,7 +253,7 @@ func (s *BotService) notifyAdminsOnRestart(botUser *telegram.UserObj) {
 				"error", err,
 			)
 		} else {
-			s.logger.Info("startup notification sent to admin",
+			s.logger.Info("startup notification sent to admin (post-SQL migration)",
 				"admin_id", adminID,
 			)
 		}
