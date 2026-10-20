@@ -100,8 +100,9 @@ type CallbackPlugin interface {
 
 // MessageDefinition defines a message handler with a filter.
 type MessageDefinition struct {
-	Filter  MessageFilterFunc
-	Handler HandlerFunc
+	Filter       MessageFilterFunc
+	Handler      HandlerFunc
+	AllowChannel bool
 }
 
 // MessagePlugin is an optional interface plugins can implement to register generic message handlers (e.g. search).

@@ -287,6 +287,30 @@ func TestMatchMovie_StrictResults(t *testing.T) {
 			filename:  "Vikramadithyan (2014).mkv",
 			wantMatch: false,
 		},
+		{
+			name:      "The Early Spring matches episode file",
+			query:     "The Early Spring",
+			filename:  "The Early Spring S01E12 480p NF WEB DL Chinese AAC -@MNTG",
+			wantMatch: true,
+		},
+		{
+			name:      "The Early Spring matches episode file with hyphen before season",
+			query:     "The Early Spring",
+			filename:  "The Early Spring - S01E12 480p NF WEB DL Chinese AAC -@MNTG",
+			wantMatch: true,
+		},
+		{
+			name:      "The Early Spring matches episode file with trailing handle",
+			query:     "The Early Spring",
+			filename:  "The Early Spring S01E12 480p - @MNTG",
+			wantMatch: true,
+		},
+		{
+			name:      "The Early Spring S1 matches episode file",
+			query:     "The Early Spring S1",
+			filename:  "The Early Spring S01E12 480p NF WEB DL Chinese AAC -@MNTG",
+			wantMatch: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -324,5 +348,19 @@ func TestFilterAndRankStrict(t *testing.T) {
 		if f.FileID != expectedIDs[i] {
 			t.Errorf("at index %d: expected FileID %q, got %q (%s)", i, expectedIDs[i], f.FileID, f.FileName)
 		}
+	}
+
+	// Series search: "The Early Spring" matches episodes
+	seriesRecords := []MediaFile{
+		{FileID: "11", FileName: "The Early Spring S01E11 480p NF WEB DL Chinese AAC -@MNTG", DateSaved: now.Add(-2 * time.Hour)},
+		{FileID: "12", FileName: "The Early Spring S01E12 480p NF WEB DL Chinese AAC -@MNTG", DateSaved: now.Add(-1 * time.Hour)},
+		{FileID: "99", FileName: "Spring Blossom 2021 720p.mkv", DateSaved: now},
+	}
+	seriesFiltered := FilterAndRankStrict("The Early Spring", seriesRecords)
+	if len(seriesFiltered) != 2 {
+		t.Fatalf("expected 2 episodes matching 'The Early Spring', got %d", len(seriesFiltered))
+	}
+	if seriesFiltered[0].FileID != "12" || seriesFiltered[1].FileID != "11" {
+		t.Errorf("expected episodes 12 and 11, got %v and %v", seriesFiltered[0].FileID, seriesFiltered[1].FileID)
 	}
 }

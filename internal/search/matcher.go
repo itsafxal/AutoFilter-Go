@@ -41,6 +41,9 @@ var (
 	// Delimiter separator in the first 35 chars: "CinemaCourt - Vikram" or "CinemaCourt | Vikram"
 	reDelimiterPrefix = regexp.MustCompile(`^([a-zA-Z0-9\s._@]+?)\s*[-|:~]\s*(.+)$`)
 
+	// Trailing handle or tag: "-@MNTG", "- @CinemaCourt", etc.
+	reTrailingHandle = regexp.MustCompile(`(?i)\s*[-_–|:~]?\s*@[a-zA-Z0-9_]+\s*$`)
+
 	// Season and Episode patterns
 	reSeasonAndEpisode = regexp.MustCompile(`(?i)\b(?:s|season)[\s._-]*(\d{1,2})[\s._-]*(?:e|ep|episode)[\s._-]*(\d{1,2})\b`)
 	reSeasonOnly       = regexp.MustCompile(`(?i)\b(?:s|season)[\s._-]*(\d{1,2})\b`)
@@ -62,10 +65,7 @@ var knownChannelKeywords = map[string]struct{}{
 	"tamildbox": {}, "isaimini": {}, "kuttymovies": {}, "tamilyogi": {},
 	"bollyflix": {}, "mallumv": {}, "malayalamrockers": {}, "dvdplay": {},
 	"sargamify": {}, "tgxcyberbot": {}, "cyberbot": {}, "mytgbotz": {},
-	"yts": {}, "rarbg": {}, "psa": {}, "pahe": {}, "galaxyrg": {},
-	"filmyzilla": {}, "extramovies": {}, "vegamovies": {}, "katmoviehd": {},
-	"skymovieshd": {}, "worldfree4u": {}, "moviesda": {}, "crazy4movie": {},
-	"tg": {}, "tgx": {}, "channel": {}, "media": {}, "studios": {},
+	"mntg": {}, "mnt": {}, "tg": {}, "tgx": {}, "channel": {}, "media": {}, "studios": {},
 	"official": {}, "group": {}, "team": {}, "bot": {},
 }
 
@@ -172,7 +172,13 @@ func ParseRelease(filename string, userQuery string) ReleaseMetadata {
 		s = s[len(m[0]):]
 	}
 
-	// 4. Check for delimiter prefix in the first 35 chars: "CinemaCourt - Vikram"
+	// 3b. Strip trailing @channel handles: e.g. "The Early Spring S01E12 480p -@MNTG"
+	if loc := reTrailingHandle.FindStringIndex(s); loc != nil {
+		meta.ChannelTag = strings.TrimSpace(s[loc[0]:loc[1]])
+		s = strings.TrimRight(s[:loc[0]], " -_–|:~")
+	}
+
+	// 4. Check for delimiter channel prefix: e.g. "CinemaCourt - Vikram" or "@CinemaCourt - Vikram"
 	if len(s) > 3 {
 		checkPrefix := s
 		if len(checkPrefix) > 40 {
@@ -180,15 +186,19 @@ func ParseRelease(filename string, userQuery string) ReleaseMetadata {
 		}
 		if m := reDelimiterPrefix.FindStringSubmatch(checkPrefix); len(m) == 3 {
 			prefix := strings.TrimSpace(m[1])
-			// If prefix looks like a channel tag (not part of user query)
-			isQuery := false
+			cleanPrefix := strings.ToLower(rePunctuation.ReplaceAllString(prefix, ""))
+
+			// A prefix before a delimiter is ONLY a channel tag if it matches known channel patterns
+			// and does NOT contain any search tokens.
+			hasQueryWord := false
 			for _, qt := range queryTokens {
-				if strings.EqualFold(qt, prefix) {
-					isQuery = true
+				if len(qt) >= 2 && strings.Contains(cleanPrefix, strings.ToLower(qt)) {
+					hasQueryWord = true
 					break
 				}
 			}
-			if !isQuery {
+
+			if !hasQueryWord && (isChannelPrefixWord(cleanPrefix, queryTokens) || strings.HasPrefix(prefix, "@")) {
 				meta.ChannelTag = prefix
 				s = s[len(prefix):]
 				s = strings.TrimLeft(s, " -|:~_")

@@ -179,8 +179,14 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 				wrappedMh := r.wrapMessageHandler(mhCopy)
 				if mhCopy.Filter != nil {
 					client.AddMessageHandler(string(telegram.OnNewMessage), wrappedMh, telegram.Any(telegram.IsIncoming, telegram.IsOutgoing), telegram.CustomFilter(mhCopy.Filter))
+					if mhCopy.AllowChannel {
+						client.AddMessageHandler(string(telegram.OnEditMessage), wrappedMh, telegram.Any(telegram.IsIncoming, telegram.IsOutgoing), telegram.CustomFilter(mhCopy.Filter))
+					}
 				} else {
 					client.AddMessageHandler(string(telegram.OnNewMessage), wrappedMh, telegram.Any(telegram.IsIncoming, telegram.IsOutgoing))
+					if mhCopy.AllowChannel {
+						client.AddMessageHandler(string(telegram.OnEditMessage), wrappedMh, telegram.Any(telegram.IsIncoming, telegram.IsOutgoing))
+					}
 				}
 			}
 		}
@@ -212,8 +218,8 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 // wrapMessageHandler wraps a message handler with channel filtering, panic recovery, and structured logging.
 func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 	return func(m *telegram.NewMessage) (err error) {
-		if m != nil && (m.IsChannel() || m.IsChannelPost()) {
-			// Never reply or process ambient messages in broadcast channels
+		if !mh.AllowChannel && m != nil && (m.IsChannel() || m.IsChannelPost()) {
+			// Never reply or process ambient messages in broadcast channels unless handler explicitly opted in
 			return nil
 		}
 		defer func() {

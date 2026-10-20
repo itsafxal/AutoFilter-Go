@@ -102,6 +102,10 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 	// (e.g. during background migration, when sync is disabled, or for newly indexed media)
 	if len(matchedFiles) == 0 && s.dbManager != nil && s.dbManager.MongoMediaRepo() != nil {
 		mongoDocs, mErr := s.dbManager.MongoMediaRepo().Search(ctx, query, 100)
+		if (mErr != nil || len(mongoDocs) == 0) && len(tokens) > 0 {
+			// Fallback: search MongoDB using meaningful tokens (e.g. without stopwords like "The")
+			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, strings.Join(tokens, " "), 100)
+		}
 		if mErr == nil && len(mongoDocs) > 0 {
 			var mongoCandidates []MediaFile
 			for _, doc := range mongoDocs {
@@ -474,7 +478,11 @@ func (s *Service) GetSuggestions(ctx context.Context, query string, limit int) (
 			seen := make(map[string]struct{})
 			var candList []scoredSuggestion
 			for _, rawName := range candTitles {
-				cleanTitle := CleanReleaseName(rawName)
+				rel := ParseRelease(rawName, norm)
+				cleanTitle := rel.CleanTitle
+				if cleanTitle == "" || len(cleanTitle) < 2 {
+					cleanTitle = CleanReleaseName(rawName)
+				}
 				if cleanTitle == "" || len(cleanTitle) < 2 {
 					cleanTitle = strings.TrimSpace(rawName)
 				}

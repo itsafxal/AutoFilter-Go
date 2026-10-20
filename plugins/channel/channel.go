@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/base64"
+	"regexp"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
 	return []plugins.MessageDefinition{
 		{
+			AllowChannel: true,
 			Filter: func(m *telegram.NewMessage) bool {
 				if m == nil || p.appCtx == nil || p.appCtx.Config == nil {
 					return false
@@ -217,8 +219,13 @@ func ExtractMediaFromMessage(m *telegram.NewMessage) *mongodb.MediaDoc {
 	if caption == "" {
 		caption = fileName
 	}
-	if fileName == "" {
-		fileName = caption
+	if fileName == "" || strings.Contains(fileName, "\n") {
+		cleanCap := cleanCaptionTitle(caption)
+		if cleanCap != "" {
+			fileName = cleanCap
+		} else if fileName == "" {
+			fileName = caption
+		}
 	}
 	if fileName == "" {
 		fileName = "Media_" + fileID
@@ -259,6 +266,27 @@ func extractFileName(doc *telegram.DocumentObj) string {
 				}
 				return audio.Title
 			}
+		}
+	}
+	return ""
+}
+
+var reCaptionPrefix = regexp.MustCompile(`(?i)^(?:\s*📂?\s*f[iɪ]l[eᴇ]\s*n[aᴀ]m[eᴇ]\s*[:\-~|]?\s*|\s*📁?\s*n[aᴀ]m[eᴇ]\s*[:\-~|]?\s*|\s*t[iɪ]tl[eᴇ]\s*[:\-~|]?\s*)`)
+
+func cleanCaptionTitle(caption string) string {
+	if strings.TrimSpace(caption) == "" {
+		return ""
+	}
+	lines := strings.Split(caption, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		cleaned := reCaptionPrefix.ReplaceAllString(line, "")
+		cleaned = strings.TrimSpace(cleaned)
+		if cleaned != "" {
+			return cleaned
 		}
 	}
 	return ""

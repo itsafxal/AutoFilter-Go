@@ -123,3 +123,48 @@ func TestChannelPlugin_ExtractChatID(t *testing.T) {
 		t.Errorf("expected -1001234567890, got %d", id)
 	}
 }
+
+func TestChannelPlugin_AllowChannel(t *testing.T) {
+	appCtx := &plugins.AppContext{
+		Config: &config.Config{Channels: []int64{-1001234567890}},
+	}
+	p := New(appCtx)
+	handlers := p.MessageHandlers()
+	if len(handlers) == 0 {
+		t.Fatal("expected message handlers")
+	}
+	if !handlers[0].AllowChannel {
+		t.Error("expected AllowChannel to be true for live channel indexer")
+	}
+}
+
+func TestCleanCaptionTitle(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "📂 Fɪʟᴇ ɴᴀᴍᴇ : The Early Spring S01E12 480p NF WEB DL Chinese AAC -@MNTG\nUploaded by @MNTG",
+			want:  "The Early Spring S01E12 480p NF WEB DL Chinese AAC -@MNTG",
+		},
+		{
+			input: "📁 File Name: Vikram.2022.1080p.mkv\nJoin @Channel",
+			want:  "Vikram.2022.1080p.mkv",
+		},
+		{
+			input: "The Early Spring S01E11 480p NF WEB DL",
+			want:  "The Early Spring S01E11 480p NF WEB DL",
+		},
+		{
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		got := cleanCaptionTitle(tt.input)
+		if got != tt.want {
+			t.Errorf("cleanCaptionTitle(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
