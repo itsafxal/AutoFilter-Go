@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -334,25 +333,26 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 		return 0, fmt.Errorf("shard %s collection is nil", shard.Label)
 	}
 
+	// Optimize wire transfer by projecting only required fields and requesting 10,000 docs per network batch
 	opts := options.Find().
-		SetBatchSize(10000)
+		SetBatchSize(10000).
+		SetProjection(bson.M{
+			"_id":       1,
+			"file_ref":  1,
+			"file_name": 1,
+			"file_size": 1,
+			"size":      1,
+			"file_type": 1,
+			"mime_type": 1,
+			"caption":   1,
+			"date":      1,
+		})
 
-	var cursor *mongo.Cursor
-	var err error
-	for attempt := 1; attempt <= 3; attempt++ {
-		cursor, err = shard.Col.Find(ctx, bson.M{}, opts)
-		if err == nil {
-			break
-		}
-		if ctx.Err() != nil {
-			return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
-		}
-		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-	}
+	cursor, err := shard.Col.Find(ctx, bson.M{}, opts)
 	if err != nil {
 		return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
 	}
-	defer cursor.Close(context.Background())
+	defer cursor.Close(ctx)
 
 	var streamed int64
 	for cursor.Next(ctx) {
