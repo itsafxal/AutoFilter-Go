@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
@@ -117,76 +118,106 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 	`
 
-	// 4. Stream each shard cluster sequentially with clear, readable progress
+	// 4. Stream all media shards concurrently using a high-throughput producer-consumer pipeline
+	type shardDoc struct {
+		label string
+		doc   mongodb.MediaDoc
+	}
+
+	docChan := make(chan shardDoc, 50000)
+	errChan := make(chan error, len(shards))
+	var wg sync.WaitGroup
+
+	s.logger.Info("🚀 Launching concurrent parallel migration across all MongoDB media clusters...",
+		"clusters", len(shards),
+		"total_expected", totalExpected,
+	)
+
 	for i, shard := range shards {
-		shardStart := time.Now()
 		var shardExpected int64
 		if i < len(shardCounts) {
 			shardExpected = shardCounts[i].Count
 		}
-
-		s.logger.Info(fmt.Sprintf("🚀 Starting migration for cluster [%s] (approx. %d files)...", shard.Label, shardExpected),
+		s.logger.Info(fmt.Sprintf("  • Streaming cluster [%s] (approx. %d files) in parallel...", shard.Label, shardExpected),
 			"cluster", shard.Label,
 			"expected_files", shardExpected,
 		)
 
-		var batch []mongodb.MediaDoc
-		var shardSaved int64
-
-		_, streamErr := s.mediaRepo.StreamShard(ctx, i, func(doc mongodb.MediaDoc) error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			batch = append(batch, doc)
-			if len(batch) >= s.batchSize {
-				if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
-					return fmt.Errorf("failed to commit batch to SQLite: %w", err)
+		wg.Add(1)
+		go func(idx int, sh mongodb.MediaShard) {
+			defer wg.Done()
+			shardStart := time.Now()
+			streamed, err := s.mediaRepo.StreamShard(ctx, idx, func(doc mongodb.MediaDoc) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case docChan <- shardDoc{label: sh.Label, doc: doc}:
+					return nil
 				}
-				shardSaved += int64(len(batch))
-				totalSaved += int64(len(batch))
+			})
+			if err != nil {
+				s.logger.Error(fmt.Sprintf("streaming failed for cluster [%s]", sh.Label), "error", err)
+				errChan <- fmt.Errorf("sync failed on cluster %s: %w", sh.Label, err)
+				return
+			}
+			s.logger.Info(fmt.Sprintf("✅ Cluster [%s] streaming complete: %d records in %s",
+				sh.Label, streamed, time.Since(shardStart).Round(time.Millisecond).String()),
+				"cluster", sh.Label,
+				"records", streamed,
+			)
+		}(i, shard)
+	}
 
+	go func() {
+		wg.Wait()
+		close(docChan)
+	}()
+
+	batch := make([]mongodb.MediaDoc, 0, s.batchSize)
+	shardProgress := make(map[string]int64)
+	lastLog := time.Now()
+
+	for sd := range docChan {
+		batch = append(batch, sd.doc)
+		shardProgress[sd.label]++
+
+		if len(batch) >= s.batchSize {
+			if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
+				return nil, fmt.Errorf("failed to commit batch to SQLite: %w", err)
+			}
+			totalSaved += int64(len(batch))
+			batch = batch[:0]
+
+			if time.Since(lastLog) >= 2*time.Second {
 				var pct float64
-				if shardExpected > 0 {
-					pct = float64(shardSaved) / float64(shardExpected) * 100
+				if totalExpected > 0 {
+					pct = float64(totalSaved) / float64(totalExpected) * 100
 					if pct > 100 {
 						pct = 100
 					}
 				}
-				s.logger.Info(fmt.Sprintf("📦 [%s] Synced: %d / %d (%.1f%%) | Total saved: %d",
-					shard.Label, shardSaved, shardExpected, pct, totalSaved),
-					"cluster", shard.Label,
-					"shard_synced", shardSaved,
+				s.logger.Info(fmt.Sprintf("📦 Synced: %d / %d (%.1f%%) | DB2: %d | DB3: %d",
+					totalSaved, totalExpected, pct, shardProgress["DB2"], shardProgress["DB3"]),
 					"total_saved", totalSaved,
 					"progress_pct", fmt.Sprintf("%.1f%%", pct),
 				)
-				batch = batch[:0]
+				lastLog = time.Now()
 			}
-			return nil
-		})
-
-		if streamErr != nil {
-			s.logger.Error(fmt.Sprintf("synchronization failed for cluster [%s]", shard.Label), "error", streamErr)
-			return nil, fmt.Errorf("sync failed on cluster %s: %w", shard.Label, streamErr)
 		}
+	}
 
-		if len(batch) > 0 {
-			if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
-				return nil, fmt.Errorf("failed to commit final batch for cluster %s: %w", shard.Label, err)
-			}
-			shardSaved += int64(len(batch))
-			totalSaved += int64(len(batch))
+	if len(batch) > 0 {
+		if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
+			return nil, fmt.Errorf("failed to commit final batch: %w", err)
 		}
+		totalSaved += int64(len(batch))
+	}
 
-		shardDuration := time.Since(shardStart)
-		s.logger.Info(fmt.Sprintf("✅ Cluster [%s] migration complete: %d records in %s",
-			shard.Label, shardSaved, shardDuration.Round(time.Millisecond).String()),
-			"cluster", shard.Label,
-			"records", shardSaved,
-			"duration", shardDuration.String(),
-		)
+	// Check if any shard returned an error
+	select {
+	case err := <-errChan:
+		return nil, err
+	default:
 	}
 
 	// 5. Rebuild search indexes
@@ -230,12 +261,11 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 		}
 		defer stmt.Close()
 
+		now := time.Now()
 		for _, doc := range docs {
-			var dateSaved interface{}
+			var dateSaved interface{} = now
 			if !doc.Date.IsZero() {
 				dateSaved = doc.Date
-			} else {
-				dateSaved = time.Now()
 			}
 
 			_, err := stmt.ExecContext(ctx,

@@ -36,8 +36,8 @@ func NewDBManager(dbPath string, logger *slog.Logger) *DBManager {
 func (m *DBManager) Open(ctx context.Context) error {
 	m.logger.Info("opening temporary SQLite runtime database...", "path", m.dbPath)
 
-	// Open connection with pure-Go driver
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-64000)&_pragma=temp_store(MEMORY)&_pragma=foreign_keys(ON)", m.dbPath)
+	// Open connection with pure-Go driver tuned for high-speed bulk ingestion
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(30000)&_pragma=journal_mode(WAL)&_pragma=synchronous(OFF)&_pragma=cache_size(-131072)&_pragma=temp_store(MEMORY)", m.dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open SQLite database: %w", err)
