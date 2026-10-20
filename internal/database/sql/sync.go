@@ -21,7 +21,7 @@ type Syncer struct {
 // NewSyncer constructs a new Syncer.
 func NewSyncer(dbManager *DBManager, mediaRepo *mongodb.MediaRepository, logger *slog.Logger, batchSize int) *Syncer {
 	if batchSize <= 0 {
-		batchSize = 20000
+		batchSize = 1000
 	}
 	return &Syncer{
 		dbManager: dbManager,
@@ -230,12 +230,11 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 		}
 		defer stmt.Close()
 
+		now := time.Now()
 		for _, doc := range docs {
-			var dateSaved interface{}
+			var dateSaved interface{} = now
 			if !doc.Date.IsZero() {
 				dateSaved = doc.Date
-			} else {
-				dateSaved = time.Now()
 			}
 
 			_, err := stmt.ExecContext(ctx,

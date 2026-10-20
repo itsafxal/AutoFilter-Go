@@ -65,7 +65,7 @@ type Config struct {
 	// SQLiteDBPath is the file path for the temporary local SQLite runtime database (default: "media.sqlite3").
 	SQLiteDBPath string
 
-	// SyncBatchSize defines how many records are fetched and inserted per batch during SQLite sync (default: 10000).
+	// SyncBatchSize defines how many records are fetched and inserted per batch during SQLite sync (default: 1000).
 	SyncBatchSize int
 
 	// CustomCaption defines the default media caption template when none is overridden by an admin.
@@ -192,7 +192,7 @@ func LoadFromEnv() (*Config, error) {
 		sqlitePath = "media.sqlite3"
 	}
 
-	batchSize := 10000
+	batchSize := 1000
 	if rawBatch := strings.TrimSpace(os.Getenv("SYNC_BATCH_SIZE")); rawBatch != "" {
 		if parsed, err := strconv.Atoi(rawBatch); err == nil && parsed > 0 {
 			batchSize = parsed

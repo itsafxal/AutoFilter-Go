@@ -143,8 +143,8 @@ func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 	if cfg.SQLiteDBPath != "media.sqlite3" {
 		t.Errorf("expected default SQLiteDBPath media.sqlite3, got %s", cfg.SQLiteDBPath)
 	}
-	if cfg.SyncBatchSize != 10000 {
-		t.Errorf("expected default SyncBatchSize 10000, got %d", cfg.SyncBatchSize)
+	if cfg.SyncBatchSize != 1000 {
+		t.Errorf("expected default SyncBatchSize 1000, got %d", cfg.SyncBatchSize)
 	}
 	if cfg.AutoDeleteFilterTime != "15m" {
 		t.Errorf("expected default AutoDeleteFilterTime 15m, got %s", cfg.AutoDeleteFilterTime)

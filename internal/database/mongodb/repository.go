@@ -334,20 +334,8 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 		return 0, fmt.Errorf("shard %s collection is nil", shard.Label)
 	}
 
-	// Optimize wire transfer by projecting only required fields and requesting 10,000 docs per network batch
 	opts := options.Find().
-		SetBatchSize(10000).
-		SetProjection(bson.M{
-			"_id":       1,
-			"file_ref":  1,
-			"file_name": 1,
-			"file_size": 1,
-			"size":      1,
-			"file_type": 1,
-			"mime_type": 1,
-			"caption":   1,
-			"date":      1,
-		})
+		SetBatchSize(1000)
 
 	var cursor *mongo.Cursor
 	var err error
