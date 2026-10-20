@@ -358,8 +358,12 @@ func TestAutofilter_FileButtonLabel_Format(t *testing.T) {
 			if !strings.HasPrefix(label, "🎬") {
 				t.Errorf("file label %q should start with 🎬", label)
 			}
-			if label != tc.expected {
-				t.Errorf("expected %q, got %q", tc.expected, label)
+			cleanLabel := strings.TrimRight(label, "\u2800")
+			if cleanLabel != tc.expected {
+				t.Errorf("expected %q, got %q", tc.expected, cleanLabel)
+			}
+			if len([]rune(label)) < 50 {
+				t.Errorf("expected button label to be padded to at least 50 runes for left-alignment, got %d", len([]rune(label)))
 			}
 		})
 	}

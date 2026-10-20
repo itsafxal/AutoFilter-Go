@@ -1044,7 +1044,17 @@ func formatFileButtonLabel(f search.MediaFile) string {
 	labelRunes := []rune(label)
 	if len(labelRunes) > 60 {
 		label = string(labelRunes[:57]) + "..."
+		labelRunes = []rune(label)
 	}
+
+	// Pad with invisible Braille whitespace (\u2800) so that Telegram centers
+	// a consistent ~50-rune width string, forcing the visible content flush-left
+	// across all button rows regardless of title length.
+	const targetWidth = 50
+	if len(labelRunes) < targetWidth {
+		label = label + strings.Repeat("\u2800", targetWidth-len(labelRunes))
+	}
+
 	return label
 }
 
