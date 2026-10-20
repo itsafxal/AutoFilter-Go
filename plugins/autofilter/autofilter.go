@@ -904,6 +904,9 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 		kb.AddRow(telegram.Button.Data("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", "pages"))
 	}
 
+	// 5. Always include Close button (Red)
+	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger())
+
 	return kb.Build()
 }
 

@@ -177,6 +177,25 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 	}
 }
 
+// CallbackHandlers registers interactive callback query handlers for fsub plugin.
+func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
+	return []plugins.CallbackDefinition{
+		{
+			Prefix:  "close_data",
+			Handler: p.HandleCloseCallback,
+		},
+	}
+}
+
+// HandleCloseCallback deletes the prompt message.
+func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
+	if cb != nil {
+		_, _ = cb.Delete()
+		_, _ = cb.Answer("")
+	}
+	return nil
+}
+
 // JoinRequestHandlers registers the MTProto chat join request listener.
 func (p *Plugin) JoinRequestHandlers() []plugins.JoinRequestHandlerFunc {
 	return []plugins.JoinRequestHandlerFunc{

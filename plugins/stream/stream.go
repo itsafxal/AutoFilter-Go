@@ -54,6 +54,10 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 			Prefix:  "stream_links#",
 			Handler: p.HandleFastDownloadCallback,
 		},
+		{
+			Prefix:  "close_data",
+			Handler: p.HandleCloseCallback,
+		},
 	}
 }
 
@@ -131,7 +135,10 @@ func (p *Plugin) HandleFastDownloadCommand(m *telegram.NewMessage) error {
 	if commands.IsValidTelegramButtonURL(downloadURL) {
 		replyMarkup = telegram.NewKeyboard().
 			AddRow(
-				telegram.Button.URL("⚡ Fast Download", downloadURL),
+				telegram.Button.URL("⚡ Fast Download", downloadURL).Danger(),
+			).
+			AddRow(
+				telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
 			).
 			Build()
 	}
@@ -206,7 +213,10 @@ func (p *Plugin) HandleFastDownloadCallback(cb *telegram.CallbackQuery) error {
 	if commands.IsValidTelegramButtonURL(downloadURL) {
 		replyMarkup = telegram.NewKeyboard().
 			AddRow(
-				telegram.Button.URL("⚡ Fast Download", downloadURL),
+				telegram.Button.URL("⚡ Fast Download", downloadURL).Danger(),
+			).
+			AddRow(
+				telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
 			).
 			Build()
 	}
@@ -233,6 +243,15 @@ func (p *Plugin) HandleFastDownloadCallback(cb *telegram.CallbackQuery) error {
 
 	_, aErr := cb.Answer("✅ Fast Download link sent to your chat!")
 	return aErr
+}
+
+// HandleCloseCallback deletes the message.
+func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
+	if cb != nil {
+		_, _ = cb.Delete()
+		_, _ = cb.Answer("")
+	}
+	return nil
 }
 
 // HandleStreamCommand aliases HandleFastDownloadCommand for backwards compatibility.

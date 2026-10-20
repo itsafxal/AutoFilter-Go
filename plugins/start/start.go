@@ -50,6 +50,7 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 		{Prefix: "start_home", Handler: p.HandleHomeCallback},
 		{Prefix: "help", Handler: p.HandleHelpCallback},
 		{Prefix: "about", Handler: p.HandleAboutCallback},
+		{Prefix: "close_data", Handler: p.HandleCloseCallback},
 	}
 }
 
@@ -205,6 +206,15 @@ func (p *Plugin) HandleHomeCallback(cb *telegram.CallbackQuery) error {
 	})
 	_, err := cb.Answer("")
 	return err
+}
+
+// HandleCloseCallback deletes the menu message.
+func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
+	if cb != nil {
+		_, _ = cb.Delete()
+		_, _ = cb.Answer("")
+	}
+	return nil
 }
 
 // HandleStart handles the /start command in private and group chats.

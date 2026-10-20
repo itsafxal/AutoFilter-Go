@@ -269,6 +269,7 @@ func (s *Service) BuildDynamicFSubKeyboard(ctx context.Context, client *telegram
 	for _, row := range buttons {
 		builder.AddRow(row...)
 	}
+	builder.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger())
 	markup := builder.Build()
 	return markup, unjoined
 }

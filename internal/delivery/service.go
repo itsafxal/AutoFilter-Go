@@ -351,7 +351,7 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 	if enableBtn {
 		replyMarkup = telegram.NewKeyboard().
 			AddRow(
-				telegram.Button.Data("⚡ Fast Download", fmt.Sprintf("fast_download#%s", cleanID)),
+				telegram.Button.Data("⚡ Fast Download", fmt.Sprintf("fast_download#%s", cleanID)).Danger(),
 			).
 			Build()
 	}

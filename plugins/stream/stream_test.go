@@ -35,6 +35,7 @@ func TestStreamPlugin_Registration(t *testing.T) {
 	cbs := plugin.CallbackHandlers()
 	hasFastDLCb := false
 	hasStreamLinksCb := false
+	hasCloseCb := false
 	for _, cb := range cbs {
 		if cb.Prefix == "fast_download#" {
 			hasFastDLCb = true
@@ -42,11 +43,17 @@ func TestStreamPlugin_Registration(t *testing.T) {
 		if cb.Prefix == "stream_links#" {
 			hasStreamLinksCb = true
 		}
+		if cb.Prefix == "close_data" {
+			hasCloseCb = true
+		}
 	}
 	if !hasFastDLCb {
 		t.Error("expected 'fast_download#' callback handler to be registered")
 	}
 	if !hasStreamLinksCb {
 		t.Error("expected 'stream_links#' callback handler to be registered")
+	}
+	if !hasCloseCb {
+		t.Error("expected 'close_data' callback handler to be registered")
 	}
 }
