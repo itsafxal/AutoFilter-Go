@@ -123,8 +123,8 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 
 	// Check if SQLite already contains all expected records from a previous run
 	existingRows, _ := s.GetTotalRows(ctx)
-	if existingRows > 0 && totalExpected > 0 && existingRows >= totalExpected {
-		s.logger.Info("SQLite media table already contains all expected records; marking complete",
+	if existingRows > 0 && totalExpected > 0 && existingRows >= int64(float64(totalExpected)*0.98) {
+		s.logger.Info("SQLite media table already contains expected records; marking complete",
 			"existing_records", existingRows,
 			"expected_records", totalExpected,
 		)
@@ -169,21 +169,13 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 	shards := s.mediaRepo.Shards()
 	var totalSaved int64
 
-	// Using INSERT OR IGNORE avoids deleting existing B-tree cells when resuming
-	insertStmt := `
-		INSERT OR IGNORE INTO media (
-			file_id, file_ref, file_name, file_size, size,
-			file_type, mime_type, caption, date_saved
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-	`
-
-	// 4. Stream all media shards concurrently using a high-throughput producer-consumer pipeline
-	type shardDoc struct {
+	// 4. Stream all media shards concurrently using a high-throughput slice-batch pipeline
+	type shardBatch struct {
 		label string
-		doc   mongodb.MediaDoc
+		docs  []mongodb.MediaDoc
 	}
 
-	docChan := make(chan shardDoc, 100000)
+	batchChan := make(chan shardBatch, 100)
 	errChan := make(chan error, len(shards))
 	var wg sync.WaitGroup
 
@@ -206,11 +198,11 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		go func(idx int, sh mongodb.MediaShard) {
 			defer wg.Done()
 			shardStart := time.Now()
-			streamed, err := s.mediaRepo.StreamShard(ctx, idx, func(doc mongodb.MediaDoc) error {
+			streamed, err := s.mediaRepo.StreamShardBatches(ctx, idx, 5000, func(batch []mongodb.MediaDoc) error {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case docChan <- shardDoc{label: sh.Label, doc: doc}:
+				case batchChan <- shardBatch{label: sh.Label, docs: batch}:
 					return nil
 				}
 			})
@@ -229,55 +221,39 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 
 	go func() {
 		wg.Wait()
-		close(docChan)
+		close(batchChan)
 	}()
 
-	batch := make([]mongodb.MediaDoc, 0, s.batchSize)
 	shardProgress := make(map[string]int64)
 	lastLog := time.Now()
 
-	for sd := range docChan {
-		batch = append(batch, sd.doc)
-		shardProgress[sd.label]++
-
-		if len(batch) >= s.batchSize {
-			if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
-				return nil, fmt.Errorf("failed to commit batch to SQLite: %w", err)
-			}
-			totalSaved += int64(len(batch))
-			s.mu.Lock()
-			s.totalSaved = totalSaved
-			s.mu.Unlock()
-			batch = batch[:0]
-
-			if time.Since(lastLog) >= 2*time.Second {
-				var pct float64
-				if totalExpected > 0 {
-					pct = float64(totalSaved) / float64(totalExpected) * 100
-					if pct > 100 {
-						pct = 100
-					}
-				}
-				rate := float64(totalSaved) / time.Since(start).Seconds()
-				s.logger.Info(fmt.Sprintf("📦 Synced: %d / %d (%.1f%%) | %.0f docs/sec | DB2: %d | DB3: %d",
-					totalSaved, totalExpected, pct, rate, shardProgress["DB2"], shardProgress["DB3"]),
-					"total_saved", totalSaved,
-					"rate_docs_sec", int64(rate),
-					"progress_pct", fmt.Sprintf("%.1f%%", pct),
-				)
-				lastLog = time.Now()
-			}
+	for sb := range batchChan {
+		if err := s.commitBatch(ctx, "", sb.docs); err != nil {
+			return nil, fmt.Errorf("failed to commit batch to SQLite: %w", err)
 		}
-	}
-
-	if len(batch) > 0 {
-		if err := s.commitBatch(ctx, insertStmt, batch); err != nil {
-			return nil, fmt.Errorf("failed to commit final batch: %w", err)
-		}
-		totalSaved += int64(len(batch))
+		totalSaved += int64(len(sb.docs))
+		shardProgress[sb.label] += int64(len(sb.docs))
 		s.mu.Lock()
 		s.totalSaved = totalSaved
 		s.mu.Unlock()
+
+		if time.Since(lastLog) >= 2*time.Second {
+			var pct float64
+			if totalExpected > 0 {
+				pct = float64(totalSaved) / float64(totalExpected) * 100
+				if pct > 100 {
+					pct = 100
+				}
+			}
+			rate := float64(totalSaved) / time.Since(start).Seconds()
+			s.logger.Info(fmt.Sprintf("📦 Synced: %d / %d (%.1f%%) | %.0f docs/sec | DB2: %d | DB3: %d",
+				totalSaved, totalExpected, pct, rate, shardProgress["DB2"], shardProgress["DB3"]),
+				"total_saved", totalSaved,
+				"rate_docs_sec", int64(rate),
+				"progress_pct", fmt.Sprintf("%.1f%%", pct),
+			)
+			lastLog = time.Now()
+		}
 	}
 
 	// Check if any shard returned an error
@@ -326,7 +302,7 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 		return nil
 	}
 	return s.dbManager.ExecWrite(func(tx *sql.Tx) error {
-		const chunkSize = 200
+		const chunkSize = 500
 		now := time.Now()
 
 		for i := 0; i < len(docs); i += chunkSize {
@@ -337,12 +313,13 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 			chunk := docs[i:end]
 
 			var b strings.Builder
+			b.Grow(len(chunk) * 220)
 			b.WriteString("INSERT OR IGNORE INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved) VALUES ")
 			args := make([]interface{}, 0, len(chunk)*9)
 
 			for j, doc := range chunk {
 				if j > 0 {
-					b.WriteString(",")
+					b.WriteByte(',')
 				}
 				b.WriteString("(?,?,?,?,?,?,?,?,?)")
 
@@ -363,7 +340,7 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 					dateSaved,
 				)
 			}
-			b.WriteString(";")
+			b.WriteByte(';')
 
 			if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
 				return fmt.Errorf("chunk insert error: %w", err)
@@ -374,10 +351,14 @@ func (s *Syncer) commitBatch(ctx context.Context, insertSQL string, docs []mongo
 }
 
 func (s *Syncer) dropSecondaryIndexes(ctx context.Context) error {
-	// Preserve media_ai triggers and idx_media_file_name so that SQLite remains indexed and searchable in real-time
 	queries := []string{
+		"DROP INDEX IF EXISTS idx_media_file_name;",
 		"DROP INDEX IF EXISTS idx_media_caption;",
 		"DROP INDEX IF EXISTS idx_date_saved;",
+		"DROP INDEX IF EXISTS idx_media_date_name;",
+		"DROP TRIGGER IF EXISTS media_ai;",
+		"DROP TRIGGER IF EXISTS media_ad;",
+		"DROP TRIGGER IF EXISTS media_au;",
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
@@ -415,11 +396,10 @@ func (s *Syncer) ensureIndexes(ctx context.Context) error {
 		}
 	}
 
-	// Rebuild FTS5 trigram search index after bulk sync only if records changed or index is out of sync
-	var mediaCount, ftsCount int64
+	// Rebuild FTS5 trigram search index after bulk sync in single linear pass (matching TGxCyberBot lines 450-454)
+	var mediaCount int64
 	_ = s.dbManager.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM media;").Scan(&mediaCount)
-	_ = s.dbManager.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM media_fts;").Scan(&ftsCount)
-	if mediaCount > 0 && ftsCount != mediaCount {
+	if mediaCount > 0 {
 		if _, err := s.dbManager.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');"); err != nil {
 			s.logger.Warn("failed to rebuild FTS5 index", "error", err)
 		}
@@ -430,8 +410,10 @@ func (s *Syncer) ensureIndexes(ctx context.Context) error {
 
 func (s *Syncer) setBulkPragmas(ctx context.Context) error {
 	queries := []string{
+		"PRAGMA journal_mode = WAL;",
 		"PRAGMA synchronous = OFF;",
-		"PRAGMA cache_size = -131072;", // 128 MB cache during bulk ingestion
+		"PRAGMA cache_size = -262144;",  // 256 MB cache
+		"PRAGMA mmap_size = 268435456;", // 256 MB memory-mapped I/O (matching TGxCyberBot line 370)
 		"PRAGMA temp_store = MEMORY;",
 	}
 	for _, q := range queries {
@@ -446,6 +428,7 @@ func (s *Syncer) setNormalPragmas(ctx context.Context) error {
 	queries := []string{
 		"PRAGMA synchronous = NORMAL;",
 		"PRAGMA cache_size = -64000;",
+		"PRAGMA mmap_size = 268435456;",
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {

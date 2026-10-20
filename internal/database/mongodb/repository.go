@@ -336,20 +336,10 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 		return 0, fmt.Errorf("shard %s collection is nil", shard.Label)
 	}
 
-	// Optimize wire transfer by projecting only required fields and requesting 5,000 docs per network batch
+	// Optimize wire transfer without projection overhead (matching TGxCyberBot cursor streaming)
+	// and requesting 10,000 documents per wire batch
 	opts := options.Find().
-		SetBatchSize(5000).
-		SetProjection(bson.M{
-			"_id":       1,
-			"file_ref":  1,
-			"file_name": 1,
-			"file_size": 1,
-			"size":      1,
-			"file_type": 1,
-			"mime_type": 1,
-			"caption":   1,
-			"date":      1,
-		})
+		SetBatchSize(10000)
 
 	var cursor *mongo.Cursor
 	var err error
@@ -384,6 +374,76 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 			return streamed, err
 		}
 		streamed++
+	}
+
+	if err := cursor.Err(); err != nil {
+		return streamed, fmt.Errorf("cursor error on shard %s: %w", shard.Label, err)
+	}
+
+	return streamed, nil
+}
+
+// StreamShardBatches streams documents in slices of batchSize to eliminate per-document channel overhead.
+func (r *MediaRepository) StreamShardBatches(ctx context.Context, shardIndex int, batchSize int, callback func(batch []MediaDoc) error) (int64, error) {
+	if r == nil || shardIndex < 0 || shardIndex >= len(r.shards) {
+		return 0, fmt.Errorf("invalid shard index: %d", shardIndex)
+	}
+
+	shard := r.shards[shardIndex]
+	if shard.Col == nil {
+		return 0, fmt.Errorf("shard %s collection is nil", shard.Label)
+	}
+
+	if batchSize <= 0 {
+		batchSize = 10000
+	}
+
+	opts := options.Find().
+		SetBatchSize(int32(batchSize))
+
+	var cursor *mongo.Cursor
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		cursor, err = shard.Col.Find(ctx, bson.M{}, opts)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
+		}
+		time.Sleep(time.Duration(attempt) * 1 * time.Second)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
+	}
+	defer cursor.Close(context.Background())
+
+	var streamed int64
+	batch := make([]MediaDoc, 0, batchSize)
+
+	for cursor.Next(ctx) {
+		var doc MediaDoc
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		if doc.FileID == "" {
+			continue
+		}
+		batch = append(batch, doc)
+		if len(batch) >= batchSize {
+			streamed += int64(len(batch))
+			if err := callback(batch); err != nil {
+				return streamed, err
+			}
+			batch = make([]MediaDoc, 0, batchSize)
+		}
+	}
+
+	if len(batch) > 0 {
+		streamed += int64(len(batch))
+		if err := callback(batch); err != nil {
+			return streamed, err
+		}
 	}
 
 	if err := cursor.Err(); err != nil {

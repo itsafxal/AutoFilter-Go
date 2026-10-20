@@ -110,8 +110,8 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 			// Check if already populated to skip immediately
 			isComplete, _ := m.syncer.IsSyncComplete(ctx)
 			hasData, _ := m.syncer.HasData(ctx)
-			if isComplete && hasData {
-				count, _ := m.syncer.GetTotalRows(ctx)
+			count, _ := m.syncer.GetTotalRows(ctx)
+			if (isComplete && hasData) || (hasData && count >= 500000) {
 				m.logger.Info("SQLite media table is already populated and synchronized; skipping full migration",
 					"existing_records", count,
 				)
