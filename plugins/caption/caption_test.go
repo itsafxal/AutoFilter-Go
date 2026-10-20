@@ -17,7 +17,7 @@ func (m *mockCaptionService) GetCaption(ctx context.Context) string {
 	if m.custom && m.caption != "" {
 		return m.caption
 	}
-	return "CUSTOM CAPTION {filename} {file sise}"
+	return "{filename}\n\nFile Size : {file size}"
 }
 
 func (m *mockCaptionService) GetCustomCaption(ctx context.Context) (string, bool) {
@@ -106,7 +106,7 @@ func TestCaptionPlugin_ServiceInteraction(t *testing.T) {
 		t.Error("expected IsCustom false after DeleteCaption")
 	}
 	outDefault := mockSvc.FormatMedia(ctx, "Movie.mkv", "1.5 GB", "")
-	if outDefault != "CUSTOM CAPTION Movie.mkv 1.5 GB" {
+	if outDefault != "Movie.mkv\n\nFile Size : 1.5 GB" {
 		t.Errorf("unexpected default output: %s", outDefault)
 	}
 }

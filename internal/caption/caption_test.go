@@ -11,9 +11,9 @@ import (
 
 
 func TestFormat_Placeholders(t *testing.T) {
-	tmpl := "CUSTOM CAPTION {filename} {file sise}"
+	tmpl := "{filename}\n\nFile Size : {file size}"
 	got := Format(tmpl, "Avatar.2009.mkv", "2.10 GB", "Original Caption")
-	want := "CUSTOM CAPTION Avatar.2009.mkv 2.10 GB"
+	want := "Avatar.2009.mkv\n\nFile Size : 2.10 GB"
 	if got != want {
 		t.Errorf("Format() = %q, want %q", got, want)
 	}
@@ -56,7 +56,7 @@ func TestService_SQLitePersistenceAndLifecycle(t *testing.T) {
 	}
 
 	sqlProv := func() *sql.DB { return db }
-	svc := NewService("CUSTOM CAPTION {filename} {file sise}", nil, sqlProv, nil)
+	svc := NewService("{filename}\n\nFile Size : {file size}", nil, sqlProv, nil)
 
 	ctx := context.Background()
 
@@ -64,7 +64,7 @@ func TestService_SQLitePersistenceAndLifecycle(t *testing.T) {
 	if svc.IsCustom() {
 		t.Error("expected IsCustom to be false initially")
 	}
-	if svc.GetCaption(ctx) != "CUSTOM CAPTION {filename} {file sise}" {
+	if svc.GetCaption(ctx) != "{filename}\n\nFile Size : {file size}" {
 		t.Errorf("expected default template, got %q", svc.GetCaption(ctx))
 	}
 
@@ -89,7 +89,7 @@ func TestService_SQLitePersistenceAndLifecycle(t *testing.T) {
 	}
 
 	// 3. Test reload via Init()
-	svc2 := NewService("CUSTOM CAPTION {filename} {file sise}", nil, sqlProv, nil)
+	svc2 := NewService("{filename}\n\nFile Size : {file size}", nil, sqlProv, nil)
 	if err := svc2.Init(ctx); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestService_SQLitePersistenceAndLifecycle(t *testing.T) {
 	if svc2.IsCustom() {
 		t.Error("expected IsCustom false after DeleteCaption")
 	}
-	if svc2.GetCaption(ctx) != "CUSTOM CAPTION {filename} {file sise}" {
+	if svc2.GetCaption(ctx) != "{filename}\n\nFile Size : {file size}" {
 		t.Errorf("expected fallback to default, got %q", svc2.GetCaption(ctx))
 	}
 }

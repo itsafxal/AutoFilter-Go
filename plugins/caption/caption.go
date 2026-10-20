@@ -103,9 +103,9 @@ func (p *Plugin) HandleSetCaption(m *telegram.NewMessage) error {
 			"• <code>{file sise}</code> - Size of the file (e.g. 1.45 GB)\n" +
 			"• <code>{caption}</code> - Original caption\n\n" +
 			"<b>Default Model:</b>\n" +
-			"<code>CUSTOM CAPTION {filename} {file sise}</code>\n\n" +
+			"<code>{filename}\n\nFile Size : {file size}</code>\n\n" +
 			"<b>Example:</b>\n" +
-			"<code>/set_caption 🎬 <b>{filename}</b>\n\n📁 <b>Size:</b> {file sise}</code>"
+			"<code>/set_caption {filename}\n\nFile Size : {file size}</code>"
 
 		_, err := m.Reply(guide, &telegram.SendOptions{
 			ParseMode: "html",

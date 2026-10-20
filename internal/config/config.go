@@ -209,7 +209,9 @@ func LoadFromEnv() (*Config, error) {
 
 	customCaption := strings.TrimSpace(os.Getenv("CUSTOM_CAPTION"))
 	if customCaption == "" {
-		customCaption = "CUSTOM CAPTION {filename} {file sise}"
+		customCaption = "{filename}\n\nFile Size : {file size}"
+	} else {
+		customCaption = strings.ReplaceAll(customCaption, "\\n", "\n")
 	}
 
 	fsubDesc := strings.TrimSpace(os.Getenv("FSUB_CHANNEL_DESCRIPTION"))

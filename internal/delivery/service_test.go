@@ -597,7 +597,7 @@ func TestDelivery_DynamicCaptionFormatter(t *testing.T) {
 	mock := newMockSender()
 	svc.SetSender(mock)
 
-	cf := &mockCaptionFormatter{template: "CUSTOM CAPTION {filename} {file sise}"}
+	cf := &mockCaptionFormatter{template: "{filename}\n\nFile Size : {file size}"}
 	svc.SetCaptionFormatter(cf)
 
 	res, err := svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
@@ -608,7 +608,7 @@ func TestDelivery_DynamicCaptionFormatter(t *testing.T) {
 		t.Error("expected Success true")
 	}
 
-	expectedCaption := "CUSTOM CAPTION sample_movie.mp4 1 MB"
+	expectedCaption := "sample_movie.mp4\n\nFile Size : 1 MB"
 	if mock.lastOpts == nil || mock.lastOpts.Caption != expectedCaption {
 		t.Errorf("expected caption %q, got %v", expectedCaption, mock.lastOpts)
 	}

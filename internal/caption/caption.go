@@ -14,8 +14,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// DefaultCaptionModel represents the baseline model for custom caption placeholders.
-const DefaultCaptionModel = "CUSTOM CAPTION {filename} {file sise}"
+// DefaultCaptionModel represents the baseline model for media delivery captions.
+const DefaultCaptionModel = "{filename}\n\nFile Size : {file size}"
 
 // CaptionService defines the operations for dynamic caption templating and persistence.
 type CaptionService interface {
