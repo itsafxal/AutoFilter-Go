@@ -402,14 +402,8 @@ func TestLoadFromEnv_StreamConfig(t *testing.T) {
 	if cfg.StreamURL != "" {
 		t.Errorf("expected default StreamURL empty, got %s", cfg.StreamURL)
 	}
-	if cfg.StreamBotToken != "" {
-		t.Errorf("expected default empty StreamBotToken, got %s", cfg.StreamBotToken)
-	}
 	if !cfg.EnableFastDownloadButton {
 		t.Error("expected default EnableFastDownloadButton true")
-	}
-	if cfg.MaskedStreamToken() != "None" {
-		t.Errorf("expected MaskedStreamToken None, got %s", cfg.MaskedStreamToken())
 	}
 
 	// 2. Custom values
@@ -417,7 +411,6 @@ func TestLoadFromEnv_StreamConfig(t *testing.T) {
 	os.Setenv("STREAM_PORT", "9090")
 	os.Setenv("STREAM_BIND_ADDR", "127.0.0.1")
 	os.Setenv("STREAM_URL", "https://stream.mybot.com/")
-	os.Setenv("STREAM_BOT_TOKEN", "987654321:XYZStreamDedicatedBotTokenSecret")
 	os.Setenv("ENABLE_FAST_DOWNLOAD_BUTTON", "false")
 
 	defer func() {
@@ -429,7 +422,6 @@ func TestLoadFromEnv_StreamConfig(t *testing.T) {
 		os.Unsetenv("STREAM_PORT")
 		os.Unsetenv("STREAM_BIND_ADDR")
 		os.Unsetenv("STREAM_URL")
-		os.Unsetenv("STREAM_BOT_TOKEN")
 		os.Unsetenv("ENABLE_FAST_DOWNLOAD_BUTTON")
 	}()
 
@@ -449,19 +441,8 @@ func TestLoadFromEnv_StreamConfig(t *testing.T) {
 	if customCfg.StreamURL != "https://stream.mybot.com" {
 		t.Errorf("expected trimmed StreamURL https://stream.mybot.com, got %s", customCfg.StreamURL)
 	}
-	if customCfg.StreamBotToken != "987654321:XYZStreamDedicatedBotTokenSecret" {
-		t.Errorf("expected StreamBotToken to match, got %s", customCfg.StreamBotToken)
-	}
 	if customCfg.EnableFastDownloadButton {
 		t.Error("expected EnableFastDownloadButton false")
-	}
-
-	str := customCfg.String()
-	if strings.Contains(str, "XYZStreamDedicatedBotTokenSecret") {
-		t.Errorf("CRITICAL SECURITY FLAW: StreamBotToken secret leaked in String(): %s", str)
-	}
-	if !strings.Contains(str, "987654321:***REDACTED***") {
-		t.Errorf("expected masked StreamBotToken in String(), got: %s", str)
 	}
 }
 

@@ -109,9 +109,6 @@ type Config struct {
 	// StreamBindAddr defines the interface IP to bind the stream server (default: "0.0.0.0").
 	StreamBindAddr string
 
-	// StreamBotToken optionally specifies a dedicated bot token for media download streaming to prevent rate limits on the main bot.
-	StreamBotToken string
-
 	// EnableFastDownloadButton specifies whether the "⚡ Get Fast Download" button is added to delivered media (default: true).
 	EnableFastDownloadButton bool
 }
@@ -269,11 +266,6 @@ func LoadFromEnv() (*Config, error) {
 	}
 	streamURL = strings.TrimRight(streamURL, "/")
 
-	streamBotToken := strings.TrimSpace(os.Getenv("STREAM_BOT_TOKEN"))
-	if streamBotToken == "" {
-		streamBotToken = strings.TrimSpace(os.Getenv("FILE_TO_LINK_BOT_TOKEN"))
-	}
-
 	enableFastDownloadBtn := true
 	if rawBtn := strings.TrimSpace(os.Getenv("ENABLE_FAST_DOWNLOAD_BUTTON")); rawBtn != "" {
 		enableFastDownloadBtn = strings.EqualFold(rawBtn, "true") || rawBtn == "1"
@@ -325,7 +317,6 @@ func LoadFromEnv() (*Config, error) {
 		StreamURL:                streamURL,
 		StreamPort:               streamPort,
 		StreamBindAddr:           streamBindAddr,
-		StreamBotToken:           streamBotToken,
 		EnableFastDownloadButton: enableFastDownloadBtn,
 		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
 	}
@@ -477,21 +468,6 @@ func (c *Config) MaskedAppHash() string {
 	return "***REDACTED***"
 }
 
-// MaskedStreamToken returns a safely redacted representation of the dedicated stream bot token.
-func (c *Config) MaskedStreamToken() string {
-	if c.StreamBotToken == "" {
-		return "None"
-	}
-	parts := strings.Split(c.StreamBotToken, ":")
-	if len(parts) >= 2 {
-		return parts[0] + ":***REDACTED***"
-	}
-	if len(c.StreamBotToken) > 6 {
-		return c.StreamBotToken[:4] + "***REDACTED***"
-	}
-	return "***REDACTED***"
-}
-
 var uriUserInfoRegex = regexp.MustCompile(`://([^:]+):([^@]+)@`)
 
 // MaskURI redacts credentials from database URIs to prevent secret leaks in logs.
@@ -516,7 +492,7 @@ func MaskURI(rawURI string) string {
 
 // String provides a safe string representation that NEVER exposes secrets.
 func (c *Config) String() string {
-	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s, BgSync:%t, Caption:%s, FSubDesc:%s, FilterDel:%s, FileDel:%s, WeeklyTrash:%t, TrashRetention:%dd, StreamServer:%t, StreamURL:%s, StreamPort:%d, StreamBotToken:%s, FastDownloadBtn:%t}",
-		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath, c.BackgroundSync, c.CustomCaption, c.FSubChannelDescription, c.AutoDeleteFilterTime, c.AutoDeleteFileTime, c.AutoDeleteWeeklyTrash, c.TrashRetentionDays, c.StreamServerEnabled, c.StreamURL, c.StreamPort, c.MaskedStreamToken(), c.EnableFastDownloadButton)
+	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s, BgSync:%t, Caption:%s, FSubDesc:%s, FilterDel:%s, FileDel:%s, WeeklyTrash:%t, TrashRetention:%dd, StreamServer:%t, StreamURL:%s, StreamPort:%d, FastDownloadBtn:%t}",
+		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath, c.BackgroundSync, c.CustomCaption, c.FSubChannelDescription, c.AutoDeleteFilterTime, c.AutoDeleteFileTime, c.AutoDeleteWeeklyTrash, c.TrashRetentionDays, c.StreamServerEnabled, c.StreamURL, c.StreamPort, c.EnableFastDownloadButton)
 }
 
