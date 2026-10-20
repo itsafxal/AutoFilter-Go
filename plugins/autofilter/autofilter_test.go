@@ -184,6 +184,12 @@ func TestAutofilter_Pagination_FirstPage(t *testing.T) {
 	if f1.Text != "🌐 Languages" || f2.Text != "🎞 Quality" {
 		t.Errorf("expected filter buttons '🌐 Languages' and '🎞 Quality', got %q and %q", f1.Text, f2.Text)
 	}
+	if f1.Style == nil || !f1.Style.BgPrimary {
+		t.Errorf("expected Languages button to be Primary (Blue)")
+	}
+	if f2.Style == nil || !f2.Style.BgPrimary {
+		t.Errorf("expected Quality button to be Primary (Blue)")
+	}
 
 	// Nav row
 	navRow := kb.Rows[2].Buttons
@@ -195,8 +201,14 @@ func TestAutofilter_Pagination_FirstPage(t *testing.T) {
 	if pBtn.Text != "📄 Page 1 / 8" {
 		t.Errorf("expected page indicator '📄 Page 1 / 8', got %q", pBtn.Text)
 	}
+	if pBtn.Style == nil || !pBtn.Style.BgSuccess {
+		t.Errorf("expected page indicator on page 1 to be Success (Green)")
+	}
 	if nBtn.Text != "Next ▶" {
 		t.Errorf("expected 'Next ▶', got %q", nBtn.Text)
+	}
+	if nBtn.Style == nil || !nBtn.Style.BgSuccess {
+		t.Errorf("expected Next button to be Success (Green)")
 	}
 	if strings.Contains(pBtn.Text, "Previous") || strings.Contains(nBtn.Text, "Previous") {
 		t.Errorf("first page must NOT have a Previous button")
@@ -226,11 +238,20 @@ func TestAutofilter_Pagination_MiddlePage(t *testing.T) {
 	if prevBtn.Text != "◀ Previous" {
 		t.Errorf("expected '◀ Previous', got %q", prevBtn.Text)
 	}
+	if prevBtn.Style == nil || !prevBtn.Style.BgSuccess {
+		t.Errorf("expected Previous button to be Success (Green)")
+	}
 	if pageBtn.Text != "📄 Page 2 / 8" {
 		t.Errorf("expected '📄 Page 2 / 8', got %q", pageBtn.Text)
 	}
+	if pageBtn.Style == nil || !pageBtn.Style.BgDanger {
+		t.Errorf("expected page indicator on page > 1 to be Danger (Red)")
+	}
 	if nextBtn.Text != "Next ▶" {
 		t.Errorf("expected 'Next ▶', got %q", nextBtn.Text)
+	}
+	if nextBtn.Style == nil || !nextBtn.Style.BgSuccess {
+		t.Errorf("expected Next button to be Success (Green)")
 	}
 }
 
@@ -256,8 +277,14 @@ func TestAutofilter_Pagination_LastPage(t *testing.T) {
 	if prevBtn.Text != "◀ Previous" {
 		t.Errorf("expected '◀ Previous', got %q", prevBtn.Text)
 	}
+	if prevBtn.Style == nil || !prevBtn.Style.BgSuccess {
+		t.Errorf("expected Previous button to be Success (Green)")
+	}
 	if pageBtn.Text != "📄 Page 8 / 8" {
 		t.Errorf("expected '📄 Page 8 / 8', got %q", pageBtn.Text)
+	}
+	if pageBtn.Style == nil || !pageBtn.Style.BgDanger {
+		t.Errorf("expected page indicator on page > 1 to be Danger (Red)")
 	}
 	if strings.Contains(prevBtn.Text, "Next") || strings.Contains(pageBtn.Text, "Next") {
 		t.Errorf("last page must NOT have a Next button")
@@ -283,6 +310,9 @@ func TestAutofilter_Pagination_SinglePage(t *testing.T) {
 	pageBtn := navRow[0].(*telegram.KeyboardButtonCallback)
 	if pageBtn.Text != "📄 Page 1 / 1" {
 		t.Errorf("expected '📄 Page 1 / 1', got %q", pageBtn.Text)
+	}
+	if pageBtn.Style == nil || !pageBtn.Style.BgSuccess {
+		t.Errorf("expected single page indicator to be Success (Green)")
 	}
 }
 

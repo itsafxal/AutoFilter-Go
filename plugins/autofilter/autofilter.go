@@ -1065,10 +1065,10 @@ func formatBytes(bytes int64) string {
 func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, currentPage, totalPages int, hasFilter bool) *telegram.ReplyInlineMarkup {
 	kb := telegram.NewKeyboard()
 
-	// 1. Languages and Quality header row
+	// 1. Languages and Quality header row (Blue color)
 	kb.AddRow(
-		telegram.Button.Data("🌐 Languages", fmt.Sprintf("languages#%s", searchKey)),
-		telegram.Button.Data("🎞 Quality", fmt.Sprintf("qualities#%s", searchKey)),
+		telegram.Button.Data("🌐 Languages", fmt.Sprintf("languages#%s", searchKey)).Primary(),
+		telegram.Button.Data("🎞 Quality", fmt.Sprintf("qualities#%s", searchKey)).Primary(),
 	)
 
 	// 2. File list rows (1 button per file)
@@ -1087,23 +1087,28 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 
 	var navButtons []telegram.KeyboardButton
 
-	// Previous button: only when currentPage > 1
+	// Previous button: only when currentPage > 1 (Green color)
 	if currentPage > 1 {
 		prevOffset := (currentPage - 2) * maxFilesPerPage
 		if prevOffset < 0 {
 			prevOffset = 0
 		}
-		navButtons = append(navButtons, telegram.Button.Data("◀ Previous", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)))
+		navButtons = append(navButtons, telegram.Button.Data("◀ Previous", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)).Success())
 	}
 
 	// Page indicator button: always present
+	// Green on page 1, Red on subsequent pages (currentPage > 1)
 	pageLabel := fmt.Sprintf("📄 Page %d / %d", currentPage, totalPages)
-	navButtons = append(navButtons, telegram.Button.Data(pageLabel, "pages"))
+	if currentPage > 1 {
+		navButtons = append(navButtons, telegram.Button.Data(pageLabel, "pages").Danger())
+	} else {
+		navButtons = append(navButtons, telegram.Button.Data(pageLabel, "pages").Success())
+	}
 
-	// Next button: only when currentPage < totalPages
+	// Next button: only when currentPage < totalPages (Green color)
 	if currentPage < totalPages {
 		nextOffset := currentPage * maxFilesPerPage
-		navButtons = append(navButtons, telegram.Button.Data("Next ▶", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)))
+		navButtons = append(navButtons, telegram.Button.Data("Next ▶", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)).Success())
 	}
 
 	if len(navButtons) > 0 {
