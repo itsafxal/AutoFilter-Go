@@ -103,18 +103,46 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 
 		// 3. Perform media synchronization from MongoDB to SQLite
 		m.syncer = sql.NewSyncer(m.sqlManager, m.mongoMediaRepo, m.logger, m.cfg.SyncBatchSize)
-		syncRes, err := m.syncer.Sync(ctx)
-		if err != nil {
-			m.logger.Error("synchronization from MongoDB to SQLite failed", "error", err)
-			_ = m.Close()
-			return fmt.Errorf("runtime database synchronization failed: %w", err)
-		}
 
-		m.logger.Info("database initialization and synchronization verified",
-			"total_records", syncRes.TotalInserted,
-			"skipped", syncRes.Skipped,
-			"duration", syncRes.Duration.String(),
-		)
+		if m.cfg.BackgroundSync {
+			// Check if already populated to skip immediately
+			isComplete, _ := m.syncer.IsSyncComplete(ctx)
+			hasData, _ := m.syncer.HasData(ctx)
+			if isComplete && hasData {
+				count, _ := m.syncer.GetTotalRows(ctx)
+				m.logger.Info("SQLite media table is already populated and synchronized; skipping full migration",
+					"existing_records", count,
+				)
+			} else {
+				m.logger.Info("⚡ Launching concurrent media migration in background to enable instant bot boot and rapid deployment...")
+				go func() {
+					bgCtx := context.Background()
+					syncRes, err := m.syncer.Sync(bgCtx)
+					if err != nil {
+						m.logger.Error("background synchronization from MongoDB to SQLite failed", "error", err)
+						return
+					}
+					m.logger.Info("🎉 Background media synchronization completed successfully",
+						"total_records", syncRes.TotalInserted,
+						"skipped", syncRes.Skipped,
+						"duration", syncRes.Duration.String(),
+					)
+				}()
+			}
+		} else {
+			syncRes, err := m.syncer.Sync(ctx)
+			if err != nil {
+				m.logger.Error("synchronization from MongoDB to SQLite failed", "error", err)
+				_ = m.Close()
+				return fmt.Errorf("runtime database synchronization failed: %w", err)
+			}
+
+			m.logger.Info("database initialization and synchronization verified",
+				"total_records", syncRes.TotalInserted,
+				"skipped", syncRes.Skipped,
+				"duration", syncRes.Duration.String(),
+			)
+		}
 	} else {
 		m.logger.Warn("DATABASE_URI not configured: running in standalone mode without authoritative MongoDB")
 	}
@@ -221,4 +249,11 @@ func (m *DatabaseManager) SaveMedia(ctx context.Context, rec sql.MediaRecord) er
 		return repo.SaveMedia(ctx, rec)
 	}
 	return nil
+}
+
+// Syncer returns the SQLite Syncer instance.
+func (m *DatabaseManager) Syncer() *sql.Syncer {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.syncer
 }

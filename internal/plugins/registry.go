@@ -237,8 +237,7 @@ func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 // wrapCallbackHandler wraps a callback handler with panic recovery and structured logging.
 func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) CallbackHandlerFunc {
 	return func(query *telegram.CallbackQuery) (err error) {
-		if query != nil && query.IsChannel() {
-			// Never process callback queries in broadcast channels
+		if query == nil {
 			return nil
 		}
 		defer func() {

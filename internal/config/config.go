@@ -68,6 +68,9 @@ type Config struct {
 	// SyncBatchSize defines how many records are fetched and inserted per batch during SQLite sync (default: 10000).
 	SyncBatchSize int
 
+	// BackgroundSync specifies whether media synchronization runs asynchronously in the background, allowing the bot to boot immediately (default: true).
+	BackgroundSync bool
+
 	// CustomCaption defines the default media caption template when none is overridden by an admin.
 	CustomCaption string
 
@@ -268,6 +271,13 @@ func LoadFromEnv() (*Config, error) {
 		enableFastDownloadBtn = strings.EqualFold(rawBtn, "true") || rawBtn == "1"
 	}
 
+	backgroundSync := true
+	if bgStr := strings.TrimSpace(os.Getenv("BACKGROUND_SYNC")); bgStr != "" {
+		if val, err := strconv.ParseBool(bgStr); err == nil {
+			backgroundSync = val
+		}
+	}
+
 	cfg := &Config{
 		BotToken:                 token,
 		AppID:                    apiID,
@@ -284,6 +294,7 @@ func LoadFromEnv() (*Config, error) {
 		DatabaseURI3:             dbURI3,
 		SQLiteDBPath:             sqlitePath,
 		SyncBatchSize:            batchSize,
+		BackgroundSync:           backgroundSync,
 		CustomCaption:            customCaption,
 		FSubChannelDescription:   fsubDesc,
 		AutoDeleteFilterTime:     filterDelTime,
@@ -421,7 +432,7 @@ func MaskURI(rawURI string) string {
 
 // String provides a safe string representation that NEVER exposes secrets.
 func (c *Config) String() string {
-	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s, Caption:%s, FSubDesc:%s, FilterDel:%s, FileDel:%s, WeeklyTrash:%t, TrashRetention:%dd, StreamServer:%t, StreamURL:%s, StreamPort:%d, StreamBotToken:%s, FastDownloadBtn:%t}",
-		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath, c.CustomCaption, c.FSubChannelDescription, c.AutoDeleteFilterTime, c.AutoDeleteFileTime, c.AutoDeleteWeeklyTrash, c.TrashRetentionDays, c.StreamServerEnabled, c.StreamURL, c.StreamPort, c.MaskedStreamToken(), c.EnableFastDownloadButton)
+	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s, BgSync:%t, Caption:%s, FSubDesc:%s, FilterDel:%s, FileDel:%s, WeeklyTrash:%t, TrashRetention:%dd, StreamServer:%t, StreamURL:%s, StreamPort:%d, StreamBotToken:%s, FastDownloadBtn:%t}",
+		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath, c.BackgroundSync, c.CustomCaption, c.FSubChannelDescription, c.AutoDeleteFilterTime, c.AutoDeleteFileTime, c.AutoDeleteWeeklyTrash, c.TrashRetentionDays, c.StreamServerEnabled, c.StreamURL, c.StreamPort, c.MaskedStreamToken(), c.EnableFastDownloadButton)
 }
 

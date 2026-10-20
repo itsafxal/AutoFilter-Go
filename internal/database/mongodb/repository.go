@@ -337,6 +337,7 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 	// Optimize wire transfer by projecting only required fields and requesting 10,000 docs per network batch
 	opts := options.Find().
 		SetBatchSize(10000).
+		SetNoCursorTimeout(true). // Prevent cursor timeout during heavy bulk migration across millions of records
 		SetProjection(bson.M{
 			"_id":       1,
 			"file_ref":  1,

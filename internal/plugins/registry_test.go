@@ -368,8 +368,13 @@ func TestRegistry_ChannelExclusion(t *testing.T) {
 		},
 	}
 	_ = cbHandler(channelCb)
-	if calledCb {
-		t.Error("expected callback handler NOT to be called for channel")
+	if !calledCb {
+		t.Error("expected callback handler to be called for group/channel callback queries")
+	}
+
+	// Nil callback query should return gracefully
+	if err := cbHandler(nil); err != nil {
+		t.Errorf("expected nil error for nil callback query, got %v", err)
 	}
 
 	// 2. Private chat message SHOULD invoke handlers

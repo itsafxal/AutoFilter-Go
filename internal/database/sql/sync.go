@@ -13,10 +13,14 @@ import (
 
 // Syncer handles runtime synchronization from authoritative MongoDB collections into local SQLite.
 type Syncer struct {
-	dbManager *DBManager
-	mediaRepo *mongodb.MediaRepository
-	logger    *slog.Logger
-	batchSize int
+	dbManager   *DBManager
+	mediaRepo   *mongodb.MediaRepository
+	logger      *slog.Logger
+	batchSize   int
+	isSyncing   bool
+	totalSaved  int64
+	totalTarget int64
+	mu          sync.RWMutex
 }
 
 // NewSyncer constructs a new Syncer.
@@ -32,6 +36,20 @@ func NewSyncer(dbManager *DBManager, mediaRepo *mongodb.MediaRepository, logger 
 	}
 }
 
+// IsSyncing returns whether a migration is actively running.
+func (s *Syncer) IsSyncing() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.isSyncing
+}
+
+// Progress returns current migration progress.
+func (s *Syncer) Progress() (saved int64, target int64, syncing bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.totalSaved, s.totalTarget, s.isSyncing
+}
+
 // SyncResult details the outcome of a synchronization run.
 type SyncResult struct {
 	Skipped       bool
@@ -42,6 +60,16 @@ type SyncResult struct {
 // Sync executes idempotent, high-performance synchronization of media documents into SQLite.
 func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 	start := time.Now()
+
+	s.mu.Lock()
+	s.isSyncing = true
+	s.totalSaved = 0
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.isSyncing = false
+		s.mu.Unlock()
+	}()
 
 	// 1. Check if sync was already successfully completed
 	isComplete, err := s.IsSyncComplete(ctx)
@@ -80,12 +108,38 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		s.logger.Warn("could not determine shard counts upfront, proceeding with sync", "error", err)
 	}
 
+	s.mu.Lock()
+	s.totalTarget = totalExpected
+	s.mu.Unlock()
+
 	s.logger.Info("MongoDB media cluster status detected",
 		"total_shards", len(shardCounts),
 		"total_expected_files", totalExpected,
 	)
 	for _, sc := range shardCounts {
 		s.logger.Info(fmt.Sprintf("  • Cluster [%s]: ~%d files available", sc.Label, sc.Count))
+	}
+
+	// Check if SQLite already contains all expected records from a previous run
+	existingRows, _ := s.GetTotalRows(ctx)
+	if existingRows > 0 && totalExpected > 0 && existingRows >= totalExpected {
+		s.logger.Info("SQLite media table already contains all expected records; marking complete",
+			"existing_records", existingRows,
+			"expected_records", totalExpected,
+		)
+		_ = s.ensureIndexes(ctx)
+		_ = s.setSyncMetadata(ctx, "is_complete", "true")
+		_ = s.setSyncMetadata(ctx, "last_sync_count", fmt.Sprintf("%d", existingRows))
+		_ = s.setSyncMetadata(ctx, "last_sync_time", time.Now().UTC().Format(time.RFC3339))
+		return &SyncResult{
+			Skipped:       true,
+			TotalInserted: existingRows,
+			Duration:      time.Since(start),
+		}, nil
+	}
+
+	if existingRows > 0 {
+		s.logger.Info(fmt.Sprintf("⚡ Resuming media migration: %d / %d files already cached in SQLite, streaming remaining...", existingRows, totalExpected))
 	}
 
 	// Mark sync status as in-progress
@@ -102,17 +156,21 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		s.logger.Warn("failed to set bulk pragmas", "error", err)
 	}
 
-	// Guarantee index restoration and pragma reset on exit (success or error)
+	// Guarantee index restoration and pragma reset on exit (ONLY once, avoiding double rebuild)
+	var indexesRebuilt bool
 	defer func() {
-		_ = s.ensureIndexes(context.Background())
+		if !indexesRebuilt {
+			_ = s.ensureIndexes(context.Background())
+		}
 		_ = s.setNormalPragmas(context.Background())
 	}()
 
 	shards := s.mediaRepo.Shards()
 	var totalSaved int64
 
+	// Using INSERT OR IGNORE avoids deleting existing B-tree cells when resuming
 	insertStmt := `
-		INSERT OR REPLACE INTO media (
+		INSERT OR IGNORE INTO media (
 			file_id, file_ref, file_name, file_size, size,
 			file_type, mime_type, caption, date_saved
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -124,7 +182,7 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		doc   mongodb.MediaDoc
 	}
 
-	docChan := make(chan shardDoc, 50000)
+	docChan := make(chan shardDoc, 100000)
 	errChan := make(chan error, len(shards))
 	var wg sync.WaitGroup
 
@@ -186,6 +244,9 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 				return nil, fmt.Errorf("failed to commit batch to SQLite: %w", err)
 			}
 			totalSaved += int64(len(batch))
+			s.mu.Lock()
+			s.totalSaved = totalSaved
+			s.mu.Unlock()
 			batch = batch[:0]
 
 			if time.Since(lastLog) >= 2*time.Second {
@@ -196,9 +257,11 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 						pct = 100
 					}
 				}
-				s.logger.Info(fmt.Sprintf("📦 Synced: %d / %d (%.1f%%) | DB2: %d | DB3: %d",
-					totalSaved, totalExpected, pct, shardProgress["DB2"], shardProgress["DB3"]),
+				rate := float64(totalSaved) / time.Since(start).Seconds()
+				s.logger.Info(fmt.Sprintf("📦 Synced: %d / %d (%.1f%%) | %.0f docs/sec | DB2: %d | DB3: %d",
+					totalSaved, totalExpected, pct, rate, shardProgress["DB2"], shardProgress["DB3"]),
 					"total_saved", totalSaved,
+					"rate_docs_sec", int64(rate),
 					"progress_pct", fmt.Sprintf("%.1f%%", pct),
 				)
 				lastLog = time.Now()
@@ -211,6 +274,9 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 			return nil, fmt.Errorf("failed to commit final batch: %w", err)
 		}
 		totalSaved += int64(len(batch))
+		s.mu.Lock()
+		s.totalSaved = totalSaved
+		s.mu.Unlock()
 	}
 
 	// Check if any shard returned an error
@@ -227,6 +293,7 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		s.logger.Error("failed to create search indexes", "error", err)
 		return nil, fmt.Errorf("failed building indexes: %w", err)
 	}
+	indexesRebuilt = true
 	indexDuration := time.Since(indexStart)
 	s.logger.Info("✨ Search indexes built successfully", "duration", indexDuration.Round(time.Millisecond).String())
 
@@ -333,9 +400,14 @@ func (s *Syncer) ensureIndexes(ctx context.Context) error {
 		}
 	}
 
-	// Rebuild FTS5 trigram search index after bulk sync
-	if _, err := s.dbManager.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');"); err != nil {
-		s.logger.Warn("failed to rebuild FTS5 index", "error", err)
+	// Rebuild FTS5 trigram search index after bulk sync only if records changed or index is out of sync
+	var mediaCount, ftsCount int64
+	_ = s.dbManager.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM media;").Scan(&mediaCount)
+	_ = s.dbManager.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM media_fts;").Scan(&ftsCount)
+	if mediaCount > 0 && ftsCount != mediaCount {
+		if _, err := s.dbManager.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');"); err != nil {
+			s.logger.Warn("failed to rebuild FTS5 index", "error", err)
+		}
 	}
 
 	return nil

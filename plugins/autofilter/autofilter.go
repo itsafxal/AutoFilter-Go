@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -158,7 +159,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		)
 	}
 
-	searchKey := fmt.Sprintf("%d_%d", userID, m.ID)
+	searchKey := fmt.Sprintf("%d_%d_%d", m.ChatID(), userID, m.ID)
 
 	startSearch := time.Now()
 
@@ -181,8 +182,9 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 			UpdatedAt: time.Now(),
 		})
 
-		text := formatResultText(userMention, query, 1)
-		kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, false)
+		botName := p.getBotName(m.Client)
+		text := p.formatResultText(query, result.Page, result.TotalPages, result.Total, botName)
+		kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 		replyMsg, replyErr := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
@@ -358,12 +360,11 @@ func (p *Plugin) HandlePaginationCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	userMention := formatUserMention(cb.Sender)
-	currentPage := (offset / maxFilesPerPage) + 1
+	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := formatResultText(userMention, displayQuery, currentPage)
+	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
 	hasFilter := sess.Language != "" || sess.Quality != ""
-	kb := p.buildResultKeyboard(result.Files, searchKey, offset, result.NextOffset, hasFilter)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, hasFilter)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -426,9 +427,9 @@ func (p *Plugin) HandleSpellCheckCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	userMention := formatUserMention(cb.Sender)
-	text := formatResultText(userMention, selectedQuery, 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, false)
+	botName := p.getBotName(cb.Client)
+	text := p.formatResultText(selectedQuery, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -480,7 +481,7 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 	var currentRow []telegram.KeyboardButton
 
 	for i, lang := range languages {
-		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey)).Primary()
+		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
 		currentRow = append(currentRow, btn)
 		if (i+1)%2 == 0 || i == len(languages)-1 {
 			kb.AddRow(currentRow...)
@@ -488,12 +489,12 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 		}
 	}
 
-	// Back to results button (Red)
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
+	// Back to results button
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
 	markup := kb.Build()
 
-	userMention := formatUserMention(cb.Sender)
-	menuText := formatLanguagesMenuText(userMention, p.getDisplayQuery(sess))
+	botName := p.getBotName(cb.Client)
+	menuText := formatLanguagesMenuText(p.getDisplayQuery(sess), botName)
 	_, editErr := cb.Edit(menuText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
@@ -559,10 +560,10 @@ func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error 
 	sess.UpdatedAt = time.Now()
 	p.saveSession(searchKey, sess)
 
-	userMention := formatUserMention(cb.Sender)
+	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := formatResultText(userMention, displayQuery, 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, true)
+	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -614,7 +615,7 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 	var currentRow []telegram.KeyboardButton
 
 	for i, q := range qualities {
-		btn := telegram.Button.Data(q, fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey)).Primary()
+		btn := telegram.Button.Data(q, fmt.Sprintf("fq#%s#%s", strings.ToLower(q), searchKey))
 		currentRow = append(currentRow, btn)
 		if (i+1)%3 == 0 || i == len(qualities)-1 {
 			kb.AddRow(currentRow...)
@@ -622,12 +623,12 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 		}
 	}
 
-	// Back button (Red)
-	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
+	// Back button
+	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)))
 	markup := kb.Build()
 
-	userMention := formatUserMention(cb.Sender)
-	menuText := formatQualitiesMenuText(userMention, p.getDisplayQuery(sess))
+	botName := p.getBotName(cb.Client)
+	menuText := formatQualitiesMenuText(p.getDisplayQuery(sess), botName)
 	_, editErr := cb.Edit(menuText, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
@@ -693,10 +694,10 @@ func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 	sess.UpdatedAt = time.Now()
 	p.saveSession(searchKey, sess)
 
-	userMention := formatUserMention(cb.Sender)
+	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := formatResultText(userMention, displayQuery, 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, true)
+	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -762,11 +763,11 @@ func (p *Plugin) HandleBackToFilesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	userMention := formatUserMention(cb.Sender)
+	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
-	text := formatResultText(userMention, displayQuery, 1)
 	hasFilter := sess.Language != "" || sess.Quality != ""
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, hasFilter)
+	text := p.formatResultText(displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, hasFilter)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -825,9 +826,9 @@ func (p *Plugin) HandleBackToAllFilesCallback(cb *telegram.CallbackQuery) error 
 		return nil
 	}
 
-	userMention := formatUserMention(cb.Sender)
-	text := formatResultText(userMention, sess.Query, 1)
-	kb := p.buildResultKeyboard(result.Files, searchKey, 0, result.NextOffset, false)
+	botName := p.getBotName(cb.Client)
+	text := p.formatResultText(sess.Query, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -855,7 +856,7 @@ func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
 // HandlePagesCallback answers non-clickable page indicator button.
 func (p *Plugin) HandlePagesCallback(cb *telegram.CallbackQuery) error {
 	if cb != nil {
-		_, _ = cb.Answer("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", &telegram.CallbackOptions{
+		_, _ = cb.Answer("📄 You are viewing search results", &telegram.CallbackOptions{
 			Alert: false,
 		})
 	}
@@ -864,48 +865,234 @@ func (p *Plugin) HandlePagesCallback(cb *telegram.CallbackQuery) error {
 
 // --- Keyboards and Formatting ---
 
-func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, offset, nextOffset int, hasFilter bool) *telegram.ReplyInlineMarkup {
+var (
+	reResolution   = regexp.MustCompile(`(?i)\b(2160p|4k|1080p|720p|480p|360p)\b`)
+	reRip          = regexp.MustCompile(`(?i)\b(hdrip|webrip|web-dl|webdl|bluray|brrip|dvdrip|hdtc|camrip|hd)\b`)
+	reLangMatch    = regexp.MustCompile(`(?i)\b(malayalam|tamil|hindi|telugu|kannada|english|multi|dual[\s._-]*audio|bengali|marathi|punjabi|gujarati|mal|tam|hin|tel|kan|eng)\b`)
+	reFileExtStrip = regexp.MustCompile(`(?i)\.(mkv|mp4|avi|webm|flv|mov|m4v|3gp|zip|rar)$`)
+	reBrackets     = regexp.MustCompile(`\[[^\]]*\]|\([^\)]*\)|\{[^\}]*\}`)
+	reCleanChars   = regexp.MustCompile(`[._]+`)
+	reYearFind     = regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
+)
+
+func canonicalLanguage(raw string) string {
+	rawLower := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case strings.HasPrefix(rawLower, "mal"):
+		return "Malayalam"
+	case strings.HasPrefix(rawLower, "tam"):
+		return "Tamil"
+	case strings.HasPrefix(rawLower, "hin"):
+		return "Hindi"
+	case strings.HasPrefix(rawLower, "tel"):
+		return "Telugu"
+	case strings.HasPrefix(rawLower, "kan"):
+		return "Kannada"
+	case strings.HasPrefix(rawLower, "eng"):
+		return "English"
+	case strings.Contains(rawLower, "multi") || strings.Contains(rawLower, "dual"):
+		return "Multi"
+	case strings.HasPrefix(rawLower, "ben"):
+		return "Bengali"
+	case strings.HasPrefix(rawLower, "mar"):
+		return "Marathi"
+	case strings.HasPrefix(rawLower, "pun"):
+		return "Punjabi"
+	case strings.HasPrefix(rawLower, "guj"):
+		return "Gujarati"
+	default:
+		if len(raw) > 0 {
+			return strings.ToUpper(raw[:1]) + strings.ToLower(raw[1:])
+		}
+		return raw
+	}
+}
+
+func canonicalQuality(raw string) string {
+	rawLower := strings.ToLower(strings.TrimSpace(raw))
+	switch rawLower {
+	case "4k":
+		return "4K"
+	case "2160p":
+		return "2160p"
+	case "1080p":
+		return "1080p"
+	case "720p":
+		return "720p"
+	case "480p":
+		return "480p"
+	case "360p":
+		return "360p"
+	case "hdrip":
+		return "HDRip"
+	case "webrip":
+		return "WEBRip"
+	case "web-dl", "webdl":
+		return "WEB-DL"
+	case "bluray":
+		return "BluRay"
+	case "brrip":
+		return "BRRip"
+	case "dvdrip":
+		return "DVDRip"
+	case "hdtc":
+		return "HDTC"
+	case "camrip":
+		return "CAM"
+	case "hd":
+		return "HD"
+	default:
+		return strings.ToUpper(raw)
+	}
+}
+
+func extractFileMetadata(fileName, caption string) (lang string, qual string, cleanTitle string) {
+	text := fileName + " " + caption
+
+	// 1. Language
+	if match := reLangMatch.FindString(text); match != "" {
+		lang = canonicalLanguage(match)
+	}
+
+	// 2. Quality
+	res := reResolution.FindString(text)
+	rip := reRip.FindString(text)
+	if res != "" && rip != "" {
+		qual = canonicalQuality(res) + " " + canonicalQuality(rip)
+	} else if res != "" {
+		qual = canonicalQuality(res)
+	} else if rip != "" {
+		qual = canonicalQuality(rip)
+	}
+
+	// 3. Clean Title
+	clean := reFileExtStrip.ReplaceAllString(fileName, "")
+	clean = reBrackets.ReplaceAllString(clean, " ")
+	if loc := reYearFind.FindStringIndex(clean); loc != nil {
+		clean = clean[:loc[0]]
+	} else if loc := reResolution.FindStringIndex(clean); loc != nil {
+		clean = clean[:loc[0]]
+	} else if loc := reRip.FindStringIndex(clean); loc != nil {
+		clean = clean[:loc[0]]
+	} else if loc := reLangMatch.FindStringIndex(clean); loc != nil {
+		clean = clean[:loc[0]]
+	}
+	clean = reCleanChars.ReplaceAllString(clean, " ")
+	clean = strings.TrimSpace(clean)
+	cleanTitle = clean
+
+	return lang, qual, cleanTitle
+}
+
+func formatFileButtonLabel(f search.MediaFile) string {
+	size := strings.TrimSpace(f.Size)
+	if size == "" && f.FileSize > 0 {
+		size = formatBytes(f.FileSize)
+	}
+	if size == "" {
+		size = "N/A"
+	}
+
+	lang, qual, cleanTitle := extractFileMetadata(f.FileName, f.Caption)
+
+	var parts []string
+	parts = append(parts, "🎬 "+size)
+
+	if lang != "" && qual != "" {
+		parts = append(parts, lang, qual)
+	} else if lang != "" {
+		parts = append(parts, lang)
+		if cleanTitle != "" && len(cleanTitle) <= 15 {
+			parts = append(parts, cleanTitle)
+		}
+	} else if qual != "" {
+		if cleanTitle != "" && len(cleanTitle) <= 15 {
+			parts = append(parts, cleanTitle)
+		}
+		parts = append(parts, qual)
+	} else if cleanTitle != "" {
+		parts = append(parts, cleanTitle)
+	} else {
+		name := strings.TrimSpace(f.FileName)
+		if len(name) > 30 {
+			name = name[:27] + "..."
+		}
+		parts = append(parts, name)
+	}
+
+	label := strings.Join(parts, " · ")
+	if len(label) > 60 {
+		label = label[:57] + "..."
+	}
+	return label
+}
+
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
+}
+
+func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string, currentPage, totalPages int, hasFilter bool) *telegram.ReplyInlineMarkup {
 	kb := telegram.NewKeyboard()
 
-	// 1. Languages and Quality header row (Blue)
+	// 1. Languages and Quality header row
 	kb.AddRow(
-		telegram.Button.Data("Lᴀɴɢᴜᴀɢᴇs", fmt.Sprintf("languages#%s", searchKey)).Primary(),
-		telegram.Button.Data("Qᴜᴀʟɪᴛʏ", fmt.Sprintf("qualities#%s", searchKey)).Primary(),
+		telegram.Button.Data("🌐 Languages", fmt.Sprintf("languages#%s", searchKey)),
+		telegram.Button.Data("🎞 Quality", fmt.Sprintf("qualities#%s", searchKey)),
 	)
 
 	// 2. File list rows (1 button per file)
 	for _, f := range files {
-		fileLabel := fmt.Sprintf("%s 🌷 %s", f.Size, f.FileName)
+		fileLabel := formatFileButtonLabel(f)
 		kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)))
 	}
 
-	// 3. Navigation row (Back is Red, Next is Green)
+	// 3. Navigation row
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if currentPage < 1 {
+		currentPage = 1
+	}
+
 	var navButtons []telegram.KeyboardButton
-	if offset > 0 {
-		prevOffset := offset - maxFilesPerPage
+
+	// Previous button: only when currentPage > 1
+	if currentPage > 1 {
+		prevOffset := (currentPage - 2) * maxFilesPerPage
 		if prevOffset < 0 {
 			prevOffset = 0
 		}
-		navButtons = append(navButtons, telegram.Button.Data("◀️ 𝗕𝗮𝗰𝗸", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)).Danger())
+		navButtons = append(navButtons, telegram.Button.Data("◀ Previous", fmt.Sprintf("next|%s|%d", searchKey, prevOffset)))
 	}
 
-	if nextOffset > 0 {
-		navButtons = append(navButtons, telegram.Button.Data("𝗡𝗲𝘅𝘁 ▶️", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)).Success())
+	// Page indicator button: always present
+	pageLabel := fmt.Sprintf("📄 Page %d / %d", currentPage, totalPages)
+	navButtons = append(navButtons, telegram.Button.Data(pageLabel, "pages"))
+
+	// Next button: only when currentPage < totalPages
+	if currentPage < totalPages {
+		nextOffset := currentPage * maxFilesPerPage
+		navButtons = append(navButtons, telegram.Button.Data("Next ▶", fmt.Sprintf("next|%s|%d", searchKey, nextOffset)))
 	}
 
 	if len(navButtons) > 0 {
 		kb.AddRow(navButtons...)
 	}
 
-	// 4. Filter reset (Red) or single-page indicator
+	// 4. Filter reset (if active filter)
 	if hasFilter {
-		kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back_all#%s", searchKey)).Danger())
-	} else if len(navButtons) == 0 {
-		kb.AddRow(telegram.Button.Data("↭ ɴᴏ ᴍᴏʀᴇ ᴘᴀɢᴇꜱ ᴀᴠᴀɪʟᴀʙʟᴇ ↭", "pages"))
+		kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back_all#%s", searchKey)))
 	}
-
-	// 5. Always include Close button (Red)
-	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger())
 
 	return kb.Build()
 }
@@ -915,7 +1102,7 @@ func (p *Plugin) buildSpellCheckKeyboard(suggestions []string, searchKey string)
 
 	var currentRow []telegram.KeyboardButton
 	for i, s := range suggestions {
-		btn := telegram.Button.Data(fmt.Sprintf("🎬 %s", s), fmt.Sprintf("sp#%s#%d", searchKey, i)).Primary()
+		btn := telegram.Button.Data(fmt.Sprintf("🎬 %s", s), fmt.Sprintf("sp#%s#%d", searchKey, i))
 		currentRow = append(currentRow, btn)
 
 		// 2 per row unless text is long
@@ -925,34 +1112,95 @@ func (p *Plugin) buildSpellCheckKeyboard(suggestions []string, searchKey string)
 		}
 	}
 
-	// Close button (Red)
-	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger())
+	// Close button
+	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"))
 
 	return kb.Build()
 }
 
-func formatResultText(userMention, search string, page int) string {
+func (p *Plugin) getBotName(client *telegram.Client) string {
+	if p.appCtx != nil && p.appCtx.BotUser != nil {
+		if name := strings.TrimSpace(p.appCtx.BotUser.FirstName); name != "" {
+			return name
+		}
+		if username := strings.TrimSpace(p.appCtx.BotUser.Username); username != "" {
+			return "@" + username
+		}
+	}
+	if client != nil {
+		if me, err := client.GetMe(); err == nil && me != nil {
+			if name := strings.TrimSpace(me.FirstName); name != "" {
+				return name
+			}
+			if username := strings.TrimSpace(me.Username); username != "" {
+				return "@" + username
+			}
+		}
+	}
+	return "Bot"
+}
+
+func (p *Plugin) formatResultText(query string, page, totalPages int, totalResults int64, botName string) string {
+	return formatResultText(query, page, totalPages, totalResults, botName)
+}
+
+func formatResultText(query string, page, totalPages int, totalResults int64, botName string) string {
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	resultsStr := "files"
+	if totalResults == 1 {
+		resultsStr = "file"
+	}
+
+	title := strings.TrimSpace(query)
+	if openIdx := strings.LastIndex(title, "("); openIdx != -1 && strings.HasSuffix(title, ")") {
+		title = strings.TrimSpace(title[:openIdx])
+	}
+	if title == "" {
+		title = strings.TrimSpace(query)
+	}
+
 	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s 🫶\n    \n📁 <b>Query :</b> %s\n\n🗓️ <b><i>Page No ›</i></b> <code>%d</code>\n\n✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within 15 Mins ❗️\n©ᶜʸᵇᵉʳᵗᵍ 🗡️",
-		userMention,
-		html.EscapeString(search),
+		"🎬 <b>%s</b>\n\n"+
+			"🔎 <b>Query:</b> %s\n"+
+			"📄 <b>Page:</b> %d / %d\n"+
+			"📦 <b>Results:</b> %d %s\n"+
+			"⏳ <i>This result expires in 15 minutes.</i>\n\n"+
+			"© %s",
+		html.EscapeString(title),
+		html.EscapeString(query),
 		page,
+		totalPages,
+		totalResults,
+		resultsStr,
+		html.EscapeString(botName),
 	)
 }
 
-func formatLanguagesMenuText(userMention, query string) string {
+func formatLanguagesMenuText(query string, botName string) string {
 	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s 🫶\n    \n📁 <b>Query :</b> %s\n\n🌐 <b><i>Select Desired Language :</i></b>\n\n✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within 15 Mins ❗️\n©ᶜʸᵇᵉʳᵗᵍ 🗡️",
-		userMention,
+		"🌐 <b>Select Desired Language</b>\n\n"+
+			"🔎 <b>Query:</b> %s\n\n"+
+			"⏳ <i>This message expires in 15 minutes.</i>\n\n"+
+			"© %s",
 		html.EscapeString(query),
+		html.EscapeString(botName),
 	)
 }
 
-func formatQualitiesMenuText(userMention, query string) string {
+func formatQualitiesMenuText(query string, botName string) string {
 	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s 🫶\n    \n📁 <b>Query :</b> %s\n\n🎞️ <b><i>Select Desired Quality :</i></b>\n\n✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within 15 Mins ❗️\n©ᶜʸᵇᵉʳᵗᵍ 🗡️",
-		userMention,
+		"🎞 <b>Select Desired Quality</b>\n\n"+
+			"🔎 <b>Query:</b> %s\n\n"+
+			"⏳ <i>This message expires in 15 minutes.</i>\n\n"+
+			"© %s",
 		html.EscapeString(query),
+		html.EscapeString(botName),
 	)
 }
 
@@ -1036,9 +1284,15 @@ func (p *Plugin) recoverSessionFromMessage(msg *telegram.NewMessage, userID int6
 	lines := strings.Split(msg.Text(), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "Query :") {
+		var queryPart string
+		if strings.Contains(line, "Query:") {
+			idx := strings.Index(line, "Query:")
+			queryPart = strings.TrimSpace(line[idx+len("Query:"):])
+		} else if strings.Contains(line, "Query :") {
 			idx := strings.Index(line, "Query :")
-			queryPart := strings.TrimSpace(line[idx+len("Query :"):])
+			queryPart = strings.TrimSpace(line[idx+len("Query :"):])
+		}
+		if queryPart != "" {
 			queryPart = strings.TrimPrefix(queryPart, "</b>")
 			queryPart = strings.TrimSpace(queryPart)
 			if queryPart == "" {

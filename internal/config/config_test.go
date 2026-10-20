@@ -146,6 +146,9 @@ func TestLoadFromEnv_DefaultLogLevelAndDB(t *testing.T) {
 	if cfg.SyncBatchSize != 10000 {
 		t.Errorf("expected default SyncBatchSize 10000, got %d", cfg.SyncBatchSize)
 	}
+	if !cfg.BackgroundSync {
+		t.Error("expected default BackgroundSync to be true")
+	}
 	if cfg.AutoDeleteFilterTime != "15m" {
 		t.Errorf("expected default AutoDeleteFilterTime 15m, got %s", cfg.AutoDeleteFilterTime)
 	}

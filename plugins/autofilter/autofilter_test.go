@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
@@ -162,70 +163,274 @@ func TestAutofilter_RecoverSession_WithFilters(t *testing.T) {
 	}
 }
 
-func TestAutofilter_ButtonStyles(t *testing.T) {
+func TestAutofilter_Pagination_FirstPage(t *testing.T) {
 	plugin := &Plugin{}
-
 	files := []search.MediaFile{
-		{FileID: "f1", FileName: "Vikram.2022.mkv", Size: "2.0 GB"},
+		{FileID: "f1", FileName: "KGF.Chapter.2.2022.Malayalam.HDRip.mkv", Size: "402 MB"},
 	}
 
-	// Result keyboard with offset > 0 and nextOffset > 0 and filter active
-	kb := plugin.buildResultKeyboard(files, "key1", 8, 16, true)
-	if kb == nil || len(kb.Rows) < 4 {
-		t.Fatalf("expected at least 4 rows, got %d", len(kb.Rows))
+	// Page 1 of 8: should have Page + Next, but NO Previous
+	kb := plugin.buildResultKeyboard(files, "key1", 1, 8, false)
+	if kb == nil || len(kb.Rows) != 3 {
+		t.Fatalf("expected 3 rows (filter, file, nav), got %d", len(kb.Rows))
 	}
 
-	// 1. Row 0: Languages & Quality header -> BgPrimary (Blue)
-	headerRow := kb.Rows[0].Buttons
-	if len(headerRow) != 2 {
-		t.Fatalf("expected 2 buttons in header row, got %d", len(headerRow))
+	// Filter row
+	if len(kb.Rows[0].Buttons) != 2 {
+		t.Fatalf("expected 2 filter buttons, got %d", len(kb.Rows[0].Buttons))
 	}
-	langBtn, ok1 := headerRow[0].(*telegram.KeyboardButtonCallback)
-	qualBtn, ok2 := headerRow[1].(*telegram.KeyboardButtonCallback)
-	if !ok1 || langBtn.Style == nil || !langBtn.Style.BgPrimary {
-		t.Errorf("expected Languages button to have BgPrimary=true")
-	}
-	if !ok2 || qualBtn.Style == nil || !qualBtn.Style.BgPrimary {
-		t.Errorf("expected Quality button to have BgPrimary=true")
+	f1 := kb.Rows[0].Buttons[0].(*telegram.KeyboardButtonCallback)
+	f2 := kb.Rows[0].Buttons[1].(*telegram.KeyboardButtonCallback)
+	if f1.Text != "🌐 Languages" || f2.Text != "🎞 Quality" {
+		t.Errorf("expected filter buttons '🌐 Languages' and '🎞 Quality', got %q and %q", f1.Text, f2.Text)
 	}
 
-	// 2. Navigation Row: Back (Danger/Red) and Next (Success/Green)
+	// Nav row
 	navRow := kb.Rows[2].Buttons
 	if len(navRow) != 2 {
-		t.Fatalf("expected 2 nav buttons, got %d", len(navRow))
+		t.Fatalf("expected 2 nav buttons on first page, got %d", len(navRow))
 	}
-	backBtn, okBack := navRow[0].(*telegram.KeyboardButtonCallback)
-	nextBtn, okNext := navRow[1].(*telegram.KeyboardButtonCallback)
-	if !okBack || backBtn.Style == nil || !backBtn.Style.BgDanger {
-		t.Errorf("expected Back button to have BgDanger=true (Red)")
+	pBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	nBtn := navRow[1].(*telegram.KeyboardButtonCallback)
+	if pBtn.Text != "📄 Page 1 / 8" {
+		t.Errorf("expected page indicator '📄 Page 1 / 8', got %q", pBtn.Text)
 	}
-	if !okNext || nextBtn.Style == nil || !nextBtn.Style.BgSuccess {
-		t.Errorf("expected Next button to have BgSuccess=true (Green)")
+	if nBtn.Text != "Next ▶" {
+		t.Errorf("expected 'Next ▶', got %q", nBtn.Text)
 	}
-
-	// 3. Filter Reset Row: Back to files (Danger/Red)
-	resetRow := kb.Rows[3].Buttons
-	if len(resetRow) != 1 {
-		t.Fatalf("expected 1 reset button, got %d", len(resetRow))
-	}
-	resetBtn, okReset := resetRow[0].(*telegram.KeyboardButtonCallback)
-	if !okReset || resetBtn.Style == nil || !resetBtn.Style.BgDanger {
-		t.Errorf("expected Back to files button to have BgDanger=true (Red)")
-	}
-
-	// 4. Spellcheck Keyboard
-	spellKb := plugin.buildSpellCheckKeyboard([]string{"Vikram"}, "key2")
-	if len(spellKb.Rows) < 2 {
-		t.Fatalf("expected at least 2 rows in spellKb, got %d", len(spellKb.Rows))
-	}
-	sugBtn, okSug := spellKb.Rows[0].Buttons[0].(*telegram.KeyboardButtonCallback)
-	if !okSug || sugBtn.Style == nil || !sugBtn.Style.BgPrimary {
-		t.Errorf("expected suggestion button to have BgPrimary=true (Blue)")
-	}
-	closeBtn, okClose := spellKb.Rows[1].Buttons[0].(*telegram.KeyboardButtonCallback)
-	if !okClose || closeBtn.Style == nil || !closeBtn.Style.BgDanger {
-		t.Errorf("expected Close button to have BgDanger=true (Red)")
+	if strings.Contains(pBtn.Text, "Previous") || strings.Contains(nBtn.Text, "Previous") {
+		t.Errorf("first page must NOT have a Previous button")
 	}
 }
+
+func TestAutofilter_Pagination_MiddlePage(t *testing.T) {
+	plugin := &Plugin{}
+	files := []search.MediaFile{
+		{FileID: "f1", FileName: "Vikram.2022.Tamil.1080p.mkv", Size: "1.4 GB"},
+	}
+
+	// Page 2 of 8: should have Previous + Page + Next
+	kb := plugin.buildResultKeyboard(files, "key1", 2, 8, false)
+	if kb == nil || len(kb.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(kb.Rows))
+	}
+
+	navRow := kb.Rows[2].Buttons
+	if len(navRow) != 3 {
+		t.Fatalf("expected 3 nav buttons on middle page, got %d", len(navRow))
+	}
+	prevBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	pageBtn := navRow[1].(*telegram.KeyboardButtonCallback)
+	nextBtn := navRow[2].(*telegram.KeyboardButtonCallback)
+
+	if prevBtn.Text != "◀ Previous" {
+		t.Errorf("expected '◀ Previous', got %q", prevBtn.Text)
+	}
+	if pageBtn.Text != "📄 Page 2 / 8" {
+		t.Errorf("expected '📄 Page 2 / 8', got %q", pageBtn.Text)
+	}
+	if nextBtn.Text != "Next ▶" {
+		t.Errorf("expected 'Next ▶', got %q", nextBtn.Text)
+	}
+}
+
+func TestAutofilter_Pagination_LastPage(t *testing.T) {
+	plugin := &Plugin{}
+	files := []search.MediaFile{
+		{FileID: "f1", FileName: "Inception.2010.mkv", Size: "700 MB"},
+	}
+
+	// Page 8 of 8: should have Previous + Page, but NO Next
+	kb := plugin.buildResultKeyboard(files, "key1", 8, 8, false)
+	if kb == nil || len(kb.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(kb.Rows))
+	}
+
+	navRow := kb.Rows[2].Buttons
+	if len(navRow) != 2 {
+		t.Fatalf("expected 2 nav buttons on last page, got %d", len(navRow))
+	}
+	prevBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	pageBtn := navRow[1].(*telegram.KeyboardButtonCallback)
+
+	if prevBtn.Text != "◀ Previous" {
+		t.Errorf("expected '◀ Previous', got %q", prevBtn.Text)
+	}
+	if pageBtn.Text != "📄 Page 8 / 8" {
+		t.Errorf("expected '📄 Page 8 / 8', got %q", pageBtn.Text)
+	}
+	if strings.Contains(prevBtn.Text, "Next") || strings.Contains(pageBtn.Text, "Next") {
+		t.Errorf("last page must NOT have a Next button")
+	}
+}
+
+func TestAutofilter_Pagination_SinglePage(t *testing.T) {
+	plugin := &Plugin{}
+	files := []search.MediaFile{
+		{FileID: "f1", FileName: "ShortFilm.mp4", Size: "50 MB"},
+	}
+
+	// Page 1 of 1: only Page indicator button
+	kb := plugin.buildResultKeyboard(files, "key1", 1, 1, false)
+	if kb == nil || len(kb.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(kb.Rows))
+	}
+
+	navRow := kb.Rows[2].Buttons
+	if len(navRow) != 1 {
+		t.Fatalf("expected 1 nav button on single page, got %d", len(navRow))
+	}
+	pageBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	if pageBtn.Text != "📄 Page 1 / 1" {
+		t.Errorf("expected '📄 Page 1 / 1', got %q", pageBtn.Text)
+	}
+}
+
+func TestAutofilter_FileButtonLabel_NoFlowerEmoji(t *testing.T) {
+	testCases := []struct {
+		file     search.MediaFile
+		expected string
+	}{
+		{
+			file:     search.MediaFile{FileName: "KGF.Chapter.2.2022.Malayalam.HDRip.x264.mkv", Size: "402 MB"},
+			expected: "🎬 402 MB · Malayalam · HDRip",
+		},
+		{
+			file:     search.MediaFile{FileName: "Vikram.2022.Tamil.1080p.WEBRip.mkv", Size: "1.4 GB"},
+			expected: "🎬 1.4 GB · Tamil · 1080p WEBRip",
+		},
+		{
+			file:     search.MediaFile{FileName: "Inception.2010.720p.mkv", Size: "700 MB"},
+			expected: "🎬 700 MB · Inception · 720p",
+		},
+		{
+			file:     search.MediaFile{FileName: "Documentary.mp4", Size: "350 MB"},
+			expected: "🎬 350 MB · Documentary",
+		},
+	}
+
+	for _, tc := range testCases {
+		label := formatFileButtonLabel(tc.file)
+		if strings.Contains(label, "🌷") {
+			t.Errorf("file label %q must not contain flower emoji 🌷", label)
+		}
+		if !strings.HasPrefix(label, "🎬") {
+			t.Errorf("file label %q should start with 🎬", label)
+		}
+		if label != tc.expected {
+			t.Errorf("expected %q, got %q", tc.expected, label)
+		}
+	}
+}
+
+func TestAutofilter_MessageText_FormattingAndBotIdentity(t *testing.T) {
+	// Bot A
+	textA := formatResultText("KGF", 1, 8, 24, "PandaBot")
+	if !strings.Contains(textA, "🎬 <b>KGF</b>") {
+		t.Errorf("expected header '🎬 <b>KGF</b>', got:\n%s", textA)
+	}
+	if !strings.Contains(textA, "🔎 <b>Query:</b> KGF") {
+		t.Errorf("expected query line, got:\n%s", textA)
+	}
+	if !strings.Contains(textA, "📄 <b>Page:</b> 1 / 8") {
+		t.Errorf("expected page line, got:\n%s", textA)
+	}
+	if !strings.Contains(textA, "📦 <b>Results:</b> 24 files") {
+		t.Errorf("expected results line, got:\n%s", textA)
+	}
+	if !strings.Contains(textA, "⏳ <i>This result expires in 15 minutes.</i>") {
+		t.Errorf("expected expiry note, got:\n%s", textA)
+	}
+	if !strings.Contains(textA, "© PandaBot") {
+		t.Errorf("expected bot signature '© PandaBot', got:\n%s", textA)
+	}
+
+	// Bot B with single file result
+	textB := formatResultText("Vikram", 2, 5, 1, "CinemaTG")
+	if !strings.Contains(textB, "📦 <b>Results:</b> 1 file") {
+		t.Errorf("expected singular '1 file', got:\n%s", textB)
+	}
+	if !strings.Contains(textB, "© CinemaTG") {
+		t.Errorf("expected bot signature '© CinemaTG', got:\n%s", textB)
+	}
+
+	// Verify no hardcoded Panda or CyberTG
+	if strings.Contains(textB, "CyberTG") || strings.Contains(textB, "PandaBot") {
+		t.Errorf("textB contains hardcoded bot name")
+	}
+}
+
+func TestAutofilter_DynamicBotName(t *testing.T) {
+	// 1. Bot with FirstName
+	pluginA := &Plugin{
+		appCtx: &plugins.AppContext{
+			BotUser: &telegram.UserObj{
+				ID:        12345,
+				FirstName: "CustomBot",
+				Username:  "custom_bot",
+			},
+		},
+	}
+	if name := pluginA.getBotName(nil); name != "CustomBot" {
+		t.Errorf("expected 'CustomBot', got %q", name)
+	}
+
+	// 2. Bot with Username only
+	pluginB := &Plugin{
+		appCtx: &plugins.AppContext{
+			BotUser: &telegram.UserObj{
+				ID:       54321,
+				Username: "movie_bot",
+			},
+		},
+	}
+	if name := pluginB.getBotName(nil); name != "@movie_bot" {
+		t.Errorf("expected '@movie_bot', got %q", name)
+	}
+
+	// 3. Fallback when BotUser is nil
+	pluginC := &Plugin{}
+	if name := pluginC.getBotName(nil); name != "Bot" {
+		t.Errorf("expected fallback 'Bot', got %q", name)
+	}
+}
+
+func TestAutofilter_GroupSession_Isolation(t *testing.T) {
+	plugin := &Plugin{
+		sessions: make(map[string]*searchSession),
+	}
+
+	// Session 1: User 100 in Group -1001
+	key1 := "-1001_100_50"
+	plugin.saveSession(key1, &searchSession{
+		Query:    "KGF",
+		UserID:   100,
+		ChatID:   -1001,
+		Language: "malayalam",
+	})
+
+	// Session 2: User 200 in Group -1001
+	key2 := "-1001_200_55"
+	plugin.saveSession(key2, &searchSession{
+		Query:    "Vikram",
+		UserID:   200,
+		ChatID:   -1001,
+		Language: "tamil",
+	})
+
+	sess1 := plugin.getSession(key1)
+	sess2 := plugin.getSession(key2)
+
+	if sess1 == nil || sess2 == nil {
+		t.Fatalf("expected both sessions to exist")
+	}
+	if sess1.Query != "KGF" || sess1.UserID != 100 || sess1.Language != "malayalam" {
+		t.Errorf("session 1 corrupted: %+v", sess1)
+	}
+	if sess2.Query != "Vikram" || sess2.UserID != 200 || sess2.Language != "tamil" {
+		t.Errorf("session 2 corrupted: %+v", sess2)
+	}
+}
+
 
 
