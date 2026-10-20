@@ -125,17 +125,7 @@ func (p *Plugin) HandleFastDownloadCommand(m *telegram.NewMessage) error {
 	downloadURL := p.appCtx.Stream.GetExpiringDownloadURL(fileID, fileName, linkExpiry)
 	text := formatFastDownloadText(fileName, sizeStr, downloadURL, msgDeleteDur, linkExpiry)
 
-	var replyMarkup *telegram.ReplyInlineMarkup
-	if commands.IsValidTelegramButtonURL(downloadURL) {
-		replyMarkup = telegram.NewKeyboard().
-			AddRow(
-				telegram.Button.URL("⚡ Fast Download", downloadURL).Danger(),
-			).
-			AddRow(
-				telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
-			).
-			Build()
-	}
+	replyMarkup := p.buildFastDownloadKeyboard(downloadURL)
 
 	sentMsg, err := m.Reply(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -194,17 +184,7 @@ func (p *Plugin) HandleFastDownloadCallback(cb *telegram.CallbackQuery) error {
 	downloadURL := p.appCtx.Stream.GetExpiringDownloadURL(fileID, fileName, linkExpiry)
 	text := formatFastDownloadText(fileName, sizeStr, downloadURL, msgDeleteDur, linkExpiry)
 
-	var replyMarkup *telegram.ReplyInlineMarkup
-	if commands.IsValidTelegramButtonURL(downloadURL) {
-		replyMarkup = telegram.NewKeyboard().
-			AddRow(
-				telegram.Button.URL("⚡ Fast Download", downloadURL).Danger(),
-			).
-			AddRow(
-				telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
-			).
-			Build()
-	}
+	replyMarkup := p.buildFastDownloadKeyboard(downloadURL)
 
 	// Send fast download link to the user in chat
 	if p.appCtx.Client != nil && cb.SenderID != 0 {
@@ -298,4 +278,32 @@ func formatFastDownloadText(fileName, sizeStr, downloadURL string, msgDeleteDur,
 		msgDurText,
 		linkDurText,
 	)
+}
+
+// buildFastDownloadKeyboard creates the inline keyboard for the generated fast download message.
+// The Fast Download button is styled with Green (Success) by default (or Blue via FAST_DOWNLOAD_BUTTON_STYLE=blue),
+// providing a fresh contrast against the Red (Danger) Close button.
+func (p *Plugin) buildFastDownloadKeyboard(downloadURL string) *telegram.ReplyInlineMarkup {
+	if !commands.IsValidTelegramButtonURL(downloadURL) {
+		return nil
+	}
+
+	dlBtn := telegram.Button.URL("⚡ Fast Download", downloadURL)
+	style := "green"
+	if p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.FastDownloadButtonStyle != "" {
+		style = strings.ToLower(strings.TrimSpace(p.appCtx.Config.FastDownloadButtonStyle))
+	}
+
+	if style == "blue" || style == "primary" {
+		dlBtn = dlBtn.Primary()
+	} else {
+		dlBtn = dlBtn.Success()
+	}
+
+	return telegram.NewKeyboard().
+		AddRow(dlBtn).
+		AddRow(
+			telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
+		).
+		Build()
 }

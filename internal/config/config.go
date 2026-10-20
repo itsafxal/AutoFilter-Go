@@ -97,6 +97,9 @@ type Config struct {
 	// FastDownloadLinkExpiry defines the duration for which fast download links remain valid on the server (default: "30m").
 	FastDownloadLinkExpiry string
 
+	// FastDownloadButtonStyle defines the color/style of the generated fast download button ("green" or "blue", default: "green").
+	FastDownloadButtonStyle string
+
 	// AutoDeleteWeeklyTrash specifies whether weekly trash cleanup is enabled (default: true).
 	AutoDeleteWeeklyTrash bool
 
@@ -245,6 +248,11 @@ func LoadFromEnv() (*Config, error) {
 		fastDLExpiry = "30m"
 	}
 
+	fastDLBtnStyle := strings.ToLower(strings.TrimSpace(os.Getenv("FAST_DOWNLOAD_BUTTON_STYLE")))
+	if fastDLBtnStyle == "" {
+		fastDLBtnStyle = "green"
+	}
+
 	weeklyTrash := true
 	if rawTrash := strings.TrimSpace(os.Getenv("AUTO_DELETE_WEEKLY_TRASH")); rawTrash != "" {
 		weeklyTrash = strings.EqualFold(rawTrash, "true") || rawTrash == "1"
@@ -331,6 +339,7 @@ func LoadFromEnv() (*Config, error) {
 		AutoDeleteFileTime:         fileDelTime,
 		AutoDeleteFastDownloadTime: fastDLTime,
 		FastDownloadLinkExpiry:     fastDLExpiry,
+		FastDownloadButtonStyle:    fastDLBtnStyle,
 		AutoDeleteWeeklyTrash:    weeklyTrash,
 		TrashRetentionDays:       trashRetentionDays,
 		StreamServerEnabled:      streamServerEnabled,

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -90,5 +92,45 @@ func TestStreamPlugin_FastDownloadDurationsAndFormat(t *testing.T) {
 	}
 	if !strings.Contains(text, "http://localhost:8080/dl/xyz") {
 		t.Error("expected text to contain download URL")
+	}
+}
+
+func TestStreamPlugin_FastDownloadKeyboardStyles(t *testing.T) {
+	// 1. Default style should be Green (.Success())
+	pluginDefault := New(&plugins.AppContext{})
+	kbDefault := pluginDefault.buildFastDownloadKeyboard("https://stream.example.com/dl/xyz")
+	if kbDefault == nil {
+		t.Fatal("expected keyboard to be built for valid URL")
+	}
+	if len(kbDefault.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(kbDefault.Rows))
+	}
+
+	dlBtn, ok := kbDefault.Rows[0].Buttons[0].(*telegram.KeyboardButtonURL)
+	if !ok {
+		t.Fatalf("expected *telegram.KeyboardButtonURL, got %T", kbDefault.Rows[0].Buttons[0])
+	}
+	if dlBtn.Style == nil || !dlBtn.Style.BgSuccess {
+		t.Errorf("expected default Fast Download button to have BgSuccess (Green) style, got %v", dlBtn.Style)
+	}
+
+	closeBtn, ok := kbDefault.Rows[1].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if !ok {
+		t.Fatalf("expected *telegram.KeyboardButtonCallback, got %T", kbDefault.Rows[1].Buttons[0])
+	}
+	if closeBtn.Style == nil || !closeBtn.Style.BgDanger {
+		t.Errorf("expected Close button to have BgDanger (Red) style, got %v", closeBtn.Style)
+	}
+
+	// 2. Configured Blue style (.Primary())
+	pluginBlue := New(&plugins.AppContext{
+		Config: &config.Config{
+			FastDownloadButtonStyle: "blue",
+		},
+	})
+	kbBlue := pluginBlue.buildFastDownloadKeyboard("https://stream.example.com/dl/xyz")
+	dlBtnBlue := kbBlue.Rows[0].Buttons[0].(*telegram.KeyboardButtonURL)
+	if dlBtnBlue.Style == nil || !dlBtnBlue.Style.BgPrimary {
+		t.Errorf("expected Fast Download button with 'blue' style to have BgPrimary style, got %v", dlBtnBlue.Style)
 	}
 }
