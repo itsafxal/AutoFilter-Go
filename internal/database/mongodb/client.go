@@ -105,11 +105,12 @@ func (m *ClientManager) connectClient(ctx context.Context, uri string) (*mongo.C
 
 	opts := options.Client().
 		ApplyURI(uri).
-		SetConnectTimeout(10 * time.Second).
-		SetServerSelectionTimeout(10 * time.Second).
-		SetSocketTimeout(30 * time.Second).
+		SetConnectTimeout(15 * time.Second).
+		SetServerSelectionTimeout(15 * time.Second).
+		SetSocketTimeout(120 * time.Second).
 		SetMaxPoolSize(100).
-		SetMinPoolSize(5)
+		SetMinPoolSize(5).
+		SetRetryReads(true)
 
 	client, err := mongo.Connect(connectCtx, opts)
 	if err != nil {

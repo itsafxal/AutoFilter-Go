@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -348,11 +349,22 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 			"date":      1,
 		})
 
-	cursor, err := shard.Col.Find(ctx, bson.M{}, opts)
+	var cursor *mongo.Cursor
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		cursor, err = shard.Col.Find(ctx, bson.M{}, opts)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
+		}
+		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to open cursor on shard %s (%s): %w", shard.Label, shard.Col.Name(), err)
 	}
-	defer cursor.Close(ctx)
+	defer cursor.Close(context.Background())
 
 	var streamed int64
 	for cursor.Next(ctx) {

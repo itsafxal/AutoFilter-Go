@@ -185,6 +185,13 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Start HTTP healthcheck/stream server early so PaaS / Coolify / Docker health checks pass immediately
+	if a.StreamService != nil && a.Config != nil && a.Config.StreamServerEnabled {
+		if err := a.StreamService.Start(ctx); err != nil {
+			a.Logger.Warn("failed to start stream server early", "error", err)
+		}
+	}
+
 	if err := a.InitDatabase(ctx); err != nil {
 		return err
 	}
