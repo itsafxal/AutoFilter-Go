@@ -119,32 +119,11 @@ func (p *Plugin) HandleFastDownloadCommand(m *telegram.NewMessage) error {
 		sizeStr = commands.FormatBytes(rec.FileSize)
 	}
 
-	var deleteDur time.Duration
-	if p.appCtx.AutoDelete != nil {
-		deleteDur = p.appCtx.AutoDelete.GetSettings().FileDeleteDuration
-	}
-	if deleteDur <= 0 {
-		deleteDur = 30 * time.Minute
-	}
+	linkExpiry := p.getFastDownloadLinkExpiry()
+	msgDeleteDur := p.getFastDownloadMsgDeleteDuration()
 
-	downloadURL := p.appCtx.Stream.GetExpiringDownloadURL(fileID, fileName, deleteDur)
-	durText := autodelete.FormatDuration(deleteDur)
-	text := fmt.Sprintf(
-		"⚡ <b><u>Fast Download Link</u></b>\n\n"+
-			"📁 <b>File:</b> <code>%s</code>\n"+
-			"📦 <b>Size:</b> <code>%s</code>\n"+
-			"⏳ <b>Auto-Delete In:</b> <code>%s</code>\n\n"+
-			"🚀 <b>Direct Download Link:</b>\n"+
-			"<a href=\"%s\">%s</a>\n\n"+
-			"⚡ <i>Click the button below to start high-speed download!</i>\n"+
-			"⚠️ <i>This download link and message will expire in %s.</i>",
-		commands.EscapeHTML(fileName),
-		sizeStr,
-		durText,
-		downloadURL,
-		commands.EscapeHTML(fileName),
-		durText,
-	)
+	downloadURL := p.appCtx.Stream.GetExpiringDownloadURL(fileID, fileName, linkExpiry)
+	text := formatFastDownloadText(fileName, sizeStr, downloadURL, msgDeleteDur, linkExpiry)
 
 	var replyMarkup *telegram.ReplyInlineMarkup
 	if commands.IsValidTelegramButtonURL(downloadURL) {
@@ -163,7 +142,7 @@ func (p *Plugin) HandleFastDownloadCommand(m *telegram.NewMessage) error {
 		ReplyMarkup: replyMarkup,
 	})
 	if err == nil && sentMsg != nil && p.appCtx.AutoDelete != nil {
-		_ = p.appCtx.AutoDelete.ScheduleFileDelete(sentMsg.ChatID(), int32(sentMsg.ID))
+		_ = p.appCtx.AutoDelete.ScheduleFastDownloadDelete(sentMsg.ChatID(), int32(sentMsg.ID))
 	}
 	return err
 }
@@ -209,33 +188,11 @@ func (p *Plugin) HandleFastDownloadCallback(cb *telegram.CallbackQuery) error {
 		sizeStr = commands.FormatBytes(rec.FileSize)
 	}
 
-	var deleteDur time.Duration
-	if p.appCtx.AutoDelete != nil {
-		deleteDur = p.appCtx.AutoDelete.GetSettings().FileDeleteDuration
-	}
-	if deleteDur <= 0 {
-		deleteDur = 30 * time.Minute
-	}
+	linkExpiry := p.getFastDownloadLinkExpiry()
+	msgDeleteDur := p.getFastDownloadMsgDeleteDuration()
 
-	downloadURL := p.appCtx.Stream.GetExpiringDownloadURL(fileID, fileName, deleteDur)
-	durText := autodelete.FormatDuration(deleteDur)
-
-	text := fmt.Sprintf(
-		"⚡ <b><u>Fast Download Link</u></b>\n\n"+
-			"📁 <b>File:</b> <code>%s</code>\n"+
-			"📦 <b>Size:</b> <code>%s</code>\n"+
-			"⏳ <b>Auto-Delete In:</b> <code>%s</code>\n\n"+
-			"🚀 <b>Direct Download Link:</b>\n"+
-			"<a href=\"%s\">%s</a>\n\n"+
-			"⚡ <i>Click the button below to start high-speed download!</i>\n"+
-			"⚠️ <i>This download link and message will expire in %s.</i>",
-		commands.EscapeHTML(fileName),
-		sizeStr,
-		durText,
-		downloadURL,
-		commands.EscapeHTML(fileName),
-		durText,
-	)
+	downloadURL := p.appCtx.Stream.GetExpiringDownloadURL(fileID, fileName, linkExpiry)
+	text := formatFastDownloadText(fileName, sizeStr, downloadURL, msgDeleteDur, linkExpiry)
 
 	var replyMarkup *telegram.ReplyInlineMarkup
 	if commands.IsValidTelegramButtonURL(downloadURL) {
@@ -256,7 +213,7 @@ func (p *Plugin) HandleFastDownloadCallback(cb *telegram.CallbackQuery) error {
 			ReplyMarkup: replyMarkup,
 		})
 		if sErr == nil && sentMsg != nil && p.appCtx.AutoDelete != nil {
-			_ = p.appCtx.AutoDelete.ScheduleFileDelete(sentMsg.ChatID(), int32(sentMsg.ID))
+			_ = p.appCtx.AutoDelete.ScheduleFastDownloadDelete(sentMsg.ChatID(), int32(sentMsg.ID))
 		}
 		_, _ = cb.Answer("✅ Fast Download link sent to your chat!")
 		return sErr
@@ -290,4 +247,55 @@ func (p *Plugin) HandleStreamCommand(m *telegram.NewMessage) error {
 // HandleStreamLinksCallback aliases HandleFastDownloadCallback for backwards compatibility.
 func (p *Plugin) HandleStreamLinksCallback(cb *telegram.CallbackQuery) error {
 	return p.HandleFastDownloadCallback(cb)
+}
+
+// getFastDownloadLinkExpiry returns the duration for which the fast download link remains valid on the server (default: 30 minutes).
+func (p *Plugin) getFastDownloadLinkExpiry() time.Duration {
+	linkExpiry := 30 * time.Minute
+	if p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.FastDownloadLinkExpiry != "" {
+		if d, err := autodelete.ParseDuration(p.appCtx.Config.FastDownloadLinkExpiry); err == nil && d > 0 {
+			linkExpiry = d
+		}
+	}
+	return linkExpiry
+}
+
+// getFastDownloadMsgDeleteDuration returns the duration before the fast download Telegram message is auto-deleted (default: 5 minutes).
+func (p *Plugin) getFastDownloadMsgDeleteDuration() time.Duration {
+	msgDeleteDur := 5 * time.Minute
+	if p.appCtx != nil && p.appCtx.AutoDelete != nil {
+		if d := p.appCtx.AutoDelete.GetSettings().FastDownloadDeleteDuration; d > 0 {
+			msgDeleteDur = d
+		}
+	} else if p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.AutoDeleteFastDownloadTime != "" {
+		if d, err := autodelete.ParseDuration(p.appCtx.Config.AutoDeleteFastDownloadTime); err == nil && d > 0 {
+			msgDeleteDur = d
+		}
+	}
+	return msgDeleteDur
+}
+
+// formatFastDownloadText builds the HTML text for the fast download response message.
+func formatFastDownloadText(fileName, sizeStr, downloadURL string, msgDeleteDur, linkExpiry time.Duration) string {
+	msgDurText := autodelete.FormatDuration(msgDeleteDur)
+	linkDurText := autodelete.FormatDuration(linkExpiry)
+	return fmt.Sprintf(
+		"⚡ <b><u>Fast Download Link</u></b>\n\n"+
+			"📁 <b>File:</b> <code>%s</code>\n"+
+			"📦 <b>Size:</b> <code>%s</code>\n"+
+			"⏳ <b>Message Auto-Delete In:</b> <code>%s</code>\n"+
+			"🔗 <b>Link Validity:</b> <code>%s</code>\n\n"+
+			"🚀 <b>Direct Download Link:</b>\n"+
+			"<a href=\"%s\">%s</a>\n\n"+
+			"⚡ <i>Click the button below to start high-speed download!</i>\n"+
+			"⚠️ <i>This message will be auto-deleted in %s. The download link remains valid on server for %s.</i>",
+		commands.EscapeHTML(fileName),
+		sizeStr,
+		msgDurText,
+		linkDurText,
+		downloadURL,
+		commands.EscapeHTML(fileName),
+		msgDurText,
+		linkDurText,
+	)
 }

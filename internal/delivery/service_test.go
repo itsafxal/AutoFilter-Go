@@ -582,11 +582,19 @@ type mockCaptionFormatter struct {
 }
 
 func (m *mockCaptionFormatter) FormatMedia(ctx context.Context, fileName, sizeStr, originalCaption string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(m.template, "{filename}", fileName), "{file sise}", sizeStr)
+	res := strings.ReplaceAll(m.template, "{filename}", fileName)
+	res = strings.ReplaceAll(res, "{file size}", sizeStr)
+	res = strings.ReplaceAll(res, "{file_size}", sizeStr)
+	res = strings.ReplaceAll(res, "{size}", sizeStr)
+	return res
 }
 
 func (m *mockCaptionFormatter) Format(template, fileName, sizeStr, originalCaption string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(template, "{filename}", fileName), "{file sise}", sizeStr)
+	res := strings.ReplaceAll(template, "{filename}", fileName)
+	res = strings.ReplaceAll(res, "{file size}", sizeStr)
+	res = strings.ReplaceAll(res, "{file_size}", sizeStr)
+	res = strings.ReplaceAll(res, "{size}", sizeStr)
+	return res
 }
 
 func TestDelivery_DynamicCaptionFormatter(t *testing.T) {

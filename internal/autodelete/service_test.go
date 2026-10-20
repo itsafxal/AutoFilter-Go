@@ -218,6 +218,7 @@ func TestSettingsPersistence(t *testing.T) {
 	// Update settings
 	_ = svc.SetFilterDuration(ctx, 45*time.Minute)
 	_ = svc.SetFileDuration(ctx, 2*time.Hour)
+	_ = svc.SetFastDownloadDuration(ctx, 10*time.Minute)
 	_ = svc.SetWeeklyTrash(ctx, false)
 	_ = svc.SetTrashRetention(ctx, 14)
 
@@ -232,10 +233,42 @@ func TestSettingsPersistence(t *testing.T) {
 	if s2.FileDeleteDuration != 2*time.Hour {
 		t.Errorf("expected FileDeleteDuration 2h, got %v", s2.FileDeleteDuration)
 	}
+	if s2.FastDownloadDeleteDuration != 10*time.Minute {
+		t.Errorf("expected FastDownloadDeleteDuration 10m, got %v", s2.FastDownloadDeleteDuration)
+	}
 	if s2.WeeklyTrashEnabled != false {
 		t.Errorf("expected WeeklyTrashEnabled false, got %v", s2.WeeklyTrashEnabled)
 	}
 	if s2.TrashRetentionDays != 14 {
 		t.Errorf("expected TrashRetentionDays 14, got %d", s2.TrashRetentionDays)
+	}
+}
+
+func TestScheduleFastDownloadDelete(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	cfg := &config.Config{
+		AutoDeleteFastDownloadTime: "5m",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := NewService(cfg, func() *sql.DB { return db }, nil, logger)
+
+	err := svc.ScheduleFastDownloadDelete(12345, 999)
+	if err != nil {
+		t.Fatalf("unexpected error scheduling fast download delete: %v", err)
+	}
+
+	var msgType string
+	var deleteAt time.Time
+	err = db.QueryRow("SELECT msg_type, delete_at FROM scheduled_deletions WHERE chat_id = 12345 AND message_id = 999;").Scan(&msgType, &deleteAt)
+	if err != nil {
+		t.Fatalf("expected scheduled deletion record: %v", err)
+	}
+	if msgType != "fast_download" {
+		t.Errorf("expected msg_type 'fast_download', got %q", msgType)
+	}
+	if deleteAt.Before(time.Now()) {
+		t.Errorf("expected delete_at to be in future, got %v", deleteAt)
 	}
 }

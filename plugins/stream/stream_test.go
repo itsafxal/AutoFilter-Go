@@ -1,7 +1,9 @@
 package stream
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -55,5 +57,38 @@ func TestStreamPlugin_Registration(t *testing.T) {
 	}
 	if !hasCloseCb {
 		t.Error("expected 'close_data' callback handler to be registered")
+	}
+}
+
+func TestStreamPlugin_FastDownloadDurationsAndFormat(t *testing.T) {
+	plugin := New(&plugins.AppContext{})
+
+	// 1. Defaults verification
+	linkExpiry := plugin.getFastDownloadLinkExpiry()
+	if linkExpiry != 30*time.Minute {
+		t.Errorf("expected default link expiry 30m, got %v", linkExpiry)
+	}
+
+	msgDur := plugin.getFastDownloadMsgDeleteDuration()
+	if msgDur != 5*time.Minute {
+		t.Errorf("expected default message auto-delete duration 5m, got %v", msgDur)
+	}
+
+	// 2. Formatting verification
+	text := formatFastDownloadText("sample_movie.mkv", "1.2 GB", "http://localhost:8080/dl/xyz", msgDur, linkExpiry)
+	if !strings.Contains(text, "sample_movie.mkv") {
+		t.Error("expected text to contain file name")
+	}
+	if !strings.Contains(text, "1.2 GB") {
+		t.Error("expected text to contain size")
+	}
+	if !strings.Contains(text, "Message Auto-Delete In:</b> <code>5 minutes</code>") {
+		t.Errorf("expected text to specify 5 minutes message auto-delete, got:\n%s", text)
+	}
+	if !strings.Contains(text, "Link Validity:</b> <code>30 minutes</code>") {
+		t.Errorf("expected text to specify 30 minutes link validity, got:\n%s", text)
+	}
+	if !strings.Contains(text, "http://localhost:8080/dl/xyz") {
+		t.Error("expected text to contain download URL")
 	}
 }

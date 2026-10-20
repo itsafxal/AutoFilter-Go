@@ -17,10 +17,11 @@ import (
 
 // Settings represents the runtime auto-delete and weekly trash configuration.
 type Settings struct {
-	FilterDeleteDuration time.Duration
-	FileDeleteDuration   time.Duration
-	WeeklyTrashEnabled   bool
-	TrashRetentionDays   int
+	FilterDeleteDuration       time.Duration
+	FileDeleteDuration         time.Duration
+	FastDownloadDeleteDuration time.Duration
+	WeeklyTrashEnabled         bool
+	TrashRetentionDays         int
 }
 
 // ScheduledItem represents a message scheduled for deletion.
@@ -50,11 +51,13 @@ type AutoDeleteService interface {
 	ScheduleDelete(chatID int64, messageID int32, msgType string, duration time.Duration) error
 	ScheduleFilterDelete(chatID int64, messageID int32) error
 	ScheduleFileDelete(chatID int64, messageID int32) error
+	ScheduleFastDownloadDelete(chatID int64, messageID int32) error
 	TrackSentMessage(chatID int64, messageID int32, msgType string) error
 
 	GetSettings() Settings
 	SetFilterDuration(ctx context.Context, d time.Duration) error
 	SetFileDuration(ctx context.Context, d time.Duration) error
+	SetFastDownloadDuration(ctx context.Context, d time.Duration) error
 	SetWeeklyTrash(ctx context.Context, enabled bool) error
 	SetTrashRetention(ctx context.Context, days int) error
 
@@ -88,11 +91,15 @@ func NewService(
 ) *Service {
 	filterDur, _ := ParseDuration(cfg.AutoDeleteFilterTime)
 	fileDur, _ := ParseDuration(cfg.AutoDeleteFileTime)
+	fastDLDur, _ := ParseDuration(cfg.AutoDeleteFastDownloadTime)
 	if filterDur <= 0 && cfg.AutoDeleteFilterTime == "" {
 		filterDur = 15 * time.Minute
 	}
 	if fileDur <= 0 && cfg.AutoDeleteFileTime == "" {
 		fileDur = 30 * time.Minute
+	}
+	if fastDLDur <= 0 {
+		fastDLDur = 5 * time.Minute
 	}
 	retentionDays := cfg.TrashRetentionDays
 	if retentionDays <= 0 {
@@ -105,10 +112,11 @@ func NewService(
 		mongoProvider: mongoProv,
 		logger:        logger,
 		settings: Settings{
-			FilterDeleteDuration: filterDur,
-			FileDeleteDuration:   fileDur,
-			WeeklyTrashEnabled:   cfg.AutoDeleteWeeklyTrash,
-			TrashRetentionDays:   retentionDays,
+			FilterDeleteDuration:       filterDur,
+			FileDeleteDuration:         fileDur,
+			FastDownloadDeleteDuration: fastDLDur,
+			WeeklyTrashEnabled:         cfg.AutoDeleteWeeklyTrash,
+			TrashRetentionDays:         retentionDays,
 		},
 		wakeCh: make(chan struct{}, 1),
 		stopCh: make(chan struct{}),
@@ -224,6 +232,17 @@ func (s *Service) ScheduleFileDelete(chatID int64, messageID int32) error {
 	return s.ScheduleDelete(chatID, messageID, "file", dur)
 }
 
+// ScheduleFastDownloadDelete schedules auto-deletion of a fast download link response message using active fast download duration.
+func (s *Service) ScheduleFastDownloadDelete(chatID int64, messageID int32) error {
+	s.mu.RLock()
+	dur := s.settings.FastDownloadDeleteDuration
+	s.mu.RUnlock()
+	if dur <= 0 {
+		dur = 5 * time.Minute
+	}
+	return s.ScheduleDelete(chatID, messageID, "fast_download", dur)
+}
+
 // TrackSentMessage logs every message sent by the bot across chats for Weekly Trash tracking.
 func (s *Service) TrackSentMessage(chatID int64, messageID int32, msgType string) error {
 	if chatID == 0 || messageID == 0 {
@@ -263,6 +282,14 @@ func (s *Service) SetFileDuration(ctx context.Context, d time.Duration) error {
 	s.settings.FileDeleteDuration = d
 	s.mu.Unlock()
 	return s.saveSetting(ctx, "file_delete_duration", d.String())
+}
+
+// SetFastDownloadDuration updates and persists the fast download message auto-delete duration.
+func (s *Service) SetFastDownloadDuration(ctx context.Context, d time.Duration) error {
+	s.mu.Lock()
+	s.settings.FastDownloadDeleteDuration = d
+	s.mu.Unlock()
+	return s.saveSetting(ctx, "fast_download_delete_duration", d.String())
 }
 
 // SetWeeklyTrash enables or disables automated weekly trash cleanup.
@@ -562,6 +589,10 @@ func (s *Service) loadSettings(ctx context.Context) {
 		case "file_delete_duration":
 			if d, err := ParseDuration(val); err == nil {
 				s.settings.FileDeleteDuration = d
+			}
+		case "fast_download_delete_duration":
+			if d, err := ParseDuration(val); err == nil {
+				s.settings.FastDownloadDeleteDuration = d
 			}
 		case "weekly_trash_enabled":
 			s.settings.WeeklyTrashEnabled = strings.EqualFold(val, "true") || val == "1"

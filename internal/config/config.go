@@ -91,6 +91,12 @@ type Config struct {
 	// AutoDeleteFileTime defines the default duration before delivered file messages are deleted (default: "30m").
 	AutoDeleteFileTime string
 
+	// AutoDeleteFastDownloadTime defines the duration before fast download messages in chat are auto-deleted (default: "5m").
+	AutoDeleteFastDownloadTime string
+
+	// FastDownloadLinkExpiry defines the duration for which fast download links remain valid on the server (default: "30m").
+	FastDownloadLinkExpiry string
+
 	// AutoDeleteWeeklyTrash specifies whether weekly trash cleanup is enabled (default: true).
 	AutoDeleteWeeklyTrash bool
 
@@ -229,6 +235,16 @@ func LoadFromEnv() (*Config, error) {
 		fileDelTime = "30m"
 	}
 
+	fastDLTime := strings.TrimSpace(os.Getenv("AUTO_DELETE_FAST_DOWNLOAD_TIME"))
+	if fastDLTime == "" {
+		fastDLTime = "5m"
+	}
+
+	fastDLExpiry := strings.TrimSpace(os.Getenv("FAST_DOWNLOAD_LINK_EXPIRY"))
+	if fastDLExpiry == "" {
+		fastDLExpiry = "30m"
+	}
+
 	weeklyTrash := true
 	if rawTrash := strings.TrimSpace(os.Getenv("AUTO_DELETE_WEEKLY_TRASH")); rawTrash != "" {
 		weeklyTrash = strings.EqualFold(rawTrash, "true") || rawTrash == "1"
@@ -311,8 +327,10 @@ func LoadFromEnv() (*Config, error) {
 		EnableSync:               enableSync,
 		CustomCaption:            customCaption,
 		FSubChannelDescription:   fsubDesc,
-		AutoDeleteFilterTime:     filterDelTime,
-		AutoDeleteFileTime:       fileDelTime,
+		AutoDeleteFilterTime:       filterDelTime,
+		AutoDeleteFileTime:         fileDelTime,
+		AutoDeleteFastDownloadTime: fastDLTime,
+		FastDownloadLinkExpiry:     fastDLExpiry,
 		AutoDeleteWeeklyTrash:    weeklyTrash,
 		TrashRetentionDays:       trashRetentionDays,
 		StreamServerEnabled:      streamServerEnabled,

@@ -79,11 +79,22 @@ func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
 				if m == nil || p.appCtx == nil || p.appCtx.Config == nil {
 					return false
 				}
-				if !m.IsPrivate() {
+				if m.Chat != nil && m.Chat.ID < 0 {
 					return false
 				}
-				senderID := m.SenderID()
-				if !p.appCtx.Config.IsAdmin(senderID) && !p.appCtx.Config.IsOwner(senderID) {
+				if m.Message != nil && m.Message.PeerID != nil {
+					switch m.Message.PeerID.(type) {
+					case *telegram.PeerChannel, *telegram.PeerChat:
+						return false
+					}
+				}
+				var senderID int64
+				if m.Sender != nil && m.Sender.ID != 0 {
+					senderID = m.Sender.ID
+				} else if m.Message != nil {
+					senderID = m.SenderID()
+				}
+				if senderID == 0 || (!p.appCtx.Config.IsAdmin(senderID) && !p.appCtx.Config.IsOwner(senderID)) {
 					return false
 				}
 				if !m.IsForward() && (m.Message == nil || m.Message.FwdFrom == nil) {

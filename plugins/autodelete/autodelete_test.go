@@ -31,6 +31,9 @@ func (m *mockAutoDeleteService) ScheduleFilterDelete(chatID int64, messageID int
 func (m *mockAutoDeleteService) ScheduleFileDelete(chatID int64, messageID int32) error {
 	return nil
 }
+func (m *mockAutoDeleteService) ScheduleFastDownloadDelete(chatID int64, messageID int32) error {
+	return nil
+}
 func (m *mockAutoDeleteService) TrackSentMessage(chatID int64, messageID int32, msgType string) error {
 	return nil
 }
@@ -43,6 +46,10 @@ func (m *mockAutoDeleteService) SetFilterDuration(ctx context.Context, d time.Du
 }
 func (m *mockAutoDeleteService) SetFileDuration(ctx context.Context, d time.Duration) error {
 	m.settings.FileDeleteDuration = d
+	return nil
+}
+func (m *mockAutoDeleteService) SetFastDownloadDuration(ctx context.Context, d time.Duration) error {
+	m.settings.FastDownloadDeleteDuration = d
 	return nil
 }
 func (m *mockAutoDeleteService) SetWeeklyTrash(ctx context.Context, enabled bool) error {

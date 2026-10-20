@@ -113,6 +113,19 @@ func (p *Plugin) handleAutoDel(m *telegram.NewMessage) error {
 			_, replyErr := m.Reply(fmt.Sprintf("✅ <b>File Auto-Delete Updated:</b> <code>%s</code>", coreAutoDel.FormatDuration(d)), &telegram.SendOptions{ParseMode: "html"})
 			return replyErr
 
+		case "fastdl", "fastdownload", "dl":
+			d, err := coreAutoDel.ParseDuration(val)
+			if err != nil {
+				_, replyErr := m.Reply(fmt.Sprintf("❌ <b>Invalid Duration:</b> <code>%s</code>\n\nUse e.g. <code>5m</code>, <code>10m</code>, <code>30m</code>, or <code>0</code> to disable.", val), &telegram.SendOptions{ParseMode: "html"})
+				return replyErr
+			}
+			if err := p.service.SetFastDownloadDuration(ctx, d); err != nil {
+				_, replyErr := m.Reply(fmt.Sprintf("❌ Error updating fast download duration: <code>%s</code>", err.Error()), &telegram.SendOptions{ParseMode: "html"})
+				return replyErr
+			}
+			_, replyErr := m.Reply(fmt.Sprintf("✅ <b>Fast Download Auto-Delete Updated:</b> <code>%s</code>", coreAutoDel.FormatDuration(d)), &telegram.SendOptions{ParseMode: "html"})
+			return replyErr
+
 		case "weekly", "trash":
 			enabled := strings.EqualFold(val, "on") || strings.EqualFold(val, "true") || val == "1" || strings.EqualFold(val, "enable")
 			if err := p.service.SetWeeklyTrash(ctx, enabled); err != nil {
@@ -159,6 +172,7 @@ func (p *Plugin) handleAutoDel(m *telegram.NewMessage) error {
 		"🗑️ <b><u>AUTO-DELETE & WEEKLY TRASH CONTROLS</u></b> 🗑️\n\n"+
 			"🔍 <b>Filter Auto-Delete:</b> <code>%s</code>\n"+
 			"📁 <b>File Auto-Delete:</b> <code>%s</code>\n"+
+			"⚡ <b>Fast Download Auto-Delete:</b> <code>%s</code>\n"+
 			"♻️ <b>Weekly Trash:</b> <code>%s</code> (Retention: %d days)\n\n"+
 			"📊 <b><u>Database & Operations Status:</u></b>\n"+
 			"• <b>Pending Auto-Deletions:</b> <code>%d</code> (survives restarts)\n"+
@@ -167,11 +181,13 @@ func (p *Plugin) handleAutoDel(m *telegram.NewMessage) error {
 			"⚙️ <b><u>Configuration Commands:</u></b>\n"+
 			"• <code>/autodel filter &lt;time&gt;</code> - Set search results deletion timer (e.g. <code>10m</code>, <code>30m</code>, <code>0</code>)\n"+
 			"• <code>/autodel file &lt;time&gt;</code> - Set delivered files deletion timer (e.g. <code>30m</code>, <code>1h</code>, <code>0</code>)\n"+
+			"• <code>/autodel fastdl &lt;time&gt;</code> - Set fast download messages deletion timer (e.g. <code>5m</code>, <code>10m</code>, <code>0</code>)\n"+
 			"• <code>/autodel weekly &lt;on/off&gt;</code> - Toggle weekly trash cleaner\n"+
 			"• <code>/autodel retention &lt;days&gt;</code> - Set trash retention days (e.g. <code>7</code>)\n"+
 			"• <code>/clean_trash</code> - Manually trigger trash cleanup now",
 		coreAutoDel.FormatDuration(settings.FilterDeleteDuration),
 		coreAutoDel.FormatDuration(settings.FileDeleteDuration),
+		coreAutoDel.FormatDuration(settings.FastDownloadDeleteDuration),
 		weeklyStatus,
 		settings.TrashRetentionDays,
 		stats.PendingDeletionsCount,

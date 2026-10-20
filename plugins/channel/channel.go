@@ -271,7 +271,7 @@ func extractFileName(doc *telegram.DocumentObj) string {
 	return ""
 }
 
-var reCaptionPrefix = regexp.MustCompile(`(?i)^(?:\s*📂?\s*f[iɪ]l[eᴇ]\s*n[aᴀ]m[eᴇ]\s*[:\-~|]?\s*|\s*📁?\s*n[aᴀ]m[eᴇ]\s*[:\-~|]?\s*|\s*t[iɪ]tl[eᴇ]\s*[:\-~|]?\s*)`)
+var reCaptionPrefix = regexp.MustCompile(`(?i)^(?:\s*[\x{1F4C1}\x{1F4C2}]?\s*[fF][iIɪ][lLʟ][eEᴇ]\s*[nNɴ][aAᴀ][mMᴍ][eEᴇ]\s*[:\-~|]?\s*|\s*[\x{1F4C1}\x{1F4C2}]?\s*[nNɴ][aAᴀ][mMᴍ][eEᴇ]\s*[:\-~|]?\s*|\s*[tT][iIɪ][tT][lLʟ][eEᴇ]\s*[:\-~|]?\s*)`)
 
 func cleanCaptionTitle(caption string) string {
 	if strings.TrimSpace(caption) == "" {
