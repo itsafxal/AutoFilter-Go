@@ -21,7 +21,7 @@ type Syncer struct {
 // NewSyncer constructs a new Syncer.
 func NewSyncer(dbManager *DBManager, mediaRepo *mongodb.MediaRepository, logger *slog.Logger, batchSize int) *Syncer {
 	if batchSize <= 0 {
-		batchSize = 1000
+		batchSize = 10000
 	}
 	return &Syncer{
 		dbManager: dbManager,

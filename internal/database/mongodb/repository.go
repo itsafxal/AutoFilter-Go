@@ -335,7 +335,7 @@ func (r *MediaRepository) StreamShard(ctx context.Context, shardIndex int, callb
 	}
 
 	opts := options.Find().
-		SetBatchSize(1000)
+		SetBatchSize(10000)
 
 	var cursor *mongo.Cursor
 	var err error
