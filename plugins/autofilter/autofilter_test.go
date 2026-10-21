@@ -328,12 +328,15 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 			PageButtonEmojiID:         5837048052061311256,
 			QualityButtonEmojiID:      5276251908774858442,
 			LanguageButtonEmojiID:     5276011261757265100,
-			FastDownloadButtonEmojiID: 5992513524440502236,
+			FastDownloadButtonEmojiID: 5195033767969839232,
+			GreetingPrefixEmojiID:     5472055112702629499,
 			GreetingEmojiID:           5427232022252764138,
 			QueryEmojiID:              5190859184312167965,
 			PageTextEmojiID:           5836954069586946866,
 			NotePrefixEmojiID:         4956461073550017373,
 			NoteSuffixEmojiID:         4958724224962265918,
+			NoteExpireEmojiID:         5440660757194744323,
+			BotNameEmojiID:            6104631352190043951,
 			FileSizePrefixEmojiID:     5992513524440502236,
 			FileSizeSuffixEmojiID:     5992519984071315160,
 		},
@@ -471,19 +474,22 @@ func TestAutofilter_Pagination_PremiumEmoji_Disabled(t *testing.T) {
 func TestAutofilter_MessageText_PremiumEmoji(t *testing.T) {
 	appCtx := &plugins.AppContext{
 		Config: &config.Config{
-			EnablePremiumEmoji:   true,
-			GreetingEmojiID:      5427232022252764138,
-			QueryEmojiID:         5190859184312167965,
-			PageTextEmojiID:      5836954069586946866,
-			NotePrefixEmojiID:    4956461073550017373,
-			NoteSuffixEmojiID:    4958724224962265918,
-			AutoDeleteFilterTime: "15m",
+			EnablePremiumEmoji:    true,
+			GreetingPrefixEmojiID: 5472055112702629499,
+			GreetingEmojiID:       5427232022252764138,
+			QueryEmojiID:          5190859184312167965,
+			PageTextEmojiID:       5836954069586946866,
+			NotePrefixEmojiID:     4956461073550017373,
+			NoteSuffixEmojiID:     4958724224962265918,
+			NoteExpireEmojiID:     5440660757194744323,
+			BotNameEmojiID:        6104631352190043951,
+			AutoDeleteFilterTime:  "15m",
 		},
 	}
 	plugin := New(appCtx)
 
 	text := plugin.formatResultText("User", "KGF", 1, 8, 24, "PandaBot")
-	if !strings.Contains(text, `𝗛𝗘𝗬 👋 User <emoji id="5427232022252764138">🫶</emoji>`) {
+	if !strings.Contains(text, `𝗛𝗘𝗬 <emoji id="5472055112702629499">👋</emoji> User <emoji id="5427232022252764138">🫶</emoji>`) {
 		t.Errorf("expected greeting with emoji tag, got:\n%s", text)
 	}
 	if !strings.Contains(text, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
@@ -492,24 +498,33 @@ func TestAutofilter_MessageText_PremiumEmoji(t *testing.T) {
 	if !strings.Contains(text, `<emoji id="5836954069586946866">🗓️</emoji> Page No › 1`) {
 		t.Errorf("expected page line with emoji tag, got:\n%s", text)
 	}
-	if !strings.Contains(text, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji> This Message Will Be Auto Deleted Within 15 Mins ❗️</blockquote>`) {
+	if !strings.Contains(text, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji> This Message Will Be Auto Deleted Within 15 Mins <emoji id="5440660757194744323">❗️</emoji></blockquote>`) {
 		t.Errorf("expected note line with emoji tags, got:\n%s", text)
+	}
+	if !strings.Contains(text, `©PandaBot <emoji id="6104631352190043951">🗡️</emoji>`) {
+		t.Errorf("expected bot name line with emoji tag, got:\n%s", text)
 	}
 
 	langText := plugin.formatLanguagesMenuText("KGF", "PandaBot")
 	if !strings.Contains(langText, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
 		t.Errorf("expected languages menu with query emoji tag, got:\n%s", langText)
 	}
-	if !strings.Contains(langText, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji>`) {
+	if !strings.Contains(langText, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji> This Message Will Be Auto Deleted Within 15 Mins <emoji id="5440660757194744323">❗️</emoji></blockquote>`) {
 		t.Errorf("expected languages menu with note emoji tags, got:\n%s", langText)
+	}
+	if !strings.Contains(langText, `©PandaBot <emoji id="6104631352190043951">🗡️</emoji>`) {
+		t.Errorf("expected languages menu with bot emoji tag, got:\n%s", langText)
 	}
 
 	qualText := plugin.formatQualitiesMenuText("KGF", "PandaBot")
 	if !strings.Contains(qualText, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
 		t.Errorf("expected qualities menu with query emoji tag, got:\n%s", qualText)
 	}
-	if !strings.Contains(qualText, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji>`) {
+	if !strings.Contains(qualText, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji> This Message Will Be Auto Deleted Within 15 Mins <emoji id="5440660757194744323">❗️</emoji></blockquote>`) {
 		t.Errorf("expected qualities menu with note emoji tags, got:\n%s", qualText)
+	}
+	if !strings.Contains(qualText, `©PandaBot <emoji id="6104631352190043951">🗡️</emoji>`) {
+		t.Errorf("expected qualities menu with bot emoji tag, got:\n%s", qualText)
 	}
 }
 

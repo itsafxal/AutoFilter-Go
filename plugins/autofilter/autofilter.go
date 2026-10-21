@@ -1138,6 +1138,17 @@ func (p *Plugin) getLanguageEmojiID() int64 {
 	return 5276011261757265100
 }
 
+func (p *Plugin) getGreetingPrefixEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.GreetingPrefixEmojiID != 0 {
+		return p.appCtx.Config.GreetingPrefixEmojiID
+	}
+	return 5472055112702629499
+}
+
+func (p *Plugin) getGreetingSuffixEmojiID() int64 {
+	return p.getGreetingEmojiID()
+}
+
 func (p *Plugin) getGreetingEmojiID() int64 {
 	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.GreetingEmojiID != 0 {
 		return p.appCtx.Config.GreetingEmojiID
@@ -1171,6 +1182,20 @@ func (p *Plugin) getNoteSuffixEmojiID() int64 {
 		return p.appCtx.Config.NoteSuffixEmojiID
 	}
 	return 4958724224962265918
+}
+
+func (p *Plugin) getNoteExpireEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.NoteExpireEmojiID != 0 {
+		return p.appCtx.Config.NoteExpireEmojiID
+	}
+	return 5440660757194744323
+}
+
+func (p *Plugin) getBotNameEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.BotNameEmojiID != 0 {
+		return p.appCtx.Config.BotNameEmojiID
+	}
+	return 6104631352190043951
 }
 
 func (p *Plugin) getFileSizePrefixEmojiID() int64 {
@@ -1368,11 +1393,14 @@ func (p *Plugin) formatResultText(userMention, query string, page, totalPages in
 	if p.isPremiumEmojiEnabled() {
 		return formatResultTextPremium(
 			userMention, query, page, totalPages, totalResults, botName, deleteMins,
-			p.getGreetingEmojiID(),
+			p.getGreetingPrefixEmojiID(),
+			p.getGreetingSuffixEmojiID(),
 			p.getQueryEmojiID(),
 			p.getPageTextEmojiID(),
 			p.getNotePrefixEmojiID(),
 			p.getNoteSuffixEmojiID(),
+			p.getNoteExpireEmojiID(),
+			p.getBotNameEmojiID(),
 		)
 	}
 	return formatResultText(userMention, query, page, totalPages, totalResults, botName, deleteMins)
@@ -1407,7 +1435,10 @@ func formatResultText(userMention, query string, page, totalPages int, totalResu
 	)
 }
 
-func formatResultTextPremium(userMention, query string, page, totalPages int, totalResults int64, botName string, deleteMins int, greetID, queryID, pageID, notePrefixID, noteSuffixID int64) string {
+func formatResultTextPremium(
+	userMention, query string, page, totalPages int, totalResults int64, botName string, deleteMins int,
+	greetPrefixID, greetSuffixID, queryID, pageID, notePrefixID, noteSuffixID, noteExpireID, botNameEmojiID int64,
+) string {
 	if userMention == "" {
 		userMention = "User"
 	}
@@ -1422,14 +1453,15 @@ func formatResultTextPremium(userMention, query string, page, totalPages int, to
 	}
 
 	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s <emoji id=\"%d\">🫶</emoji>\n"+
+		"𝗛𝗘𝗬 <emoji id=\"%d\">👋</emoji> %s <emoji id=\"%d\">🫶</emoji>\n"+
 			"    \n"+
 			"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
 			"<emoji id=\"%d\">🗓️</emoji> Page No › %d\n\n"+
-			"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
-			"©%s 🗡️",
+			"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
+			"©%s <emoji id=\"%d\">🗡️</emoji>",
+		greetPrefixID,
 		userMention,
-		greetID,
+		greetSuffixID,
 		queryID,
 		html.EscapeString(query),
 		pageID,
@@ -1437,7 +1469,9 @@ func formatResultTextPremium(userMention, query string, page, totalPages int, to
 		notePrefixID,
 		noteSuffixID,
 		deleteMins,
+		noteExpireID,
 		html.EscapeString(botName),
+		botNameEmojiID,
 	)
 }
 
@@ -1447,14 +1481,16 @@ func (p *Plugin) formatLanguagesMenuText(query string, botName string) string {
 		return fmt.Sprintf(
 			"🌐 <b>Select Desired Language</b>\n\n"+
 				"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
-				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
-				"©%s 🗡️",
+				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
+				"©%s <emoji id=\"%d\">🗡️</emoji>",
 			p.getQueryEmojiID(),
 			html.EscapeString(query),
 			p.getNotePrefixEmojiID(),
 			p.getNoteSuffixEmojiID(),
 			deleteMins,
+			p.getNoteExpireEmojiID(),
 			html.EscapeString(botName),
+			p.getBotNameEmojiID(),
 		)
 	}
 	return formatLanguagesMenuText(query, botName, deleteMins)
@@ -1481,14 +1517,16 @@ func (p *Plugin) formatQualitiesMenuText(query string, botName string) string {
 		return fmt.Sprintf(
 			"🎞 <b>Select Desired Quality</b>\n\n"+
 				"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
-				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
-				"©%s 🗡️",
+				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
+				"©%s <emoji id=\"%d\">🗡️</emoji>",
 			p.getQueryEmojiID(),
 			html.EscapeString(query),
 			p.getNotePrefixEmojiID(),
 			p.getNoteSuffixEmojiID(),
 			deleteMins,
+			p.getNoteExpireEmojiID(),
 			html.EscapeString(botName),
+			p.getBotNameEmojiID(),
 		)
 	}
 	return formatQualitiesMenuText(query, botName, deleteMins)

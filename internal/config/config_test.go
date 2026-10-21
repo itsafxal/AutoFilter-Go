@@ -540,8 +540,11 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if cfg.LanguageButtonEmojiID != 5276011261757265100 {
 		t.Errorf("expected default LanguageButtonEmojiID 5276011261757265100, got %d", cfg.LanguageButtonEmojiID)
 	}
-	if cfg.FastDownloadButtonEmojiID != 5992513524440502236 {
-		t.Errorf("expected default FastDownloadButtonEmojiID 5992513524440502236, got %d", cfg.FastDownloadButtonEmojiID)
+	if cfg.FastDownloadButtonEmojiID != 5195033767969839232 {
+		t.Errorf("expected default FastDownloadButtonEmojiID 5195033767969839232, got %d", cfg.FastDownloadButtonEmojiID)
+	}
+	if cfg.GreetingPrefixEmojiID != 5472055112702629499 {
+		t.Errorf("expected default GreetingPrefixEmojiID 5472055112702629499, got %d", cfg.GreetingPrefixEmojiID)
 	}
 	if cfg.GreetingEmojiID != 5427232022252764138 {
 		t.Errorf("expected default GreetingEmojiID 5427232022252764138, got %d", cfg.GreetingEmojiID)
@@ -558,6 +561,12 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if cfg.NoteSuffixEmojiID != 4958724224962265918 {
 		t.Errorf("expected default NoteSuffixEmojiID 4958724224962265918, got %d", cfg.NoteSuffixEmojiID)
 	}
+	if cfg.NoteExpireEmojiID != 5440660757194744323 {
+		t.Errorf("expected default NoteExpireEmojiID 5440660757194744323, got %d", cfg.NoteExpireEmojiID)
+	}
+	if cfg.BotNameEmojiID != 6104631352190043951 {
+		t.Errorf("expected default BotNameEmojiID 6104631352190043951, got %d", cfg.BotNameEmojiID)
+	}
 	if cfg.FileSizePrefixEmojiID != 5992513524440502236 {
 		t.Errorf("expected default FileSizePrefixEmojiID 5992513524440502236, got %d", cfg.FileSizePrefixEmojiID)
 	}
@@ -573,11 +582,14 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	os.Setenv("QUALITY_BUTTON_EMOJI_ID", "222")
 	os.Setenv("LANGUAGE_BUTTON_EMOJI_ID", "333")
 	os.Setenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID", "444")
+	os.Setenv("GREETING_PREFIX_EMOJI_ID", "554")
 	os.Setenv("GREETING_EMOJI_ID", "555")
 	os.Setenv("QUERY_EMOJI_ID", "666")
 	os.Setenv("PAGE_TEXT_EMOJI_ID", "777")
 	os.Setenv("NOTE_PREFIX_EMOJI_ID", "888")
 	os.Setenv("NOTE_SUFFIX_EMOJI_ID", "999")
+	os.Setenv("NOTE_EXPIRE_EMOJI_ID", "1111")
+	os.Setenv("BOT_NAME_EMOJI_ID", "2222")
 	os.Setenv("FILE_SIZE_PREFIX_EMOJI_ID", "1010")
 	os.Setenv("FILE_SIZE_SUFFIX_EMOJI_ID", "2020")
 
@@ -606,6 +618,9 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if cfg2.FastDownloadButtonEmojiID != 444 {
 		t.Errorf("expected FastDownloadButtonEmojiID 444, got %d", cfg2.FastDownloadButtonEmojiID)
 	}
+	if cfg2.GreetingPrefixEmojiID != 554 {
+		t.Errorf("expected GreetingPrefixEmojiID 554, got %d", cfg2.GreetingPrefixEmojiID)
+	}
 	if cfg2.GreetingEmojiID != 555 {
 		t.Errorf("expected GreetingEmojiID 555, got %d", cfg2.GreetingEmojiID)
 	}
@@ -620,6 +635,12 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	}
 	if cfg2.NoteSuffixEmojiID != 999 {
 		t.Errorf("expected NoteSuffixEmojiID 999, got %d", cfg2.NoteSuffixEmojiID)
+	}
+	if cfg2.NoteExpireEmojiID != 1111 {
+		t.Errorf("expected NoteExpireEmojiID 1111, got %d", cfg2.NoteExpireEmojiID)
+	}
+	if cfg2.BotNameEmojiID != 2222 {
+		t.Errorf("expected BotNameEmojiID 2222, got %d", cfg2.BotNameEmojiID)
 	}
 	if cfg2.FileSizePrefixEmojiID != 1010 {
 		t.Errorf("expected FileSizePrefixEmojiID 1010, got %d", cfg2.FileSizePrefixEmojiID)

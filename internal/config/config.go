@@ -139,10 +139,13 @@ type Config struct {
 	// LanguageButtonEmojiID defines the Telegram custom emoji ID for the Language button (default: 5276011261757265100).
 	LanguageButtonEmojiID int64
 
-	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 5992513524440502236).
+	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 5195033767969839232).
 	FastDownloadButtonEmojiID int64
 
-	// GreetingEmojiID defines the Telegram custom emoji ID for the greeting in result text (default: 5427232022252764138).
+	// GreetingPrefixEmojiID defines the Telegram custom emoji ID after 'Hey' in result text (default: 5472055112702629499).
+	GreetingPrefixEmojiID int64
+
+	// GreetingEmojiID defines the Telegram custom emoji ID after user mention in result text (default: 5427232022252764138).
 	GreetingEmojiID int64
 
 	// QueryEmojiID defines the Telegram custom emoji ID for the Query line (default: 5190859184312167965).
@@ -156,6 +159,12 @@ type Config struct {
 
 	// NoteSuffixEmojiID defines the Telegram custom emoji ID after NOTE in message text (default: 4958724224962265918).
 	NoteSuffixEmojiID int64
+
+	// NoteExpireEmojiID defines the Telegram custom emoji ID after expiration time in NOTE (default: 5440660757194744323).
+	NoteExpireEmojiID int64
+
+	// BotNameEmojiID defines the Telegram custom emoji ID after bot name in result text (default: 6104631352190043951).
+	BotNameEmojiID int64
 
 	// FileSizePrefixEmojiID defines the Telegram custom emoji ID before file size on file buttons (default: 5992513524440502236).
 	FileSizePrefixEmojiID int64
@@ -399,10 +408,21 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
-	fastDownloadButtonEmojiID := int64(5992513524440502236)
+	fastDownloadButtonEmojiID := int64(5195033767969839232)
 	if s := strings.TrimSpace(os.Getenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID")); s != "" {
 		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
 			fastDownloadButtonEmojiID = val
+		}
+	}
+
+	greetingPrefixEmojiID := int64(5472055112702629499)
+	if s := strings.TrimSpace(os.Getenv("GREETING_PREFIX_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			greetingPrefixEmojiID = val
+		}
+	} else if s := strings.TrimSpace(os.Getenv("HEY_PREFIX_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			greetingPrefixEmojiID = val
 		}
 	}
 
@@ -450,6 +470,28 @@ func LoadFromEnv() (*Config, error) {
 	} else if s := strings.TrimSpace(os.Getenv("WARN_EMOJI_ID")); s != "" {
 		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
 			noteSuffixEmojiID = val
+		}
+	}
+
+	noteExpireEmojiID := int64(5440660757194744323)
+	if s := strings.TrimSpace(os.Getenv("NOTE_EXPIRE_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			noteExpireEmojiID = val
+		}
+	} else if s := strings.TrimSpace(os.Getenv("EXPIRE_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			noteExpireEmojiID = val
+		}
+	}
+
+	botNameEmojiID := int64(6104631352190043951)
+	if s := strings.TrimSpace(os.Getenv("BOT_NAME_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			botNameEmojiID = val
+		}
+	} else if s := strings.TrimSpace(os.Getenv("BOT_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			botNameEmojiID = val
 		}
 	}
 
@@ -506,11 +548,14 @@ func LoadFromEnv() (*Config, error) {
 		QualityButtonEmojiID:     qualityButtonEmojiID,
 		LanguageButtonEmojiID:    languageButtonEmojiID,
 		FastDownloadButtonEmojiID: fastDownloadButtonEmojiID,
+		GreetingPrefixEmojiID:    greetingPrefixEmojiID,
 		GreetingEmojiID:          greetingEmojiID,
 		QueryEmojiID:             queryEmojiID,
 		PageTextEmojiID:          pageTextEmojiID,
 		NotePrefixEmojiID:        notePrefixEmojiID,
 		NoteSuffixEmojiID:        noteSuffixEmojiID,
+		NoteExpireEmojiID:        noteExpireEmojiID,
+		BotNameEmojiID:           botNameEmojiID,
 		FileSizePrefixEmojiID:    fileSizePrefixEmojiID,
 		FileSizeSuffixEmojiID:    fileSizeSuffixEmojiID,
 		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
