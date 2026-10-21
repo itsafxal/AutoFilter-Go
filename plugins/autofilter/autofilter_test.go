@@ -322,9 +322,20 @@ func TestAutofilter_Pagination_SinglePage(t *testing.T) {
 func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 	appCtx := &plugins.AppContext{
 		Config: &config.Config{
-			EnablePremiumEmoji: true,
-			PrevButtonEmojiID:  5989806303474618304,
-			NextButtonEmojiID:  5992261405565260004,
+			EnablePremiumEmoji:        true,
+			PrevButtonEmojiID:         5989806303474618304,
+			NextButtonEmojiID:         5992261405565260004,
+			PageButtonEmojiID:         5837048052061311256,
+			QualityButtonEmojiID:      5276251908774858442,
+			LanguageButtonEmojiID:     5276011261757265100,
+			FastDownloadButtonEmojiID: 5195033767969839232,
+			GreetingEmojiID:           5427232022252764138,
+			QueryEmojiID:              5190859184312167965,
+			PageTextEmojiID:           5836954069586946866,
+			NotePrefixEmojiID:         4956461073550017373,
+			NoteSuffixEmojiID:         4958724224962265918,
+			FileSizePrefixEmojiID:     5992513524440502236,
+			FileSizeSuffixEmojiID:     5992519984071315160,
 		},
 	}
 	plugin := New(appCtx)
@@ -332,12 +343,42 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 		{FileID: "f1", FileName: "Vikram.2022.Tamil.1080p.mkv", Size: "1.4 GB"},
 	}
 
-	// Page 2 of 8: should have Previous (with Icon and empty text) + Page + Next (with Icon and empty text)
+	// Page 2 of 8: should have Languages/Quality row + File row (with Icon) + Previous/Page/Next row
 	kb := plugin.buildResultKeyboard(files, "key1", 2, 8, false)
 	if kb == nil || len(kb.Rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(kb.Rows))
 	}
 
+	// 1. Language & Quality buttons
+	headerRow := kb.Rows[0].Buttons
+	if len(headerRow) != 2 {
+		t.Fatalf("expected 2 header buttons, got %d", len(headerRow))
+	}
+	langBtn := headerRow[0].(*telegram.KeyboardButtonCallback)
+	qualBtn := headerRow[1].(*telegram.KeyboardButtonCallback)
+	if langBtn.Text != "Language" {
+		t.Errorf("expected 'Language', got %q", langBtn.Text)
+	}
+	if langBtn.Style == nil || langBtn.Style.Icon != 5276011261757265100 {
+		t.Errorf("expected Language icon 5276011261757265100, got %v", langBtn.Style)
+	}
+	if qualBtn.Text != "Quality" {
+		t.Errorf("expected 'Quality', got %q", qualBtn.Text)
+	}
+	if qualBtn.Style == nil || qualBtn.Style.Icon != 5276251908774858442 {
+		t.Errorf("expected Quality icon 5276251908774858442, got %v", qualBtn.Style)
+	}
+
+	// 2. File button: with prefix icon and clean label
+	fileBtn := kb.Rows[1].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if fileBtn.Style == nil || fileBtn.Style.Icon != 5992513524440502236 {
+		t.Errorf("expected File icon 5992513524440502236, got %v", fileBtn.Style)
+	}
+	if strings.HasPrefix(fileBtn.Text, "🔸") {
+		t.Errorf("expected file button with custom icon to not start with 🔸, got %q", fileBtn.Text)
+	}
+
+	// 3. Navigation row
 	navRow := kb.Rows[2].Buttons
 	if len(navRow) != 3 {
 		t.Fatalf("expected 3 nav buttons on middle page, got %d", len(navRow))
@@ -357,12 +398,15 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 		t.Errorf("expected Previous button Icon to be 5989806303474618304, got %v", prevBtn.Style.Icon)
 	}
 
-	// Page button: normal text, Danger style
-	if pageBtn.Text != "📄 Page 2 / 8" {
-		t.Errorf("expected '📄 Page 2 / 8', got %q", pageBtn.Text)
+	// Page button: "page 2/8", custom emoji ID, Danger style
+	if pageBtn.Text != "page 2/8" {
+		t.Errorf("expected 'page 2/8', got %q", pageBtn.Text)
 	}
 	if pageBtn.Style == nil || !pageBtn.Style.BgDanger {
 		t.Errorf("expected page indicator on page > 1 to be Danger (Red)")
+	}
+	if pageBtn.Style == nil || pageBtn.Style.Icon != 5837048052061311256 {
+		t.Errorf("expected Page button Icon to be 5837048052061311256, got %v", pageBtn.Style.Icon)
 	}
 
 	// Next button: empty text, custom emoji ID, Success style (Green)
@@ -391,15 +435,81 @@ func TestAutofilter_Pagination_PremiumEmoji_Disabled(t *testing.T) {
 	}
 
 	kb := plugin.buildResultKeyboard(files, "key1", 2, 8, false)
+	// Header row
+	langBtn := kb.Rows[0].Buttons[0].(*telegram.KeyboardButtonCallback)
+	qualBtn := kb.Rows[0].Buttons[1].(*telegram.KeyboardButtonCallback)
+	if langBtn.Text != "🌐 Languages" || (langBtn.Style != nil && langBtn.Style.Icon != 0) {
+		t.Errorf("expected '🌐 Languages' without icon when disabled, got %q", langBtn.Text)
+	}
+	if qualBtn.Text != "🎞 Quality" || (qualBtn.Style != nil && qualBtn.Style.Icon != 0) {
+		t.Errorf("expected '🎞 Quality' without icon when disabled, got %q", qualBtn.Text)
+	}
+
+	// File row
+	fileBtn := kb.Rows[1].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if !strings.HasPrefix(fileBtn.Text, "🔸") || (fileBtn.Style != nil && fileBtn.Style.Icon != 0) {
+		t.Errorf("expected file button with 🔸 and no icon when disabled, got %q", fileBtn.Text)
+	}
+
+	// Nav row
 	navRow := kb.Rows[2].Buttons
 	prevBtn := navRow[0].(*telegram.KeyboardButtonCallback)
+	pageBtn := navRow[1].(*telegram.KeyboardButtonCallback)
 	nextBtn := navRow[2].(*telegram.KeyboardButtonCallback)
 
 	if prevBtn.Text != "◀ Previous" {
 		t.Errorf("expected fallback '◀ Previous' when disabled, got %q", prevBtn.Text)
 	}
+	if pageBtn.Text != "📄 Page 2 / 8" {
+		t.Errorf("expected fallback '📄 Page 2 / 8' when disabled, got %q", pageBtn.Text)
+	}
 	if nextBtn.Text != "Next ▶" {
 		t.Errorf("expected fallback 'Next ▶' when disabled, got %q", nextBtn.Text)
+	}
+}
+
+func TestAutofilter_MessageText_PremiumEmoji(t *testing.T) {
+	appCtx := &plugins.AppContext{
+		Config: &config.Config{
+			EnablePremiumEmoji:   true,
+			GreetingEmojiID:      5427232022252764138,
+			QueryEmojiID:         5190859184312167965,
+			PageTextEmojiID:      5836954069586946866,
+			NotePrefixEmojiID:    4956461073550017373,
+			NoteSuffixEmojiID:    4958724224962265918,
+			AutoDeleteFilterTime: "15m",
+		},
+	}
+	plugin := New(appCtx)
+
+	text := plugin.formatResultText("User", "KGF", 1, 8, 24, "PandaBot")
+	if !strings.Contains(text, `𝗛𝗘𝗬 👋 User <emoji id="5427232022252764138">🫶</emoji>`) {
+		t.Errorf("expected greeting with emoji tag, got:\n%s", text)
+	}
+	if !strings.Contains(text, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
+		t.Errorf("expected query line with emoji tag, got:\n%s", text)
+	}
+	if !strings.Contains(text, `<emoji id="5836954069586946866">🗓️</emoji> Page No › 1`) {
+		t.Errorf("expected page line with emoji tag, got:\n%s", text)
+	}
+	if !strings.Contains(text, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji> This Message Will Be Auto Deleted Within 15 Mins ❗️</blockquote>`) {
+		t.Errorf("expected note line with emoji tags, got:\n%s", text)
+	}
+
+	langText := plugin.formatLanguagesMenuText("KGF", "PandaBot")
+	if !strings.Contains(langText, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
+		t.Errorf("expected languages menu with query emoji tag, got:\n%s", langText)
+	}
+	if !strings.Contains(langText, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji>`) {
+		t.Errorf("expected languages menu with note emoji tags, got:\n%s", langText)
+	}
+
+	qualText := plugin.formatQualitiesMenuText("KGF", "PandaBot")
+	if !strings.Contains(qualText, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
+		t.Errorf("expected qualities menu with query emoji tag, got:\n%s", qualText)
+	}
+	if !strings.Contains(qualText, `<blockquote><emoji id="4956461073550017373">✍️</emoji> NOTE : <emoji id="4958724224962265918">⚠️</emoji>`) {
+		t.Errorf("expected qualities menu with note emoji tags, got:\n%s", qualText)
 	}
 }
 

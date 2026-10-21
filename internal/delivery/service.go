@@ -47,6 +47,9 @@ type MediaDeliveryService interface {
 	// SetAdminConfig configures administrative targets for operations like file reference refreshing.
 	SetAdminConfig(ownerID int64, admins []int64)
 
+	// SetPremiumEmojiConfig configures premium emoji support and custom emoji ID for fast download buttons.
+	SetPremiumEmojiConfig(enable bool, emojiID int64)
+
 	// RefreshFileRef re-fetches a fresh Telegram file reference by sending the media silently and immediately deleting it.
 	RefreshFileRef(ctx context.Context, fileID string) (any, error)
 
@@ -56,16 +59,18 @@ type MediaDeliveryService interface {
 
 // Service implements MediaDeliveryService.
 type Service struct {
-	db               *database.DatabaseManager
-	sender           TelegramSender
-	senderMu         sync.RWMutex
-	logger             *slog.Logger
-	inFlight           *InFlightTracker
-	captionFormatter   CaptionFormatter
-	streamURL          string
-	enableFastDownload bool
-	ownerID            int64
-	admins             []int64
+	db                  *database.DatabaseManager
+	sender              TelegramSender
+	senderMu            sync.RWMutex
+	logger              *slog.Logger
+	inFlight            *InFlightTracker
+	captionFormatter    CaptionFormatter
+	streamURL           string
+	enableFastDownload  bool
+	enablePremiumEmoji  bool
+	fastDownloadEmojiID int64
+	ownerID             int64
+	admins              []int64
 }
 
 // NewService constructs a new media delivery service.
@@ -74,10 +79,12 @@ func NewService(db *database.DatabaseManager, logger *slog.Logger) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		db:                 db,
-		logger:             logger,
-		inFlight:           NewInFlightTracker(30 * time.Second),
-		enableFastDownload: true,
+		db:                  db,
+		logger:              logger,
+		inFlight:            NewInFlightTracker(30 * time.Second),
+		enableFastDownload:  true,
+		enablePremiumEmoji:  true,
+		fastDownloadEmojiID: 5195033767969839232,
 	}
 }
 
@@ -97,6 +104,12 @@ func (s *Service) SetCaptionFormatter(cf CaptionFormatter) {
 func (s *Service) SetStreamConfig(streamURL string, enableFastDownload bool) {
 	s.streamURL = strings.TrimRight(strings.TrimSpace(streamURL), "/")
 	s.enableFastDownload = enableFastDownload
+}
+
+// SetPremiumEmojiConfig configures premium emoji support and custom emoji ID for fast download button.
+func (s *Service) SetPremiumEmojiConfig(enable bool, emojiID int64) {
+	s.enablePremiumEmoji = enable
+	s.fastDownloadEmojiID = emojiID
 }
 
 // SetAdminConfig configures administrative targets for operations like file reference refreshing.
@@ -349,10 +362,18 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 
 	var replyMarkup telegram.ReplyMarkup
 	if enableBtn {
+		var btn *telegram.KeyboardButtonCallback
+		if s.enablePremiumEmoji {
+			emojiID := s.fastDownloadEmojiID
+			if emojiID == 0 {
+				emojiID = 5195033767969839232
+			}
+			btn = telegram.Button.Data("Fast Download ⚡", fmt.Sprintf("fast_download#%s", cleanID)).Icon(emojiID).Danger()
+		} else {
+			btn = telegram.Button.Data("⚡ Fast Download", fmt.Sprintf("fast_download#%s", cleanID)).Danger()
+		}
 		replyMarkup = telegram.NewKeyboard().
-			AddRow(
-				telegram.Button.Data("⚡ Fast Download", fmt.Sprintf("fast_download#%s", cleanID)).Danger(),
-			).
+			AddRow(btn).
 			Build()
 	}
 

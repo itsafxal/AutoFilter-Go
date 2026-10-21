@@ -667,6 +667,49 @@ func TestDelivery_FastDownloadButton(t *testing.T) {
 	if res.MessageID != 9999 {
 		t.Errorf("expected messageID 9999 after fallback, got %d", res.MessageID)
 	}
+
+	// 4. Test premium emoji icon and label for Fast Download button
+	svc.SetPremiumEmojiConfig(true, 5195033767969839232)
+	mock.fallbackErr = nil
+	_, err = svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
+	if err != nil {
+		t.Fatalf("Deliver failed: %v", err)
+	}
+	if mock.lastOpts == nil || mock.lastOpts.ReplyMarkup == nil {
+		t.Fatal("expected ReplyMarkup with Fast Download button attached, got nil")
+	}
+	kb, ok := mock.lastOpts.ReplyMarkup.(*telegram.ReplyInlineMarkup)
+	if !ok || len(kb.Rows) == 0 || len(kb.Rows[0].Buttons) == 0 {
+		t.Fatalf("expected valid ReplyInlineMarkup, got %v", mock.lastOpts.ReplyMarkup)
+	}
+	dlBtn, ok := kb.Rows[0].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if !ok {
+		t.Fatalf("expected KeyboardButtonCallback, got %T", kb.Rows[0].Buttons[0])
+	}
+	if dlBtn.Text != "Fast Download ⚡" {
+		t.Errorf("expected button text 'Fast Download ⚡', got %q", dlBtn.Text)
+	}
+	if dlBtn.Style == nil || dlBtn.Style.Icon != 5195033767969839232 {
+		t.Errorf("expected custom emoji icon 5195033767969839232, got %v", dlBtn.Style)
+	}
+	if dlBtn.Style == nil || !dlBtn.Style.BgDanger {
+		t.Errorf("expected Danger (Red) style on fast download button")
+	}
+
+	// When disabled, fallback to standard text and no icon
+	svc.SetPremiumEmojiConfig(false, 0)
+	_, err = svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
+	if err != nil {
+		t.Fatalf("Deliver failed: %v", err)
+	}
+	kbDisabled := mock.lastOpts.ReplyMarkup.(*telegram.ReplyInlineMarkup)
+	dlBtnDisabled := kbDisabled.Rows[0].Buttons[0].(*telegram.KeyboardButtonCallback)
+	if dlBtnDisabled.Text != "⚡ Fast Download" {
+		t.Errorf("expected button text '⚡ Fast Download', got %q", dlBtnDisabled.Text)
+	}
+	if dlBtnDisabled.Style != nil && dlBtnDisabled.Style.Icon != 0 {
+		t.Errorf("expected no custom emoji icon when disabled, got %v", dlBtnDisabled.Style.Icon)
+	}
 }
 
 

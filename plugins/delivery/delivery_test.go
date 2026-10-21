@@ -60,6 +60,8 @@ func (m *mockDeliveryService) SetCaptionFormatter(cf deliveryCore.CaptionFormatt
 
 func (m *mockDeliveryService) SetAdminConfig(ownerID int64, admins []int64) {}
 
+func (m *mockDeliveryService) SetPremiumEmojiConfig(enable bool, emojiID int64) {}
+
 func (m *mockDeliveryService) RefreshFileRef(ctx context.Context, fileID string) (any, error) {
 	return nil, nil
 }

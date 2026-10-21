@@ -121,14 +121,47 @@ type Config struct {
 	// EnableFastDownloadButton specifies whether the "⚡ Get Fast Download" button is added to delivered media (default: true).
 	EnableFastDownloadButton bool
 
-	// EnablePremiumEmoji specifies whether custom emoji IDs are used for search pagination buttons (default: true).
+	// EnablePremiumEmoji specifies whether custom emoji IDs are used for buttons and messages (default: true).
 	EnablePremiumEmoji bool
 
-	// PrevButtonEmojiID defines the Telegram custom emoji ID for the Previous button (default: 5989806303474618304).
+	// PrevButtonEmojiID defines the Telegram custom emoji ID for the Previous button (default: 5447183459602669338).
 	PrevButtonEmojiID int64
 
-	// NextButtonEmojiID defines the Telegram custom emoji ID for the Next button (default: 5992261405565260004).
+	// NextButtonEmojiID defines the Telegram custom emoji ID for the Next button (default: 5449683594425410231).
 	NextButtonEmojiID int64
+
+	// PageButtonEmojiID defines the Telegram custom emoji ID for the Page indicator button (default: 5837048052061311256).
+	PageButtonEmojiID int64
+
+	// QualityButtonEmojiID defines the Telegram custom emoji ID for the Quality button (default: 5276251908774858442).
+	QualityButtonEmojiID int64
+
+	// LanguageButtonEmojiID defines the Telegram custom emoji ID for the Language button (default: 5276011261757265100).
+	LanguageButtonEmojiID int64
+
+	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 5195033767969839232).
+	FastDownloadButtonEmojiID int64
+
+	// GreetingEmojiID defines the Telegram custom emoji ID for the greeting in result text (default: 5427232022252764138).
+	GreetingEmojiID int64
+
+	// QueryEmojiID defines the Telegram custom emoji ID for the Query line (default: 5190859184312167965).
+	QueryEmojiID int64
+
+	// PageTextEmojiID defines the Telegram custom emoji ID for the Page line in message text (default: 5836954069586946866).
+	PageTextEmojiID int64
+
+	// NotePrefixEmojiID defines the Telegram custom emoji ID before NOTE in message text (default: 4956461073550017373).
+	NotePrefixEmojiID int64
+
+	// NoteSuffixEmojiID defines the Telegram custom emoji ID after NOTE in message text (default: 4958724224962265918).
+	NoteSuffixEmojiID int64
+
+	// FileSizePrefixEmojiID defines the Telegram custom emoji ID before file size on file buttons (default: 5992513524440502236).
+	FileSizePrefixEmojiID int64
+
+	// FileSizeSuffixEmojiID defines the Telegram custom emoji ID after file size on file buttons (default: 5992519984071315160).
+	FileSizeSuffixEmojiID int64
 }
 
 
@@ -331,17 +364,106 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
-	prevEmojiID := int64(5989806303474618304)
+	prevEmojiID := int64(5447183459602669338)
 	if pEmojiStr := strings.TrimSpace(os.Getenv("PREV_BUTTON_EMOJI_ID")); pEmojiStr != "" {
 		if val, err := strconv.ParseInt(pEmojiStr, 10, 64); err == nil && val != 0 {
 			prevEmojiID = val
 		}
 	}
 
-	nextEmojiID := int64(5992261405565260004)
+	nextEmojiID := int64(5449683594425410231)
 	if nEmojiStr := strings.TrimSpace(os.Getenv("NEXT_BUTTON_EMOJI_ID")); nEmojiStr != "" {
 		if val, err := strconv.ParseInt(nEmojiStr, 10, 64); err == nil && val != 0 {
 			nextEmojiID = val
+		}
+	}
+
+	pageButtonEmojiID := int64(5837048052061311256)
+	if s := strings.TrimSpace(os.Getenv("PAGE_BUTTON_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			pageButtonEmojiID = val
+		}
+	}
+
+	qualityButtonEmojiID := int64(5276251908774858442)
+	if s := strings.TrimSpace(os.Getenv("QUALITY_BUTTON_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			qualityButtonEmojiID = val
+		}
+	}
+
+	languageButtonEmojiID := int64(5276011261757265100)
+	if s := strings.TrimSpace(os.Getenv("LANGUAGE_BUTTON_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			languageButtonEmojiID = val
+		}
+	}
+
+	fastDownloadButtonEmojiID := int64(5195033767969839232)
+	if s := strings.TrimSpace(os.Getenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			fastDownloadButtonEmojiID = val
+		}
+	}
+
+	greetingEmojiID := int64(5427232022252764138)
+	if s := strings.TrimSpace(os.Getenv("GREETING_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			greetingEmojiID = val
+		}
+	} else if s := strings.TrimSpace(os.Getenv("HEY_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			greetingEmojiID = val
+		}
+	}
+
+	queryEmojiID := int64(5190859184312167965)
+	if s := strings.TrimSpace(os.Getenv("QUERY_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			queryEmojiID = val
+		}
+	}
+
+	pageTextEmojiID := int64(5836954069586946866)
+	if s := strings.TrimSpace(os.Getenv("PAGE_TEXT_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			pageTextEmojiID = val
+		}
+	}
+
+	notePrefixEmojiID := int64(4956461073550017373)
+	if s := strings.TrimSpace(os.Getenv("NOTE_PREFIX_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			notePrefixEmojiID = val
+		}
+	} else if s := strings.TrimSpace(os.Getenv("NOTE_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			notePrefixEmojiID = val
+		}
+	}
+
+	noteSuffixEmojiID := int64(4958724224962265918)
+	if s := strings.TrimSpace(os.Getenv("NOTE_SUFFIX_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			noteSuffixEmojiID = val
+		}
+	} else if s := strings.TrimSpace(os.Getenv("WARN_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			noteSuffixEmojiID = val
+		}
+	}
+
+	fileSizePrefixEmojiID := int64(5992513524440502236)
+	if s := strings.TrimSpace(os.Getenv("FILE_SIZE_PREFIX_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			fileSizePrefixEmojiID = val
+		}
+	}
+
+	fileSizeSuffixEmojiID := int64(5992519984071315160)
+	if s := strings.TrimSpace(os.Getenv("FILE_SIZE_SUFFIX_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			fileSizeSuffixEmojiID = val
 		}
 	}
 
@@ -380,6 +502,17 @@ func LoadFromEnv() (*Config, error) {
 		EnablePremiumEmoji:       enablePremiumEmoji,
 		PrevButtonEmojiID:        prevEmojiID,
 		NextButtonEmojiID:        nextEmojiID,
+		PageButtonEmojiID:        pageButtonEmojiID,
+		QualityButtonEmojiID:     qualityButtonEmojiID,
+		LanguageButtonEmojiID:    languageButtonEmojiID,
+		FastDownloadButtonEmojiID: fastDownloadButtonEmojiID,
+		GreetingEmojiID:          greetingEmojiID,
+		QueryEmojiID:             queryEmojiID,
+		PageTextEmojiID:          pageTextEmojiID,
+		NotePrefixEmojiID:        notePrefixEmojiID,
+		NoteSuffixEmojiID:        noteSuffixEmojiID,
+		FileSizePrefixEmojiID:    fileSizePrefixEmojiID,
+		FileSizeSuffixEmojiID:    fileSizeSuffixEmojiID,
 		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
 	}
 

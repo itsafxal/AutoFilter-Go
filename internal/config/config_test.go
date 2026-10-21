@@ -503,6 +503,18 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 		os.Unsetenv("ENABLE_PREMIUM_EMOJI")
 		os.Unsetenv("PREV_BUTTON_EMOJI_ID")
 		os.Unsetenv("NEXT_BUTTON_EMOJI_ID")
+		os.Unsetenv("PAGE_BUTTON_EMOJI_ID")
+		os.Unsetenv("QUALITY_BUTTON_EMOJI_ID")
+		os.Unsetenv("LANGUAGE_BUTTON_EMOJI_ID")
+		os.Unsetenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID")
+		os.Unsetenv("GREETING_EMOJI_ID")
+		os.Unsetenv("HEY_EMOJI_ID")
+		os.Unsetenv("QUERY_EMOJI_ID")
+		os.Unsetenv("PAGE_TEXT_EMOJI_ID")
+		os.Unsetenv("NOTE_PREFIX_EMOJI_ID")
+		os.Unsetenv("NOTE_SUFFIX_EMOJI_ID")
+		os.Unsetenv("FILE_SIZE_PREFIX_EMOJI_ID")
+		os.Unsetenv("FILE_SIZE_SUFFIX_EMOJI_ID")
 	}()
 
 	// Defaults
@@ -513,17 +525,61 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if !cfg.EnablePremiumEmoji {
 		t.Errorf("expected EnablePremiumEmoji to default to true")
 	}
-	if cfg.PrevButtonEmojiID != 5989806303474618304 {
-		t.Errorf("expected default PrevButtonEmojiID 5989806303474618304, got %d", cfg.PrevButtonEmojiID)
+	if cfg.PrevButtonEmojiID != 5447183459602669338 {
+		t.Errorf("expected default PrevButtonEmojiID 5447183459602669338, got %d", cfg.PrevButtonEmojiID)
 	}
-	if cfg.NextButtonEmojiID != 5992261405565260004 {
-		t.Errorf("expected default NextButtonEmojiID 5992261405565260004, got %d", cfg.NextButtonEmojiID)
+	if cfg.NextButtonEmojiID != 5449683594425410231 {
+		t.Errorf("expected default NextButtonEmojiID 5449683594425410231, got %d", cfg.NextButtonEmojiID)
+	}
+	if cfg.PageButtonEmojiID != 5837048052061311256 {
+		t.Errorf("expected default PageButtonEmojiID 5837048052061311256, got %d", cfg.PageButtonEmojiID)
+	}
+	if cfg.QualityButtonEmojiID != 5276251908774858442 {
+		t.Errorf("expected default QualityButtonEmojiID 5276251908774858442, got %d", cfg.QualityButtonEmojiID)
+	}
+	if cfg.LanguageButtonEmojiID != 5276011261757265100 {
+		t.Errorf("expected default LanguageButtonEmojiID 5276011261757265100, got %d", cfg.LanguageButtonEmojiID)
+	}
+	if cfg.FastDownloadButtonEmojiID != 5195033767969839232 {
+		t.Errorf("expected default FastDownloadButtonEmojiID 5195033767969839232, got %d", cfg.FastDownloadButtonEmojiID)
+	}
+	if cfg.GreetingEmojiID != 5427232022252764138 {
+		t.Errorf("expected default GreetingEmojiID 5427232022252764138, got %d", cfg.GreetingEmojiID)
+	}
+	if cfg.QueryEmojiID != 5190859184312167965 {
+		t.Errorf("expected default QueryEmojiID 5190859184312167965, got %d", cfg.QueryEmojiID)
+	}
+	if cfg.PageTextEmojiID != 5836954069586946866 {
+		t.Errorf("expected default PageTextEmojiID 5836954069586946866, got %d", cfg.PageTextEmojiID)
+	}
+	if cfg.NotePrefixEmojiID != 4956461073550017373 {
+		t.Errorf("expected default NotePrefixEmojiID 4956461073550017373, got %d", cfg.NotePrefixEmojiID)
+	}
+	if cfg.NoteSuffixEmojiID != 4958724224962265918 {
+		t.Errorf("expected default NoteSuffixEmojiID 4958724224962265918, got %d", cfg.NoteSuffixEmojiID)
+	}
+	if cfg.FileSizePrefixEmojiID != 5992513524440502236 {
+		t.Errorf("expected default FileSizePrefixEmojiID 5992513524440502236, got %d", cfg.FileSizePrefixEmojiID)
+	}
+	if cfg.FileSizeSuffixEmojiID != 5992519984071315160 {
+		t.Errorf("expected default FileSizeSuffixEmojiID 5992519984071315160, got %d", cfg.FileSizeSuffixEmojiID)
 	}
 
 	// Custom values
 	os.Setenv("ENABLE_PREMIUM_EMOJI", "false")
 	os.Setenv("PREV_BUTTON_EMOJI_ID", "12345")
 	os.Setenv("NEXT_BUTTON_EMOJI_ID", "67890")
+	os.Setenv("PAGE_BUTTON_EMOJI_ID", "111")
+	os.Setenv("QUALITY_BUTTON_EMOJI_ID", "222")
+	os.Setenv("LANGUAGE_BUTTON_EMOJI_ID", "333")
+	os.Setenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID", "444")
+	os.Setenv("GREETING_EMOJI_ID", "555")
+	os.Setenv("QUERY_EMOJI_ID", "666")
+	os.Setenv("PAGE_TEXT_EMOJI_ID", "777")
+	os.Setenv("NOTE_PREFIX_EMOJI_ID", "888")
+	os.Setenv("NOTE_SUFFIX_EMOJI_ID", "999")
+	os.Setenv("FILE_SIZE_PREFIX_EMOJI_ID", "1010")
+	os.Setenv("FILE_SIZE_SUFFIX_EMOJI_ID", "2020")
 
 	cfg2, err := LoadFromEnv()
 	if err != nil {
@@ -537,6 +593,39 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	}
 	if cfg2.NextButtonEmojiID != 67890 {
 		t.Errorf("expected NextButtonEmojiID 67890, got %d", cfg2.NextButtonEmojiID)
+	}
+	if cfg2.PageButtonEmojiID != 111 {
+		t.Errorf("expected PageButtonEmojiID 111, got %d", cfg2.PageButtonEmojiID)
+	}
+	if cfg2.QualityButtonEmojiID != 222 {
+		t.Errorf("expected QualityButtonEmojiID 222, got %d", cfg2.QualityButtonEmojiID)
+	}
+	if cfg2.LanguageButtonEmojiID != 333 {
+		t.Errorf("expected LanguageButtonEmojiID 333, got %d", cfg2.LanguageButtonEmojiID)
+	}
+	if cfg2.FastDownloadButtonEmojiID != 444 {
+		t.Errorf("expected FastDownloadButtonEmojiID 444, got %d", cfg2.FastDownloadButtonEmojiID)
+	}
+	if cfg2.GreetingEmojiID != 555 {
+		t.Errorf("expected GreetingEmojiID 555, got %d", cfg2.GreetingEmojiID)
+	}
+	if cfg2.QueryEmojiID != 666 {
+		t.Errorf("expected QueryEmojiID 666, got %d", cfg2.QueryEmojiID)
+	}
+	if cfg2.PageTextEmojiID != 777 {
+		t.Errorf("expected PageTextEmojiID 777, got %d", cfg2.PageTextEmojiID)
+	}
+	if cfg2.NotePrefixEmojiID != 888 {
+		t.Errorf("expected NotePrefixEmojiID 888, got %d", cfg2.NotePrefixEmojiID)
+	}
+	if cfg2.NoteSuffixEmojiID != 999 {
+		t.Errorf("expected NoteSuffixEmojiID 999, got %d", cfg2.NoteSuffixEmojiID)
+	}
+	if cfg2.FileSizePrefixEmojiID != 1010 {
+		t.Errorf("expected FileSizePrefixEmojiID 1010, got %d", cfg2.FileSizePrefixEmojiID)
+	}
+	if cfg2.FileSizeSuffixEmojiID != 2020 {
+		t.Errorf("expected FileSizeSuffixEmojiID 2020, got %d", cfg2.FileSizeSuffixEmojiID)
 	}
 }
 

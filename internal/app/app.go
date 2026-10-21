@@ -50,6 +50,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	dbManager := database.NewDatabaseManager(cfg, logger)
 	deliveryService := delivery.NewService(dbManager, logger)
 	deliveryService.SetStreamConfig(cfg.StreamURL, cfg.EnableFastDownloadButton)
+	deliveryService.SetPremiumEmojiConfig(cfg.EnablePremiumEmoji, cfg.FastDownloadButtonEmojiID)
 
 	searchService := search.NewService(dbManager, logger)
 	fsubRepo := fsub.NewRepositoryWithProvider(dbManager.MongoPrimaryDB)

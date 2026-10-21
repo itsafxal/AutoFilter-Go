@@ -288,7 +288,20 @@ func (p *Plugin) buildFastDownloadKeyboard(downloadURL string) *telegram.ReplyIn
 		return nil
 	}
 
-	dlBtn := telegram.Button.URL("⚡ Fast Download", downloadURL)
+	btnText := "⚡ Fast Download"
+	var emojiID int64
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.EnablePremiumEmoji {
+		btnText = "Fast Download ⚡"
+		emojiID = p.appCtx.Config.FastDownloadButtonEmojiID
+		if emojiID == 0 {
+			emojiID = 5195033767969839232
+		}
+	}
+
+	dlBtn := telegram.Button.URL(btnText, downloadURL)
+	if emojiID != 0 {
+		dlBtn = dlBtn.Icon(emojiID)
+	}
 	style := "green"
 	if p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.FastDownloadButtonStyle != "" {
 		style = strings.ToLower(strings.TrimSpace(p.appCtx.Config.FastDownloadButtonStyle))

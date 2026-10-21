@@ -975,6 +975,10 @@ func extractFileMetadata(fileName, caption string) (lang string, qual string, cl
 }
 
 func formatFileButtonLabel(f search.MediaFile) string {
+	return formatFileButtonLabelCustom(f, false)
+}
+
+func formatFileButtonLabelCustom(f search.MediaFile, hasIcon bool) string {
 	size := strings.TrimSpace(f.Size)
 	if size == "" && f.FileSize > 0 {
 		size = formatBytes(f.FileSize)
@@ -988,8 +992,12 @@ func formatFileButtonLabel(f search.MediaFile) string {
 		cleanTitle = strings.TrimSpace(f.FileName)
 	}
 
-	// Format: 🔸 {file_size} ▫️ {name} {quality}
-	prefix := "🔸 " + size + " ▫️ "
+	var prefix string
+	if hasIcon {
+		prefix = size + " ▫️ "
+	} else {
+		prefix = "🔸 " + size + " ▫️ "
+	}
 
 	var details []string
 	if cleanTitle != "" {
@@ -1099,14 +1107,84 @@ func (p *Plugin) getPrevEmojiID() int64 {
 	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.PrevButtonEmojiID != 0 {
 		return p.appCtx.Config.PrevButtonEmojiID
 	}
-	return 5989806303474618304
+	return 5447183459602669338
 }
 
 func (p *Plugin) getNextEmojiID() int64 {
 	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.NextButtonEmojiID != 0 {
 		return p.appCtx.Config.NextButtonEmojiID
 	}
-	return 5992261405565260004
+	return 5449683594425410231
+}
+
+func (p *Plugin) getPageButtonEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.PageButtonEmojiID != 0 {
+		return p.appCtx.Config.PageButtonEmojiID
+	}
+	return 5837048052061311256
+}
+
+func (p *Plugin) getQualityEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.QualityButtonEmojiID != 0 {
+		return p.appCtx.Config.QualityButtonEmojiID
+	}
+	return 5276251908774858442
+}
+
+func (p *Plugin) getLanguageEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.LanguageButtonEmojiID != 0 {
+		return p.appCtx.Config.LanguageButtonEmojiID
+	}
+	return 5276011261757265100
+}
+
+func (p *Plugin) getGreetingEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.GreetingEmojiID != 0 {
+		return p.appCtx.Config.GreetingEmojiID
+	}
+	return 5427232022252764138
+}
+
+func (p *Plugin) getQueryEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.QueryEmojiID != 0 {
+		return p.appCtx.Config.QueryEmojiID
+	}
+	return 5190859184312167965
+}
+
+func (p *Plugin) getPageTextEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.PageTextEmojiID != 0 {
+		return p.appCtx.Config.PageTextEmojiID
+	}
+	return 5836954069586946866
+}
+
+func (p *Plugin) getNotePrefixEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.NotePrefixEmojiID != 0 {
+		return p.appCtx.Config.NotePrefixEmojiID
+	}
+	return 4956461073550017373
+}
+
+func (p *Plugin) getNoteSuffixEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.NoteSuffixEmojiID != 0 {
+		return p.appCtx.Config.NoteSuffixEmojiID
+	}
+	return 4958724224962265918
+}
+
+func (p *Plugin) getFileSizePrefixEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.FileSizePrefixEmojiID != 0 {
+		return p.appCtx.Config.FileSizePrefixEmojiID
+	}
+	return 5992513524440502236
+}
+
+func (p *Plugin) getFileSizeSuffixEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.FileSizeSuffixEmojiID != 0 {
+		return p.appCtx.Config.FileSizeSuffixEmojiID
+	}
+	return 5992519984071315160
 }
 
 func (p *Plugin) buildPrevButton(searchKey string, prevOffset int) *telegram.KeyboardButtonCallback {
@@ -1129,15 +1207,27 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 	kb := telegram.NewKeyboard()
 
 	// 1. Languages and Quality header row (Blue color)
-	kb.AddRow(
-		telegram.Button.Data("🌐 Languages", fmt.Sprintf("languages#%s", searchKey)).Primary(),
-		telegram.Button.Data("🎞 Quality", fmt.Sprintf("qualities#%s", searchKey)).Primary(),
-	)
+	if p.isPremiumEmojiEnabled() {
+		kb.AddRow(
+			telegram.Button.Data("Language", fmt.Sprintf("languages#%s", searchKey)).Icon(p.getLanguageEmojiID()).Primary(),
+			telegram.Button.Data("Quality", fmt.Sprintf("qualities#%s", searchKey)).Icon(p.getQualityEmojiID()).Primary(),
+		)
+	} else {
+		kb.AddRow(
+			telegram.Button.Data("🌐 Languages", fmt.Sprintf("languages#%s", searchKey)).Primary(),
+			telegram.Button.Data("🎞 Quality", fmt.Sprintf("qualities#%s", searchKey)).Primary(),
+		)
+	}
 
 	// 2. File list rows (1 button per file)
 	for _, f := range files {
-		fileLabel := formatFileButtonLabel(f)
-		kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)))
+		if p.isPremiumEmojiEnabled() {
+			fileLabel := formatFileButtonLabelCustom(f, true)
+			kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)).Icon(p.getFileSizePrefixEmojiID()))
+		} else {
+			fileLabel := formatFileButtonLabel(f)
+			kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)))
+		}
 	}
 
 	// 3. Navigation row
@@ -1161,12 +1251,20 @@ func (p *Plugin) buildResultKeyboard(files []search.MediaFile, searchKey string,
 
 	// Page indicator button: always present
 	// Green on page 1, Red on subsequent pages (currentPage > 1)
-	pageLabel := fmt.Sprintf("📄 Page %d / %d", currentPage, totalPages)
-	if currentPage > 1 {
-		navButtons = append(navButtons, telegram.Button.Data(pageLabel, "pages").Danger())
+	var pageBtn *telegram.KeyboardButtonCallback
+	if p.isPremiumEmojiEnabled() {
+		pageLabel := fmt.Sprintf("page %d/%d", currentPage, totalPages)
+		pageBtn = telegram.Button.Data(pageLabel, "pages").Icon(p.getPageButtonEmojiID())
 	} else {
-		navButtons = append(navButtons, telegram.Button.Data(pageLabel, "pages").Success())
+		pageLabel := fmt.Sprintf("📄 Page %d / %d", currentPage, totalPages)
+		pageBtn = telegram.Button.Data(pageLabel, "pages")
 	}
+	if currentPage > 1 {
+		pageBtn = pageBtn.Danger()
+	} else {
+		pageBtn = pageBtn.Success()
+	}
+	navButtons = append(navButtons, pageBtn)
 
 	// Next button: only when currentPage < totalPages (Green color)
 	if currentPage < totalPages {
@@ -1267,6 +1365,16 @@ func (p *Plugin) getUserMentionForSession(sess *searchSession, sender *telegram.
 
 func (p *Plugin) formatResultText(userMention, query string, page, totalPages int, totalResults int64, botName string) string {
 	deleteMins := p.getFilterDeleteMinutes()
+	if p.isPremiumEmojiEnabled() {
+		return formatResultTextPremium(
+			userMention, query, page, totalPages, totalResults, botName, deleteMins,
+			p.getGreetingEmojiID(),
+			p.getQueryEmojiID(),
+			p.getPageTextEmojiID(),
+			p.getNotePrefixEmojiID(),
+			p.getNoteSuffixEmojiID(),
+		)
+	}
 	return formatResultText(userMention, query, page, totalPages, totalResults, botName, deleteMins)
 }
 
@@ -1299,8 +1407,56 @@ func formatResultText(userMention, query string, page, totalPages int, totalResu
 	)
 }
 
+func formatResultTextPremium(userMention, query string, page, totalPages int, totalResults int64, botName string, deleteMins int, greetID, queryID, pageID, notePrefixID, noteSuffixID int64) string {
+	if userMention == "" {
+		userMention = "User"
+	}
+	if page < 1 {
+		page = 1
+	}
+	if deleteMins <= 0 {
+		deleteMins = 15
+	}
+	if botName == "" {
+		botName = "Bot"
+	}
+
+	return fmt.Sprintf(
+		"𝗛𝗘𝗬 👋 %s <emoji id=\"%d\">🫶</emoji>\n"+
+			"    \n"+
+			"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
+			"<emoji id=\"%d\">🗓️</emoji> Page No › %d\n\n"+
+			"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
+			"©%s 🗡️",
+		userMention,
+		greetID,
+		queryID,
+		html.EscapeString(query),
+		pageID,
+		page,
+		notePrefixID,
+		noteSuffixID,
+		deleteMins,
+		html.EscapeString(botName),
+	)
+}
+
 func (p *Plugin) formatLanguagesMenuText(query string, botName string) string {
 	deleteMins := p.getFilterDeleteMinutes()
+	if p.isPremiumEmojiEnabled() {
+		return fmt.Sprintf(
+			"🌐 <b>Select Desired Language</b>\n\n"+
+				"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
+				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
+				"©%s 🗡️",
+			p.getQueryEmojiID(),
+			html.EscapeString(query),
+			p.getNotePrefixEmojiID(),
+			p.getNoteSuffixEmojiID(),
+			deleteMins,
+			html.EscapeString(botName),
+		)
+	}
 	return formatLanguagesMenuText(query, botName, deleteMins)
 }
 
@@ -1321,6 +1477,20 @@ func formatLanguagesMenuText(query string, botName string, deleteMins int) strin
 
 func (p *Plugin) formatQualitiesMenuText(query string, botName string) string {
 	deleteMins := p.getFilterDeleteMinutes()
+	if p.isPremiumEmojiEnabled() {
+		return fmt.Sprintf(
+			"🎞 <b>Select Desired Quality</b>\n\n"+
+				"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
+				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
+				"©%s 🗡️",
+			p.getQueryEmojiID(),
+			html.EscapeString(query),
+			p.getNotePrefixEmojiID(),
+			p.getNoteSuffixEmojiID(),
+			deleteMins,
+			html.EscapeString(botName),
+		)
+	}
 	return formatQualitiesMenuText(query, botName, deleteMins)
 }
 
