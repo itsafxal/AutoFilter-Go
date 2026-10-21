@@ -18,7 +18,8 @@ import (
 // FSubService defines the force subscribe operations required across plugins.
 type FSubService interface {
 	BuildDynamicFSubKeyboard(ctx context.Context, client *telegram.Client, userID int64, fileID string) (*telegram.ReplyInlineMarkup, []int64)
-	CheckLoopSubDynamic(ctx context.Context, client *telegram.Client, userID int64, chatID int64, promptMsgID int32, fileID string) bool
+	BuildDynamicFSubKeyboardForChannels(ctx context.Context, client *telegram.Client, userID int64, targetChannels []int64) (*telegram.ReplyInlineMarkup, []int64)
+	CheckLoopSubDynamic(ctx context.Context, client *telegram.Client, userID int64, chatID int64, promptMsgID int32, fileID string, requiredChannels ...int64) bool
 	CheckChannelMembership(ctx context.Context, client *telegram.Client, userID int64, channelID int64, slot int) bool
 	Init(ctx context.Context, client *telegram.Client, botID int64) error
 }

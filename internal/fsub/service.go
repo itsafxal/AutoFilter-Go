@@ -274,8 +274,91 @@ func (s *Service) BuildDynamicFSubKeyboard(ctx context.Context, client *telegram
 	return markup, unjoined
 }
 
+// BuildDynamicFSubKeyboardForChannels constructs the Force Subscribe keyboard dynamically
+// only for a specific subset of target channels (e.g. Channel 1 & 2 for first movie, Channel 3 for next movie).
+func (s *Service) BuildDynamicFSubKeyboardForChannels(
+	ctx context.Context,
+	client *telegram.Client,
+	userID int64,
+	targetChannels []int64,
+) (*telegram.ReplyInlineMarkup, []int64) {
+	if s.cfg.IsAdmin(userID) || s.cfg.IsOwner(userID) {
+		return nil, nil
+	}
+
+	s.mu.RLock()
+	ch1 := s.loadout.Channel1
+	ch2 := s.loadout.Channel2
+	ch3 := s.loadout.Channel3
+	l1 := s.link1
+	l2 := s.link2
+	l3 := s.link3
+	s.mu.RUnlock()
+
+	targetSet := make(map[int64]bool, len(targetChannels))
+	for _, ch := range targetChannels {
+		targetSet[ch] = true
+	}
+
+	var unjoined []int64
+	var buttons [][]telegram.KeyboardButton
+
+	if targetSet[ch1] && ch1 != 0 {
+		if !s.CheckChannelMembership(ctx, client, userID, ch1, 1) {
+			unjoined = append(unjoined, ch1)
+			link := l1
+			if link == "" && client != nil {
+				link, _ = s.generateInviteLink(client, ch1)
+			}
+			buttons = append(buttons, []telegram.KeyboardButton{
+				telegram.Button.URL("💐 Rᴇǫᴜᴇsᴛ Tᴏ Jᴏɪɴ Cʜᴀɴɴᴇʟ 1 💐", link),
+			})
+		}
+	}
+
+	if targetSet[ch2] && ch2 != 0 {
+		if !s.CheckChannelMembership(ctx, client, userID, ch2, 2) {
+			unjoined = append(unjoined, ch2)
+			link := l2
+			if link == "" && client != nil {
+				link, _ = s.generateInviteLink(client, ch2)
+			}
+			buttons = append(buttons, []telegram.KeyboardButton{
+				telegram.Button.URL("⚡ RᴇǫᴜESᴛ Tᴏ Jᴏɪɴ Cʜᴀɴɴᴇʟ 2 ⚡", link),
+			})
+		}
+	}
+
+	if targetSet[ch3] && ch3 != 0 {
+		if !s.CheckChannelMembership(ctx, client, userID, ch3, 3) {
+			unjoined = append(unjoined, ch3)
+			link := l3
+			if link == "" && client != nil {
+				link, _ = s.generateInviteLink(client, ch3)
+			}
+			buttons = append(buttons, []telegram.KeyboardButton{
+				telegram.Button.URL("♦️ RᴇǫᴜESᴛ Tᴏ Jᴏɪɴ Cʜᴀɴɴᴇʟ 3 ♦️", link),
+			})
+		}
+	}
+
+	if len(buttons) == 0 {
+		return nil, nil
+	}
+
+	builder := telegram.NewKeyboard()
+	for _, row := range buttons {
+		builder.AddRow(row...)
+	}
+	builder.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger())
+	markup := builder.Build()
+	return markup, unjoined
+}
+
 // CheckLoopSubDynamic runs the background verification loop.
 // Updates promptMsg reply markup dynamically only when channel status changes.
+// When requiredChannels are provided, it only verifies and updates those channels
+// (ensuring Channel 3 is not appended mid-session if the user was fulfilling Channel 1 & 2).
 // Returns true when all channels are joined (or join requests sent), eliminating the need for a manual "Try Again" button.
 func (s *Service) CheckLoopSubDynamic(
 	parentCtx context.Context,
@@ -284,6 +367,7 @@ func (s *Service) CheckLoopSubDynamic(
 	chatID int64,
 	promptMsgID int32,
 	fileID string,
+	requiredChannels ...int64,
 ) bool {
 	loopCtx, cancel := s.taskTracker.Acquire(parentCtx, userID)
 	defer s.taskTracker.Release(userID)
@@ -301,7 +385,15 @@ func (s *Service) CheckLoopSubDynamic(
 		default:
 		}
 
-		markup, unjoined := s.BuildDynamicFSubKeyboard(loopCtx, client, userID, fileID)
+		var markup *telegram.ReplyInlineMarkup
+		var unjoined []int64
+
+		if len(requiredChannels) > 0 {
+			markup, unjoined = s.BuildDynamicFSubKeyboardForChannels(loopCtx, client, userID, requiredChannels)
+		} else {
+			markup, unjoined = s.BuildDynamicFSubKeyboard(loopCtx, client, userID, fileID)
+		}
+
 		if len(unjoined) == 0 {
 			return true
 		}

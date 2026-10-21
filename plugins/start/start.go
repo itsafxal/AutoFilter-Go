@@ -378,7 +378,7 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 							}
 
 							// Seamless refresh background loop: dynamically updates markup & auto-delivers once joined without needing a Try Again button
-							checkSuccess := p.appCtx.FSub.CheckLoopSubDynamic(context.Background(), p.appCtx.Client, userID, m.ChatID(), promptMsgID, payload)
+							checkSuccess := p.appCtx.FSub.CheckLoopSubDynamic(context.Background(), p.appCtx.Client, userID, m.ChatID(), promptMsgID, payload, unjoined...)
 							if checkSuccess {
 								if p.appCtx.Client != nil && promptMsgID != 0 {
 									_, _ = p.appCtx.Client.DeleteMessages(m.ChatID(), []int32{promptMsgID})
