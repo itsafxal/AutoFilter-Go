@@ -1033,16 +1033,22 @@ func canonicalQuality(raw string) string {
 }
 
 func extractFileMetadata(fileName, caption string) (lang string, qual string, cleanTitle string) {
-	text := fileName + " " + caption
-
-	// 1. Language
-	if match := reLangMatch.FindString(text); match != "" {
+	// 1. Language: prioritize filename over caption
+	if match := reLangMatch.FindString(fileName); match != "" {
+		lang = canonicalLanguage(match)
+	} else if match := reLangMatch.FindString(caption); match != "" {
 		lang = canonicalLanguage(match)
 	}
 
-	// 2. Quality
-	res := reResolution.FindString(text)
-	rip := reRip.FindString(text)
+	// 2. Quality: prioritize filename over caption
+	res := reResolution.FindString(fileName)
+	rip := reRip.FindString(fileName)
+	if res == "" {
+		res = reResolution.FindString(caption)
+	}
+	if rip == "" {
+		rip = reRip.FindString(caption)
+	}
 	if res != "" && rip != "" {
 		qual = canonicalQuality(res) + " " + canonicalQuality(rip)
 	} else if res != "" {

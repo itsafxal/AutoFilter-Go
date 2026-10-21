@@ -97,6 +97,9 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 
 	// Apply intelligent release parser and strict movie matching
 	matchedFiles := FilterAndRankStrict(query, candidateRecords)
+	if filter.Language != "" || filter.Quality != "" {
+		matchedFiles = FilterByMediaFilter(matchedFiles, filter)
+	}
 
 	// 4. Fallback to authoritative MongoDB media shards if SQLite returned no matches
 	// (e.g. during background migration, when sync is disabled, or for newly indexed media)
@@ -137,6 +140,9 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 				}(mf)
 			}
 			matchedFiles = FilterAndRankStrict(query, mongoCandidates)
+			if filter.Language != "" || filter.Quality != "" {
+				matchedFiles = FilterByMediaFilter(matchedFiles, filter)
+			}
 		}
 	}
 

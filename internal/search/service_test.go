@@ -163,6 +163,56 @@ func TestSearchService_Search(t *testing.T) {
 	if len(resHarg.Files) != 1 || resHarg.Files[0].FileID != "file_10" {
 		t.Errorf("expected only file_10 for 'Hargadimaju', got %v", resHarg.Files)
 	}
+
+	// 9. Filter for "Vikram" with Quality 720p:
+	// MUST return ONLY file_7 (720p), NOT file_6 (1080p).
+	resVikram720, err := service.Search(ctx, "Vikram", 10, 0, SearchFilter{Quality: "720p"})
+	if err != nil {
+		t.Fatalf("search error for Vikram 720p: %v", err)
+	}
+	if len(resVikram720.Files) != 1 || resVikram720.Files[0].FileID != "file_7" {
+		t.Errorf("expected only file_7 for 'Vikram' 720p, got %d files: %v", len(resVikram720.Files), resVikram720.Files)
+	}
+
+	// 10. Filter for "Vikram" with Quality 480p (non-existent):
+	// MUST return 0 files and NOT fall back to main results.
+	resVikram480, err := service.Search(ctx, "Vikram", 10, 0, SearchFilter{Quality: "480p"})
+	if err != nil {
+		t.Fatalf("search error for Vikram 480p: %v", err)
+	}
+	if len(resVikram480.Files) != 0 {
+		t.Errorf("expected 0 files for 'Vikram' 480p, got %d files", len(resVikram480.Files))
+	}
+
+	// 11. Filter for "Vikram" with Language "hindi" (non-existent):
+	// MUST return 0 files and NOT fall back to main results.
+	resVikramHindi, err := service.Search(ctx, "Vikram", 10, 0, SearchFilter{Language: "hindi"})
+	if err != nil {
+		t.Fatalf("search error for Vikram hindi: %v", err)
+	}
+	if len(resVikramHindi.Files) != 0 {
+		t.Errorf("expected 0 files for 'Vikram' hindi, got %d files", len(resVikramHindi.Files))
+	}
+
+	// 12. Filter for "Leo" (Tamil 1080p) with Language "hindi":
+	// MUST return 0 files.
+	resLeoHindi, err := service.Search(ctx, "Leo", 10, 0, SearchFilter{Language: "hindi"})
+	if err != nil {
+		t.Fatalf("search error for Leo hindi: %v", err)
+	}
+	if len(resLeoHindi.Files) != 0 {
+		t.Errorf("expected 0 files for 'Leo' hindi, got %d files", len(resLeoHindi.Files))
+	}
+
+	// 13. Filter for "Leo" (1080p) with Quality "720p":
+	// MUST return 0 files.
+	resLeo720, err := service.Search(ctx, "Leo", 10, 0, SearchFilter{Quality: "720p"})
+	if err != nil {
+		t.Fatalf("search error for Leo 720p: %v", err)
+	}
+	if len(resLeo720.Files) != 0 {
+		t.Errorf("expected 0 files for 'Leo' 720p, got %d files", len(resLeo720.Files))
+	}
 }
 
 func TestSearchService_GetSuggestions(t *testing.T) {
