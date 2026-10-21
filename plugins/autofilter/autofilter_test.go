@@ -387,9 +387,9 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 	pageBtn := navRow[1].(*telegram.KeyboardButtonCallback)
 	nextBtn := navRow[2].(*telegram.KeyboardButtonCallback)
 
-	// Previous button: empty text, custom emoji ID, Success style (Green)
-	if prevBtn.Text != "" {
-		t.Errorf("expected empty text for premium Previous button, got %q", prevBtn.Text)
+	// Previous button: "Previous", custom emoji ID, Success style (Green)
+	if prevBtn.Text != "Previous" {
+		t.Errorf("expected 'Previous' text for premium Previous button, got %q", prevBtn.Text)
 	}
 	if prevBtn.Style == nil || !prevBtn.Style.BgSuccess {
 		t.Errorf("expected Previous button to be Success (Green)")
@@ -409,9 +409,9 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 		t.Errorf("expected Page button Icon to be 5837048052061311256, got %v", pageBtn.Style.Icon)
 	}
 
-	// Next button: empty text, custom emoji ID, Success style (Green)
-	if nextBtn.Text != "" {
-		t.Errorf("expected empty text for premium Next button, got %q", nextBtn.Text)
+	// Next button: "Next", custom emoji ID, Success style (Green)
+	if nextBtn.Text != "Next" {
+		t.Errorf("expected 'Next' text for premium Next button, got %q", nextBtn.Text)
 	}
 	if nextBtn.Style == nil || !nextBtn.Style.BgSuccess {
 		t.Errorf("expected Next button to be Success (Green)")

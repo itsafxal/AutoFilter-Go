@@ -1190,7 +1190,7 @@ func (p *Plugin) getFileSizeSuffixEmojiID() int64 {
 func (p *Plugin) buildPrevButton(searchKey string, prevOffset int) *telegram.KeyboardButtonCallback {
 	data := fmt.Sprintf("next|%s|%d", searchKey, prevOffset)
 	if p.isPremiumEmojiEnabled() {
-		return telegram.Button.Data("", data).Icon(p.getPrevEmojiID()).Success()
+		return telegram.Button.Data("Previous", data).Icon(p.getPrevEmojiID()).Success()
 	}
 	return telegram.Button.Data("◀ Previous", data).Success()
 }
@@ -1198,7 +1198,7 @@ func (p *Plugin) buildPrevButton(searchKey string, prevOffset int) *telegram.Key
 func (p *Plugin) buildNextButton(searchKey string, nextOffset int) *telegram.KeyboardButtonCallback {
 	data := fmt.Sprintf("next|%s|%d", searchKey, nextOffset)
 	if p.isPremiumEmojiEnabled() {
-		return telegram.Button.Data("", data).Icon(p.getNextEmojiID()).Success()
+		return telegram.Button.Data("Next", data).Icon(p.getNextEmojiID()).Success()
 	}
 	return telegram.Button.Data("Next ▶", data).Success()
 }
