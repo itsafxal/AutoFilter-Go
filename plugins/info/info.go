@@ -125,12 +125,53 @@ func (p *Plugin) HandleInfo(m *telegram.NewMessage) error {
 		}
 	}
 
-	// Otherwise, display bot info
 	var startTime time.Time
 	var botUser *telegram.UserObj
 	if p.appCtx != nil {
 		startTime = p.appCtx.StartTime
 		botUser = p.appCtx.BotUser
+	}
+
+	// If command is /about, render the custom about card
+	if m != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(m.Text())), "/about") {
+		botName := "AutoFilter Bot"
+		botUsername := "bot"
+		if botUser != nil {
+			if botUser.FirstName != "" {
+				botName = commands.EscapeHTML(botUser.FirstName)
+			}
+			if botUser.Username != "" {
+				botUsername = strings.TrimPrefix(commands.EscapeHTML(botUser.Username), "@")
+			}
+		}
+
+		tgSettings := "tg://" + "settings"
+		aboutText := fmt.Sprintf(
+			"<blockquote><b>\n"+
+				"‣ ᴍʏ ɴᴀᴍᴇ : <a href='https://t.me/%s'>%s</a>\n"+
+				"‣ ᴄʀᴇᴀᴛᴏʀ : <a href='%s'>ᴛʜɪs ᴘᴇʀsᴏɴ</a>\n"+
+				"‣ ᴅᴇᴠᴇʟᴏᴘᴇʀ : <a href='https://cybertg.vercel.app'>ᴄʏʙᴇʀ ᠰ ᴛɢ</a>\n"+
+				"‣ ʟɪʙʀᴀʀʏ : <a href='https://www.gogram.sbs/'>ᴘʏʀᴏɢʀᴀᴍ</a>\n"+
+				"‣ ʟᴀɴɢᴜᴀɢᴇ : <a href='https://go.dev/'>Go </a>\n"+
+				"‣ ᴅᴀᴛᴀ ʙᴀsᴇ : <a href='https://www.mongodb.com/'>ᴍᴏɴɢᴏ ᴅʙ</a>\n"+
+				"‣ ʙᴏᴛ sᴇʀᴠᴇʀ : <a href='https://t.me/quickfastt'>ǫᴜɪᴄᴋ ꜰᴀsᴛ</a></b></blockquote>",
+			botUsername,
+			botName,
+			tgSettings,
+		)
+
+		replyMarkup := telegram.NewKeyboard().
+			AddRow(
+				telegram.Button.Data("ℹ️ ʜᴇʟᴘ", "start_help"),
+				telegram.Button.Data("🏠 ʜᴏᴍᴇ", "start_home"),
+			).
+			Build()
+
+		_, err := m.Reply(aboutText, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: replyMarkup,
+		})
+		return err
 	}
 
 	botReport := BuildBotInfoReport(botUser, startTime)

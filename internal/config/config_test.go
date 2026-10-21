@@ -781,3 +781,42 @@ func TestLoadFromEnv_OldBotTokens(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnv_StartPic(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("DATABASE_URI", "mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true")
+	os.Setenv("OWNER_ID", "12345678")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("DATABASE_URI")
+		os.Unsetenv("OWNER_ID")
+		os.Unsetenv("START_PIC")
+	}()
+
+	// 1. Explicit START_PIC env
+	os.Setenv("START_PIC", "custom/banner.jpg")
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.StartPic != "custom/banner.jpg" {
+		t.Errorf("expected custom/banner.jpg, got %s", cfg.StartPic)
+	}
+
+	// 2. Unset START_PIC env: should fallback to assets/start.jpg if it exists
+	os.Unsetenv("START_PIC")
+	cfgDefault, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat("assets/start.jpg"); err == nil {
+		if cfgDefault.StartPic != "assets/start.jpg" {
+			t.Errorf("expected assets/start.jpg, got %s", cfgDefault.StartPic)
+		}
+	}
+}
+
+

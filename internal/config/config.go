@@ -187,6 +187,9 @@ type Config struct {
 
 	// FileSizeSuffixEmojiID defines the Telegram custom emoji ID after file size on file buttons (default: 5992519984071315160).
 	FileSizeSuffixEmojiID int64
+
+	// StartPic defines the file path or URL for the bot's welcome/start message banner image (default: "assets/start.jpg" if exists).
+	StartPic string
 }
 
 
@@ -579,6 +582,13 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
+	startPic := strings.TrimSpace(os.Getenv("START_PIC"))
+	if startPic == "" {
+		if _, err := os.Stat("assets/start.jpg"); err == nil {
+			startPic = "assets/start.jpg"
+		}
+	}
+
 	cfg := &Config{
 		BotToken:                 token,
 		OldBotTokens:             oldBotTokens,
@@ -633,6 +643,7 @@ func LoadFromEnv() (*Config, error) {
 		BotNameEmojiID:           botNameEmojiID,
 		FileSizePrefixEmojiID:    fileSizePrefixEmojiID,
 		FileSizeSuffixEmojiID:    fileSizeSuffixEmojiID,
+		StartPic:                 startPic,
 		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
 	}
 

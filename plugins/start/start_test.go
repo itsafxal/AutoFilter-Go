@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
@@ -71,9 +72,16 @@ func TestStartPlugin_CallbacksAndContent(t *testing.T) {
 
 	// Test Welcome Content
 	wText, wMarkup := p.buildWelcomeContent(nil, "TestBot")
-	if !strings.Contains(wText, "Hey there, there!") {
+	if !strings.Contains(wText, "𝙃𝙚𝙮 𝙩𝙝𝙚𝙧𝙚") || !strings.Contains(wText, "𝙖𝙪𝙩𝙤-𝙛𝙞𝙡𝙩𝙚𝙧 𝙗𝙤𝙩") {
 		t.Errorf("unexpected welcome text: %s", wText)
 	}
+
+	userObj := &telegram.UserObj{ID: 123456, FirstName: "Alex"}
+	uText, _ := p.buildWelcomeContent(userObj, "TestBot")
+	if !strings.Contains(uText, "<a href=\"tg://user?id=123456\">Alex</a>") {
+		t.Errorf("expected mention with user link, got: %s", uText)
+	}
+
 	if wMarkup == nil || len(wMarkup.Rows) != 2 {
 		t.Fatalf("expected 2 keyboard rows in start menu, got %v", wMarkup)
 	}
@@ -95,10 +103,16 @@ func TestStartPlugin_CallbacksAndContent(t *testing.T) {
 		t.Errorf("expected 1 row with 2 buttons in help markup, got %v", hMarkup)
 	}
 
+	cleanText, tags, err := telegram.ParseHTMLToTags(hText)
+	if err != nil {
+		t.Fatalf("ParseHTMLToTags failed on helpText: %v", err)
+	}
+	t.Logf("Clean text: %s, tags count: %d", cleanText, len(tags))
+
 	// Test About Content
 	aText, aMarkup := p.buildAboutContent()
-	if !strings.Contains(aText, "Gogram v1.7.71") || !strings.Contains(aText, "MongoDB & SQLite") || !strings.Contains(aText, "Telegram MTProto") {
-		t.Errorf("expected about text to contain bot info, got: %s", aText)
+	if !strings.Contains(aText, "cybertg.vercel.app") || !strings.Contains(aText, "ᴍᴏɴɢᴏ ᴅʙ") || !strings.Contains(aText, "ǫᴜɪᴄᴋ ꜰᴀsᴛ") {
+		t.Errorf("expected about text to contain custom about info, got: %s", aText)
 	}
 	if aMarkup == nil || len(aMarkup.Rows) != 1 || len(aMarkup.Rows[0].Buttons) != 2 {
 		t.Errorf("expected 1 row with 2 buttons in about markup, got %v", aMarkup)

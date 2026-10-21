@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -308,11 +309,11 @@ func (p *Plugin) HandleIndexLinkCommand(m *telegram.NewMessage) error {
 
 	kb := telegram.NewKeyboard().
 		AddRow(
-			telegram.Button.Data("💾 Index to DB1", fmt.Sprintf("index#link1#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
-			telegram.Button.Data("🗃️ Index to DB2", fmt.Sprintf("index#link2#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
+			telegram.Button.Data("💾 Index to DB2", fmt.Sprintf("index#link1#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
+			telegram.Button.Data("🗃️ Index to DB3", fmt.Sprintf("index#link2#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
 		).
 		AddRow(
-			telegram.Button.Data("🔄 Index to Alternating DBs", fmt.Sprintf("index#link5#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
+			telegram.Button.Data("🔄 Distribute (DB2 ↔ DB3)", fmt.Sprintf("index#link5#%s#%d#%d#%d", chatIDStr, startID, endID, senderID)),
 		).
 		AddRow(
 			telegram.Button.Data("✖️ Close Options", "close_data"),
@@ -379,11 +380,11 @@ func (p *Plugin) promptIndexConfirmation(m *telegram.NewMessage, chatIDStr strin
 	if isAdmin {
 		kb := telegram.NewKeyboard().
 			AddRow(
-				telegram.Button.Data("💾 Index to DB1", fmt.Sprintf("index#accept1#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
-				telegram.Button.Data("🗃️ Index to DB2", fmt.Sprintf("index#accept2#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+				telegram.Button.Data("💾 Index to DB2", fmt.Sprintf("index#accept1#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+				telegram.Button.Data("🗃️ Index to DB3", fmt.Sprintf("index#accept2#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
 			).
 			AddRow(
-				telegram.Button.Data("🔄 Index to Alternating DBs", fmt.Sprintf("index#accept5#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+				telegram.Button.Data("🔄 Distribute (DB2 ↔ DB3)", fmt.Sprintf("index#accept5#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
 			).
 			AddRow(
 				telegram.Button.Data("✖️ Close Options", "close_data"),
@@ -421,11 +422,11 @@ func (p *Plugin) promptIndexConfirmation(m *telegram.NewMessage, chatIDStr strin
 
 	reqKb := telegram.NewKeyboard().
 		AddRow(
-			telegram.Button.Data("✅ Accept (DB1)", fmt.Sprintf("index#accept1#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
-			telegram.Button.Data("✅ Accept (DB2)", fmt.Sprintf("index#accept2#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+			telegram.Button.Data("✅ Accept (DB2)", fmt.Sprintf("index#accept1#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+			telegram.Button.Data("✅ Accept (DB3)", fmt.Sprintf("index#accept2#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
 		).
 		AddRow(
-			telegram.Button.Data("🔄 Accept (Alternating DBs)", fmt.Sprintf("index#accept5#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
+			telegram.Button.Data("🔄 Distribute (DB2 ↔ DB3)", fmt.Sprintf("index#accept5#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
 		).
 		AddRow(
 			telegram.Button.Data("❌ Decline Request", fmt.Sprintf("index#reject#%s#%d#%d", chatIDStr, lastMsgID, senderID)),
@@ -592,6 +593,164 @@ func (p *Plugin) runIndexOperation(progressMsg *telegram.NewMessage, chatIDStr s
 	p.runIndexRangeOperation(progressMsg, chatIDStr, startMsgID, lastMsgID, dbType, fromUserID)
 }
 
+type messageBatch struct {
+	chunkStart int
+	chunkEnd   int
+	messages   []telegram.NewMessage
+}
+
+type indexStats struct {
+	mu                sync.RWMutex
+	startTime         time.Time
+	startMsgID        int
+	endMsgID          int
+	totalMessages     int
+	messagesFetched   int
+	messagesProcessed int
+	maxSavedMsgID     int
+	totalSaved        int
+	totalDuplicates   int
+	totalNoMedia      int
+	totalErrors       int
+	isFloodWait       bool
+	floodWaitSec      int
+	lastScannedID     int
+}
+
+func newIndexStats(startID, endID int) *indexStats {
+	total := endID - startID + 1
+	if total < 0 {
+		total = 0
+	}
+	return &indexStats{
+		startTime:     time.Now(),
+		startMsgID:    startID,
+		endMsgID:      endID,
+		totalMessages: total,
+		lastScannedID: startID,
+	}
+}
+
+func (s *indexStats) addFetched(n int, lastID int) {
+	s.mu.Lock()
+	s.messagesFetched += n
+	if lastID > s.lastScannedID {
+		s.lastScannedID = lastID
+	}
+	s.mu.Unlock()
+}
+
+func (s *indexStats) addProcessed(n int) {
+	s.mu.Lock()
+	s.messagesProcessed += n
+	s.mu.Unlock()
+}
+
+func (s *indexStats) addSaved(n int) {
+	s.mu.Lock()
+	s.totalSaved += n
+	s.mu.Unlock()
+}
+
+func (s *indexStats) addDuplicates(n int) {
+	s.mu.Lock()
+	s.totalDuplicates += n
+	s.mu.Unlock()
+}
+
+func (s *indexStats) addNoMedia(n int) {
+	s.mu.Lock()
+	s.totalNoMedia += n
+	s.mu.Unlock()
+}
+
+func (s *indexStats) addErrors(n int) {
+	s.mu.Lock()
+	s.totalErrors += n
+	s.mu.Unlock()
+}
+
+func (s *indexStats) updateMaxSavedID(id int) {
+	s.mu.Lock()
+	if id > s.maxSavedMsgID {
+		s.maxSavedMsgID = id
+	}
+	s.mu.Unlock()
+}
+
+func (s *indexStats) setFloodWait(sec int) {
+	s.mu.Lock()
+	s.isFloodWait = true
+	s.floodWaitSec = sec
+	s.mu.Unlock()
+}
+
+func (s *indexStats) clearFloodWait() {
+	s.mu.Lock()
+	s.isFloodWait = false
+	s.floodWaitSec = 0
+	s.mu.Unlock()
+}
+
+type indexSnapshot struct {
+	fetched       int
+	processed     int
+	maxSavedID    int
+	saved         int
+	duplicates    int
+	noMedia       int
+	errorsCount   int
+	isFloodWait   bool
+	floodSec      int
+	fetchSpeed    float64
+	indexSpeed    float64
+	remaining     int
+	lastScannedID int
+	elapsed       time.Duration
+	timeLeft      time.Duration
+}
+
+func (s *indexStats) getSnapshot() indexSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	elapsed := time.Since(s.startTime)
+	sec := elapsed.Seconds()
+	if sec < 0.1 {
+		sec = 0.1
+	}
+
+	fetchSpd := float64(s.messagesFetched) / sec
+	idxSpd := float64(s.totalSaved) / sec
+	rem := s.totalMessages - s.messagesFetched
+	if rem < 0 {
+		rem = 0
+	}
+
+	var tLeft time.Duration
+	if fetchSpd > 0 && rem > 0 {
+		tLeft = time.Duration(float64(rem)/fetchSpd) * time.Second
+	}
+
+	return indexSnapshot{
+		fetched:       s.messagesFetched,
+		processed:     s.messagesProcessed,
+		maxSavedID:    s.maxSavedMsgID,
+		saved:         s.totalSaved,
+		duplicates:    s.totalDuplicates,
+		noMedia:       s.totalNoMedia,
+		errorsCount:   s.totalErrors,
+		isFloodWait:   s.isFloodWait,
+		floodSec:      s.floodWaitSec,
+		fetchSpeed:    fetchSpd,
+		indexSpeed:    idxSpd,
+		remaining:     rem,
+		lastScannedID: s.lastScannedID,
+		elapsed:       elapsed,
+		timeLeft:      tLeft,
+	}
+}
+
 func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatIDStr string, startMsgID, endMsgID int, dbType string, fromUserID int64) {
 	startTime := time.Now()
 	if startMsgID <= 0 {
@@ -602,13 +761,7 @@ func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatID
 	}
 
 	totalMessages := endMsgID - startMsgID + 1
-	var (
-		messagesFetched int
-		totalSaved      int
-		totalDuplicates int
-		totalNoMedia    int
-		totalErrors     int
-	)
+	stats := newIndexStats(startMsgID, endMsgID)
 
 	var peer any = chatIDStr
 	if parsedInt, err := strconv.ParseInt(chatIDStr, 10, 64); err == nil {
@@ -620,159 +773,345 @@ func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatID
 			telegram.Button.Data("🛑 Cancel Indexing", "index_cancel"),
 		).Build()
 
+	channelDisplay := formatChannelDisplay(chatIDStr)
+	targetDBDisplay := formatTargetDB(dbType)
+
 	// Initial progress notification
 	if progressMsg != nil {
-		_, _ = progressMsg.Edit(fmt.Sprintf(
-			"✨ <b>Indexing Initialized!</b> ✨\n\n"+
-				"<b>Channel:</b> <code>%s</code>\n"+
-				"<b>Messages to Scan:</b> <code>%d</code> (from ID %d to %d)\n"+
-				"<b>Current Status:</b> Fetching messages... 📥\n"+
-				"<b>Time Elapsed:</b> <code>0s</code>",
-			chatIDStr, totalMessages, startMsgID, endMsgID,
-		), &telegram.SendOptions{
+		initSnap := stats.getSnapshot()
+		initText := renderProgressUpdate(
+			channelDisplay, targetDBDisplay, startMsgID, endMsgID, totalMessages,
+			initSnap.fetched, initSnap.processed, initSnap.maxSavedID,
+			initSnap.saved, initSnap.duplicates, initSnap.noMedia, initSnap.errorsCount,
+			0, 0, totalMessages, "0s", "Calculating...", false, 0,
+		)
+		_, _ = progressMsg.Edit(initText, &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: cancelKb,
 		})
 	}
 
-	lastUIUpdate := time.Now()
-	const chunkSize = 100
+	queue := make(chan messageBatch, 30)
+	stopCh := make(chan struct{})
+	var wg sync.WaitGroup
 
-	for currentID := startMsgID; currentID <= endMsgID; currentID += chunkSize {
-		if atomic.LoadInt32(&p.cancelFlag) == 1 {
-			break
+	// Determine base pacing delay (default 850ms, safely beneath Telegram's ~1s rate limit bucket)
+	baseDelay := 850 * time.Millisecond
+	if envDelay := os.Getenv("INDEX_FETCH_DELAY_MS"); envDelay != "" {
+		if parsed, err := strconv.Atoi(envDelay); err == nil && parsed >= 200 {
+			baseDelay = time.Duration(parsed) * time.Millisecond
 		}
+	}
+	minDelay := 600 * time.Millisecond
+	maxDelay := 3000 * time.Millisecond
 
-		chunkEnd := currentID + chunkSize - 1
-		if chunkEnd > endMsgID {
-			chunkEnd = endMsgID
-		}
+	// 1. Fetcher Worker (Dedicated Telegram MTProto Producer)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(queue)
 
-		ids := make([]int32, 0, chunkEnd-currentID+1)
-		for id := currentID; id <= chunkEnd; id++ {
-			ids = append(ids, int32(id))
-		}
+		currentDelay := baseDelay
+		consecutiveSuccess := 0
+		const chunkSize = 100
 
-		fetched, err := p.appCtx.Client.GetMessages(peer, &telegram.SearchOption{
-			IDs: ids,
-		})
-		if err != nil {
-			totalErrors += len(ids)
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
+		for currentID := startMsgID; currentID <= endMsgID; currentID += chunkSize {
+			if atomic.LoadInt32(&p.cancelFlag) == 1 {
+				break
+			}
+			select {
+			case <-stopCh:
+				return
+			default:
+			}
 
-		messagesFetched += len(fetched)
+			chunkEnd := currentID + chunkSize - 1
+			if chunkEnd > endMsgID {
+				chunkEnd = endMsgID
+			}
 
-		// Extract media items
-		var mediaDocs []mongodb.MediaDoc
-		var fileIDs []string
+			ids := make([]int32, 0, chunkEnd-currentID+1)
+			for id := currentID; id <= chunkEnd; id++ {
+				ids = append(ids, int32(id))
+			}
 
-		for _, m := range fetched {
-			doc := channel.ExtractMediaFromMessage(&m)
-			if doc == nil || doc.FileID == "" {
-				totalNoMedia++
+			var fetched []telegram.NewMessage
+			var success bool
+
+			for attempt := 1; attempt <= 6; attempt++ {
+				if atomic.LoadInt32(&p.cancelFlag) == 1 {
+					break
+				}
+				select {
+				case <-stopCh:
+					return
+				default:
+				}
+
+				msgs, err := p.appCtx.Client.GetMessages(peer, &telegram.SearchOption{
+					IDs: ids,
+				})
+				if err == nil {
+					fetched = msgs
+					success = true
+					break
+				}
+
+				// Telegram FloodWait / 420 Rate Limit Interception
+				if isFloodWaitError(err) {
+					waitSec := extractFloodWaitSeconds(err)
+					if waitSec <= 0 {
+						waitSec = 30
+					}
+					if p.appCtx.Logger != nil {
+						p.appCtx.Logger.Warn("⚠️ [Index] Telegram FloodWait encountered",
+							"wait_seconds", waitSec,
+							"chunk_start", currentID,
+							"chunk_end", chunkEnd,
+							"attempt", attempt,
+						)
+					}
+
+					stats.setFloodWait(waitSec)
+
+					sleepTimer := time.NewTimer(time.Duration(waitSec+1) * time.Second)
+					select {
+					case <-sleepTimer.C:
+					case <-stopCh:
+						sleepTimer.Stop()
+						return
+					}
+
+					stats.clearFloodWait()
+					// Adaptive backoff: increase delay to avoid re-triggering Telegram bucket limit
+					if currentDelay < maxDelay {
+						currentDelay += 250 * time.Millisecond
+					}
+					consecutiveSuccess = 0
+					// Retry the EXACT same chunk without dropping files
+					continue
+				}
+
+				errStr := strings.ToUpper(err.Error())
+				if strings.Contains(errStr, "CHANNEL_INVALID") || strings.Contains(errStr, "CHANNEL_PRIVATE") || strings.Contains(errStr, "CHAT_ADMIN_REQUIRED") {
+					if p.appCtx.Logger != nil {
+						p.appCtx.Logger.Error("❌ [Index] Fatal chat permission error during fetch", "error", err)
+					}
+					stats.addErrors(len(ids))
+					return
+				}
+
+				// Transient network or connection error
+				if p.appCtx.Logger != nil {
+					p.appCtx.Logger.Warn("⚠️ [Index] Transient MTProto error, retrying...",
+						"attempt", attempt,
+						"error", err,
+						"chunk_start", currentID,
+					)
+				}
+				backoff := time.Duration(attempt) * time.Second
+				if backoff > 5*time.Second {
+					backoff = 5 * time.Second
+				}
+				time.Sleep(backoff)
+			}
+
+			if !success {
+				if atomic.LoadInt32(&p.cancelFlag) == 1 {
+					break
+				}
+				stats.addErrors(len(ids))
 				continue
 			}
-			mediaDocs = append(mediaDocs, *doc)
-			fileIDs = append(fileIDs, doc.FileID)
-		}
 
-		if len(mediaDocs) > 0 {
-			// Check duplicates in bulk
-			ctx := context.Background()
-			existMap, err := p.appCtx.DB.BulkCheckMediaExists(ctx, fileIDs)
-			if err != nil {
-				existMap = make(map[string]bool)
+			// Hand over to processing pipeline
+			stats.addFetched(len(ids), chunkEnd)
+			select {
+			case queue <- messageBatch{chunkStart: currentID, chunkEnd: chunkEnd, messages: fetched}:
+			case <-stopCh:
+				return
 			}
 
-			var newDocs []mongodb.MediaDoc
-			for _, doc := range mediaDocs {
-				if existMap[doc.FileID] {
-					totalDuplicates++
-				} else {
-					newDocs = append(newDocs, doc)
-				}
+			// Adaptive rate tuning: gradually reduce delay when stable
+			consecutiveSuccess++
+			if consecutiveSuccess >= 25 && currentDelay > minDelay {
+				currentDelay -= 50 * time.Millisecond
+				consecutiveSuccess = 0
 			}
 
-			if len(newDocs) > 0 {
-				var saved, dups int
-				var saveErr error
+			// Inter-request pacing sleep
+			select {
+			case <-time.After(currentDelay):
+			case <-stopCh:
+				return
+			}
+		}
+	}()
 
-				switch dbType {
-				case "accept1":
-					saved, dups, saveErr = p.appCtx.DB.BulkSaveMedia(ctx, newDocs, 0)
-				case "accept2":
-					saved, dups, saveErr = p.appCtx.DB.BulkSaveMedia(ctx, newDocs, 1)
-				case "accept5":
-					saved, dups, saveErr = p.appCtx.DB.BulkSaveMediaAlternating(ctx, newDocs, 100)
-				default:
-					saved, dups, saveErr = p.appCtx.DB.BulkSaveMediaAlternating(ctx, newDocs, 100)
+	// 2. Indexer Worker (Dedicated MongoDB & SQLite Consumer)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for batch := range queue {
+			if atomic.LoadInt32(&p.cancelFlag) == 1 {
+				// Finish current batch quickly then terminate
+			}
+
+			var mediaDocs []mongodb.MediaDoc
+			var fileIDs []string
+			var msgIDs []int
+
+			for _, m := range batch.messages {
+				doc := channel.ExtractMediaFromMessage(&m)
+				if doc == nil || doc.FileID == "" {
+					stats.addNoMedia(1)
+					continue
+				}
+				mediaDocs = append(mediaDocs, *doc)
+				fileIDs = append(fileIDs, doc.FileID)
+				msgIDs = append(msgIDs, int(m.ID))
+			}
+
+			stats.addProcessed(len(batch.messages))
+
+			if len(mediaDocs) > 0 {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				existMap, err := p.appCtx.DB.BulkCheckMediaExists(ctx, fileIDs)
+				cancel()
+				if err != nil {
+					existMap = make(map[string]bool)
 				}
 
-				if saveErr != nil {
-					totalErrors += len(newDocs)
-				} else {
-					totalSaved += saved
-					totalDuplicates += dups
+				var newDocs []mongodb.MediaDoc
+				var newMsgIDs []int
+				for i, doc := range mediaDocs {
+					if existMap[doc.FileID] {
+						stats.addDuplicates(1)
+					} else {
+						newDocs = append(newDocs, doc)
+						newMsgIDs = append(newMsgIDs, msgIDs[i])
+					}
+				}
+
+				if len(newDocs) > 0 {
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					var saved, dups int
+					var saveErr error
+
+					switch dbType {
+					case "accept1", "link1":
+						saved, dups, saveErr = p.appCtx.DB.BulkSaveMedia(ctx, newDocs, 0)
+					case "accept2", "link2":
+						saved, dups, saveErr = p.appCtx.DB.BulkSaveMedia(ctx, newDocs, 1)
+					case "accept5", "link5":
+						saved, dups, saveErr = p.appCtx.DB.BulkSaveMediaAlternating(ctx, newDocs, 100)
+					default:
+						saved, dups, saveErr = p.appCtx.DB.BulkSaveMediaAlternating(ctx, newDocs, 100)
+					}
+					cancel()
+
+					if saveErr != nil {
+						stats.addErrors(len(newDocs))
+					} else {
+						stats.addSaved(saved)
+						stats.addDuplicates(dups)
+						for _, id := range newMsgIDs {
+							stats.updateMaxSavedID(id)
+						}
+					}
 				}
 			}
 		}
+	}()
 
-		// Update UI throttle (every 3 seconds)
-		now := time.Now()
-		if progressMsg != nil && (now.Sub(lastUIUpdate) >= 3*time.Second || chunkEnd >= endMsgID) {
-			lastUIUpdate = now
-			elapsedStr := formatDuration(now.Sub(startTime))
-			_, _ = progressMsg.Edit(fmt.Sprintf(
-				"📊 <b>Indexing Progress Update</b> 📊\n\n"+
-					"<b>Channel:</b> <code>%s</code>\n"+
-					"<b>Target Range:</b> <code>%d</code> to <code>%d</code>\n\n"+
-					"<b>Messages Fetched:</b> <code>%d</code> / <code>%d</code>\n\n"+
-					"--- <b>Current Stats</b> ---\n"+
-					"<b>✅ Saved:</b> <code>%d</code> files\n"+
-					"<b>⚠️ Duplicates:</b> <code>%d</code> skipped\n"+
-					"<b>🚫 No Media:</b> <code>%d</code> skipped\n"+
-					"<b>❌ Errors:</b> <code>%d</code> encountered\n\n"+
-					"<b>Time Elapsed:</b> <code>%s</code>",
-				chatIDStr, startMsgID, endMsgID, messagesFetched, totalMessages,
-				totalSaved, totalDuplicates, totalNoMedia, totalErrors, elapsedStr,
-			), &telegram.SendOptions{
-				ParseMode:   "html",
-				ReplyMarkup: cancelKb,
-			})
+	// 3. UI Updater Goroutine (Throttled progress reporting every 3.5 seconds)
+	uiDone := make(chan struct{})
+	go func() {
+		defer close(uiDone)
+		ticker := time.NewTicker(3500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				snap := stats.getSnapshot()
+				elapsedStr := formatCompactDuration(snap.elapsed)
+				timeLeftStr := formatETA(snap.timeLeft)
+				if snap.fetchSpeed <= 0 {
+					timeLeftStr = "Calculating..."
+				}
+
+				text := renderProgressUpdate(
+					channelDisplay, targetDBDisplay, startMsgID, endMsgID, totalMessages,
+					snap.fetched, snap.processed, snap.maxSavedID,
+					snap.saved, snap.duplicates, snap.noMedia, snap.errorsCount,
+					snap.fetchSpeed, snap.indexSpeed, snap.remaining,
+					elapsedStr, timeLeftStr, snap.isFloodWait, snap.floodSec,
+				)
+
+				safeEditProgress(progressMsg, text, cancelKb)
+			case <-stopCh:
+				return
+			}
 		}
+	}()
 
-		time.Sleep(50 * time.Millisecond)
-	}
+	// Wait for fetcher and indexer to conclude
+	wg.Wait()
+	close(stopCh)
+	<-uiDone
 
+	// Final Report Generation
+	finalSnap := stats.getSnapshot()
 	totalDuration := formatDuration(time.Since(startTime))
 	var finalReport string
 
 	if atomic.LoadInt32(&p.cancelFlag) == 1 {
+		resumeSkip := finalSnap.maxSavedID
+		if resumeSkip <= 0 {
+			resumeSkip = finalSnap.lastScannedID
+		}
 		finalReport = fmt.Sprintf(
-			"🛑 <b>Indexing Operation Cancelled for</b> <code>%s</code> 🛑\n\n"+
-				"The process was interrupted by user request.\n\n"+
-				"<b>Total Messages Scanned:</b> <code>%d</code>\n"+
-				"<b>Successfully Saved Files:</b> <code>%d</code>\n"+
-				"<b>Skipped (Duplicates):</b> <code>%d</code>\n"+
-				"<b>Skipped (No Media/Invalid):</b> <code>%d</code>\n"+
-				"<b>Errors during processing:</b> <code>%d</code>\n"+
-				"<b>Elapsed Time:</b> <code>%s</code>\n\n"+
-				"The indexing can be resumed later using <code>/setskip</code>.",
-			chatIDStr, messagesFetched, totalSaved, totalDuplicates, totalNoMedia, totalErrors, totalDuration,
+			"🛑 <b>ɪɴᴅᴇxɪɴɢ ᴏᴘᴇʀᴀᴛɪᴏɴ ᴄᴀɴᴄᴇʟʟᴇᴅ</b> 🛑\n\n"+
+				"★ <b>ᴄʜᴀɴɴᴇʟ:</b> <code>%s</code>\n"+
+				"★ <b>ᴛᴀʀɢᴇᴛ ᴅʙ:</b> <code>%s</code>\n"+
+				"★ <b>ᴛᴀʀɢᴇᴛ ʀᴀɴɢᴇ:</b> <code>%d</code> ᴛᴏ <code>%d</code>\n\n"+
+				"--- <b>ꜱᴛᴀᴛꜱ ʙᴇꜰᴏʀᴇ ᴄᴀɴᴄᴇʟʟᴀᴛɪᴏɴ</b> ---\n"+
+				"• <b>ᴛᴏᴛᴀʟ ᴍᴇꜱꜱᴀɢᴇꜱ ꜱᴄᴀɴɴᴇᴅ:</b> <code>%d</code>\n"+
+				"• <b>ᴍᴇꜱꜱᴀɢᴇꜱ ᴘʀᴏᴄᴇꜱꜱᴇᴅ:</b> <code>%d</code>\n"+
+				"• <b>ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ꜱᴀᴠᴇᴅ ꜰɪʟᴇꜱ:</b> <code>%d</code>\n"+
+				"• <b>ꜱᴋɪᴘᴘᴇᴅ (ᴅᴜᴘʟɪᴄᴀᴛᴇꜱ):</b> <code>%d</code>\n"+
+				"• <b>ꜱᴋɪᴘᴘᴇᴅ (ɴᴏ ᴍᴇᴅɪᴀ):</b> <code>%d</code>\n"+
+				"• <b>ᴇʀʀᴏʀꜱ ᴇɴᴄᴏᴜɴᴛᴇʀᴇᴅ:</b> <code>%d</code>\n"+
+				"• <b>ᴍᴀx ꜱᴀᴠᴇᴅ ᴍꜱɢ ɪᴅ:</b> <code>%d</code>\n"+
+				"• <b>ᴛɪᴍᴇ ᴇʟᴀᴘꜱᴇᴅ:</b> <code>%s</code>\n\n"+
+				"💡 <i>You can resume indexing later from where you left off:</i>\n"+
+				"<code>/setskip %d</code>",
+			channelDisplay, targetDBDisplay, startMsgID, endMsgID,
+			finalSnap.fetched, finalSnap.processed, finalSnap.saved, finalSnap.duplicates,
+			finalSnap.noMedia, finalSnap.errorsCount, finalSnap.maxSavedID, totalDuration,
+			resumeSkip,
 		)
 	} else {
 		finalReport = fmt.Sprintf(
-			"✅ <b>Indexing Completed Successfully for</b> <code>%s</code> ✅\n\n"+
-				"<b>Total Messages Scanned:</b> <code>%d</code>\n"+
-				"<b>Successfully Saved Files:</b> <code>%d</code>\n"+
-				"<b>Skipped (Duplicates):</b> <code>%d</code>\n"+
-				"<b>Skipped (No Media/Invalid):</b> <code>%d</code>\n"+
-				"<b>Errors during processing:</b> <code>%d</code>\n"+
-				"<b>Total Time Taken:</b> <code>%s</code>\n\n"+
-				"All available content within the specified range has been indexed.",
-			chatIDStr, messagesFetched, totalSaved, totalDuplicates, totalNoMedia, totalErrors, totalDuration,
+			"✅ <b>ɪɴᴅᴇxɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ</b> ✅\n\n"+
+				"★ <b>ᴄʜᴀɴɴᴇʟ:</b> <code>%s</code>\n"+
+				"★ <b>ᴛᴀʀɢᴇᴛ ᴅʙ:</b> <code>%s</code>\n"+
+				"★ <b>ᴛᴀʀɢᴇᴛ ʀᴀɴɢᴇ:</b> <code>%d</code> ᴛᴏ <code>%d</code>\n\n"+
+				"--- <b>ꜰɪɴᴀʟ ꜱᴛᴀᴛꜱ</b> ---\n"+
+				"• <b>ᴛᴏᴛᴀʟ ᴍᴇꜱꜱᴀɢᴇꜱ ꜱᴄᴀɴɴᴇᴅ:</b> <code>%d</code>\n"+
+				"• <b>ᴍᴇꜱꜱᴀɢᴇꜱ ᴘʀᴏᴄᴇꜱꜱᴇᴅ:</b> <code>%d</code>\n"+
+				"• <b>ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ꜱᴀᴠᴇᴅ ꜰɪʟᴇꜱ:</b> <code>%d</code>\n"+
+				"• <b>ꜱᴋɪᴘᴘᴇᴅ (ᴅᴜᴘʟɪᴄᴀᴛᴇꜱ):</b> <code>%d</code>\n"+
+				"• <b>ꜱᴋɪᴘᴘᴇᴅ (ɴᴏ ᴍᴇᴅɪᴀ):</b> <code>%d</code>\n"+
+				"• <b>ᴇʀʀᴏʀꜱ ᴇɴᴄᴏᴜɴᴛᴇʀᴇᴅ:</b> <code>%d</code>\n"+
+				"• <b>ᴍᴀx ꜱᴀᴠᴇᴅ ᴍꜱɢ ɪᴅ:</b> <code>%d</code>\n"+
+				"• <b>ᴛᴏᴛᴀʟ ᴛɪᴍᴇ ᴛᴀᴋᴇɴ:</b> <code>%s</code>\n\n"+
+				"🎉 <i>All available content in the selected range has been indexed and synced!</i>",
+			channelDisplay, targetDBDisplay, startMsgID, endMsgID,
+			finalSnap.fetched, finalSnap.processed, finalSnap.saved, finalSnap.duplicates,
+			finalSnap.noMedia, finalSnap.errorsCount, finalSnap.maxSavedID, totalDuration,
 		)
 	}
 
@@ -787,6 +1126,163 @@ func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatID
 			ParseMode: "html",
 		})
 	}
+}
+
+func renderProgressUpdate(channelDisplay, targetDB string, startMsgID, endMsgID, totalMessages int,
+	fetched, processed, maxSavedID, saved, duplicates, noMedia, errorsCount int,
+	fetchSpeed, indexSpeed float64, remaining int, elapsedStr, timeLeftStr string,
+	isFloodWait bool, floodSec int) string {
+
+	floodNotice := ""
+	if isFloodWait && floodSec > 0 {
+		floodNotice = fmt.Sprintf("\n\n⚠️ <b>Telegram Rate Limit:</b> Paused for <code>%d</code>s before auto-retrying...", floodSec)
+	}
+
+	return fmt.Sprintf(
+		"📊 <b>ɪɴᴅᴇxɪɴɢ ᴘʀᴏɢʀᴇꜱꜱ ᴜᴘᴅᴀᴛᴇ</b> 📊\n\n"+
+			"★ <b>ᴄʜᴀɴɴᴇʟ:</b> <code>%s</code>\n"+
+			"★ <b>ᴛᴀʀɢᴇᴛ ᴅʙ:</b> <code>%s</code>\n"+
+			"★ <b>ᴛᴀʀɢᴇᴛ ʀᴀɴɢᴇ:</b> <code>%d</code> ᴛᴏ <code>%d</code>\n\n"+
+			"★ <b>ᴍᴇꜱꜱᴀɢᴇꜱ ꜰᴇᴛᴄʜᴇᴅ:</b> <code>%d</code> / <code>%d</code>\n"+
+			"★ <b>ᴍᴇꜱꜱᴀɢᴇꜱ ᴘʀᴏᴄᴇꜱꜱᴇᴅ:</b> <code>%d</code>\n"+
+			"★ <b>ᴍᴀx ꜱᴀᴠᴇᴅ ᴍꜱɢ ɪᴅ (ꜰɪʟᴇ ᴍᴇᴛᴀᴅᴀᴛᴀ, ɴᴏᴛ ᴄʜᴇᴄᴋᴘᴏɪɴᴛ):</b> <code>%d</code>\n\n"+
+			"<b>ᴄᴜʀʀᴇɴᴛ ꜱᴛᴀᴛꜱ</b>\n"+
+			"✅ <b>ꜱᴀᴠᴇᴅ:</b> <code>%d</code> ꜰɪʟᴇꜱ\n"+
+			"⚠️ <b>ᴅᴜᴘʟɪᴄᴀᴛᴇꜱ:</b> <code>%d</code> ꜱᴋɪᴘᴘᴇᴅ\n"+
+			"🚫 <b>ɴᴏ ᴍᴇᴅɪᴀ:</b> <code>%d</code> ꜱᴋɪᴘᴘᴇᴅ\n"+
+			"❌ <b>ᴇʀʀᴏʀꜱ:</b> <code>%d</code> ᴇɴᴄᴏᴜɴᴛᴇʀᴇᴅ\n\n"+
+			"<b>ᴘʀᴏᴄᴇꜱꜱɪɴɢ ꜱᴘᴇᴇᴅ:</b>\n"+
+			"├─ <b>ꜰᴇᴛᴄʜ:</b> <code>%.1f</code> ᴍꜱɢ/ꜱ\n"+
+			"├─ <b>ɪɴᴅᴇxɪɴɢ:</b> <code>%.1f</code> ꜰɪʟᴇꜱ/ꜱ\n"+
+			"└─ <b>ʀᴇᴍᴀɪɴɪɴɢ:</b> <code>%d</code> ᴍᴇꜱꜱᴀɢᴇꜱ\n\n"+
+			"⏱️ <b>ᴛɪᴍᴇ ᴇʟᴀᴘꜱᴇᴅ:</b> <code>%s</code>  ⏳ <b>ᴛɪᴍᴇ ʟᴇꜰᴛ:</b> ~<code>%s</code>%s",
+		channelDisplay, targetDB, startMsgID, endMsgID,
+		fetched, totalMessages,
+		processed,
+		maxSavedID,
+		saved, duplicates, noMedia, errorsCount,
+		fetchSpeed, indexSpeed,
+		remaining,
+		elapsedStr, timeLeftStr, floodNotice,
+	)
+}
+
+func safeEditProgress(msg *telegram.NewMessage, text string, kb telegram.ReplyMarkup) {
+	if msg == nil {
+		return
+	}
+	_, _ = msg.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: kb,
+	})
+}
+
+func isFloodWaitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if telegram.MatchError(err, "FLOOD_WAIT_") || telegram.MatchError(err, "FLOOD_PREMIUM_WAIT_") {
+		return true
+	}
+	errStr := strings.ToUpper(err.Error())
+	return strings.Contains(errStr, "FLOOD_WAIT") ||
+		strings.Contains(errStr, "FLOOD_PREMIUM_WAIT") ||
+		strings.Contains(errStr, "420") ||
+		strings.Contains(errStr, "WAIT OF") ||
+		strings.Contains(errStr, "WAIT ")
+}
+
+func extractFloodWaitSeconds(err error) int {
+	if err == nil {
+		return 0
+	}
+	if wait := telegram.GetFloodWait(err); wait > 0 {
+		return wait
+	}
+	re := regexp.MustCompile(`FLOOD(?:_PREMIUM)?_WAIT_(\d+)`)
+	if matches := re.FindStringSubmatch(err.Error()); len(matches) > 1 {
+		if val, pErr := strconv.Atoi(matches[1]); pErr == nil && val > 0 {
+			return val
+		}
+	}
+	reSec := regexp.MustCompile(`(?i)wait (?:of )?(\d+) seconds`)
+	if matches := reSec.FindStringSubmatch(err.Error()); len(matches) > 1 {
+		if val, pErr := strconv.Atoi(matches[1]); pErr == nil && val > 0 {
+			return val
+		}
+	}
+	return 0
+}
+
+func formatChannelDisplay(chatIDStr string) string {
+	cleanID := chatIDStr
+	if strings.HasPrefix(cleanID, "-100") {
+		cleanID = strings.TrimPrefix(cleanID, "-100")
+	}
+	if isNumeric(cleanID) {
+		return fmt.Sprintf("ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀɴɴᴇʟ %s", cleanID)
+	}
+	if !strings.HasPrefix(cleanID, "@") {
+		return "@" + cleanID
+	}
+	return cleanID
+}
+
+func formatTargetDB(dbType string) string {
+	switch dbType {
+	case "accept5", "link5":
+		return "ᴅɪꜱᴛʀɪʙᴜᴛᴇ (ᴀʟᴛᴇʀɴᴀᴛᴇ →DB2↔DB3)"
+	case "accept1", "link1":
+		return "DB2 (Media Shard 1)"
+	case "accept2", "link2":
+		return "DB3 (Media Shard 2)"
+	default:
+		return "ᴅɪꜱᴛʀɪʙᴜᴛᴇ (ᴀʟᴛᴇʀɴᴀᴛᴇ →DB2↔DB3)"
+	}
+}
+
+func formatETA(d time.Duration) string {
+	if d <= 0 {
+		return "0ꜱ"
+	}
+	totalSec := int64(d.Seconds())
+	hours := totalSec / 3600
+	minutes := (totalSec % 3600) / 60
+	seconds := totalSec % 60
+
+	if hours > 0 {
+		return fmt.Sprintf("%dʜ %dᴍ", hours, minutes)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dᴍ %dꜱ", minutes, seconds)
+	}
+	return fmt.Sprintf("%dꜱ", seconds)
+}
+
+func formatCompactDuration(d time.Duration) string {
+	totalSec := int64(d.Seconds())
+	if totalSec < 0 {
+		totalSec = 0
+	}
+	days := totalSec / 86400
+	hours := (totalSec % 86400) / 3600
+	minutes := (totalSec % 3600) / 60
+	seconds := totalSec % 60
+
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if seconds > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%ds", seconds))
+	}
+	return strings.Join(parts, "")
 }
 
 func extractChannelInfo(m *telegram.NewMessage, target *telegram.NewMessage) (string, int) {
