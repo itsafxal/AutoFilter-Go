@@ -25,6 +25,9 @@ type Config struct {
 	// BotToken is the Telegram Bot API authentication token.
 	BotToken string
 
+	// OldBotTokens contains optional Telegram bot tokens of old bots for user migration to the main bot.
+	OldBotTokens []string
+
 	// AppID is the Telegram MTProto API ID from my.telegram.org.
 	AppID int32
 
@@ -550,8 +553,35 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
+	var oldBotTokens []string
+	if rawTokens := strings.TrimSpace(os.Getenv("OLD_BOT_TOKENS")); rawTokens != "" {
+		for _, tok := range strings.FieldsFunc(rawTokens, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == ';'
+		}) {
+			tok = strings.TrimSpace(tok)
+			if tok != "" {
+				oldBotTokens = append(oldBotTokens, tok)
+			}
+		}
+	}
+	for _, envKey := range []string{"OLD_BOT_TOKEN_1", "OLD_BOT_TOKEN_2", "OLD_BOT_TOKEN"} {
+		if tok := strings.TrimSpace(os.Getenv(envKey)); tok != "" {
+			exists := false
+			for _, t := range oldBotTokens {
+				if t == tok {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				oldBotTokens = append(oldBotTokens, tok)
+			}
+		}
+	}
+
 	cfg := &Config{
 		BotToken:                 token,
+		OldBotTokens:             oldBotTokens,
 		AppID:                    apiID,
 		AppHash:                  apiHash,
 		SessionPath:              sessionPath,
@@ -658,6 +688,11 @@ func (c *Config) IsAdmin(userID int64) bool {
 		}
 	}
 	return false
+}
+
+// HasOldBots returns true if at least one old bot token is configured for user migration.
+func (c *Config) HasOldBots() bool {
+	return len(c.OldBotTokens) > 0
 }
 
 // NormalizeChannelID converts any channel ID format (e.g. 1234567890, -1001234567890)

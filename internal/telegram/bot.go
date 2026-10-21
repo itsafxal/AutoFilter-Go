@@ -15,15 +15,22 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
+// OldBotService defines the contract for managing old bots running concurrently for user migration.
+type OldBotService interface {
+	Start(ctx context.Context, mainBotUsername string)
+	Stop()
+}
+
 // BotService manages the lifecycle of the unified Gogram MTProto Telegram client.
 type BotService struct {
-	cfg      *config.Config
-	logger   *slog.Logger
-	registry *plugins.Registry
-	appCtx   *plugins.AppContext
-	client   *telegram.Client
-	running  bool
-	mu       sync.Mutex
+	cfg           *config.Config
+	logger        *slog.Logger
+	registry      *plugins.Registry
+	appCtx        *plugins.AppContext
+	client        *telegram.Client
+	oldBotService OldBotService
+	running       bool
+	mu            sync.Mutex
 }
 
 // NewBotService constructs a new Telegram bot service.
@@ -34,6 +41,13 @@ func NewBotService(cfg *config.Config, logger *slog.Logger, reg *plugins.Registr
 		registry: reg,
 		appCtx:   appCtx,
 	}
+}
+
+// SetOldBotService configures the background old bots migration service.
+func (s *BotService) SetOldBotService(obs OldBotService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.oldBotService = obs
 }
 
 // Init creates and initializes the unified Gogram client and attaches all validated plugin handlers.
@@ -138,6 +152,11 @@ func (s *BotService) Start(ctx context.Context) error {
 
 	// Send restart notification to admin(s) in background
 	go s.notifyAdminsOnRestart(botUser)
+
+	// Launch old bot user migration service in background if configured
+	if s.oldBotService != nil && s.cfg != nil && s.cfg.HasOldBots() {
+		go s.oldBotService.Start(ctx, botUser.Username)
+	}
 
 	s.mu.Lock()
 	s.running = true
@@ -271,6 +290,9 @@ func (s *BotService) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("shutting down Gogram bot service...")
+	if s.oldBotService != nil {
+		s.oldBotService.Stop()
+	}
 	if s.client != nil {
 		return s.client.Stop()
 	}

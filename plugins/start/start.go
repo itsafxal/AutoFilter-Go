@@ -11,6 +11,7 @@ import (
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/MYTGBOTZ/internal/commands"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/MYTGBOTZ/internal/oldbot"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 )
 
@@ -320,7 +321,83 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 			return err
 		}
 
-		// 3. Media delivery deep link: file_<id>, filep_<id>, or direct file ID
+		// 3. Welcome redirect from old bots
+		if payload == "from_oldbot" || strings.HasPrefix(payload, "from_") {
+			welcomeText := fmt.Sprintf(
+				"👋 <b>Welcome to our Main Bot!</b>\n\n"+
+					"🎉 You have successfully switched from our old bot!\n\n"+
+					"✨ <b>Here you can enjoy:</b>\n"+
+					"• 🌐 Multi-language filters (Malayalam, Tamil, English, Hindi, Telugu, Kannada, Multi)\n"+
+					"• 🎞 Quality filters (480p, 720p, 1080p, 4K)\n"+
+					"• ⚡ Ultra-fast direct download links\n"+
+					"• 📦 Auto-deleting links for storage safety\n\n"+
+					"💡 <i>Send any movie or series title now to start searching!</i>",
+			)
+			_, replyMarkup := p.buildWelcomeContent(user, botUsername)
+			_, err := m.Reply(welcomeText, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: replyMarkup,
+			})
+			return err
+		}
+
+		// 4. Search deep-link from old bots or external buttons (q_<b64> or search_<query>)
+		if query, ok := oldbot.DecodeSearchDeepLinkPayload(payload); ok && query != "" {
+			var userID int64
+			if user != nil {
+				userID = user.ID
+			} else {
+				userID = m.SenderID()
+			}
+
+			// Force Subscribe Verification Flow if enabled
+			if p.appCtx != nil && p.appCtx.FSub != nil {
+				isAdmin := false
+				if p.appCtx.Config != nil {
+					isAdmin = p.appCtx.Config.IsAdmin(userID) || p.appCtx.Config.IsOwner(userID)
+				}
+
+				if !isAdmin {
+					markup, unjoined := p.appCtx.FSub.BuildDynamicFSubKeyboard(context.Background(), p.appCtx.Client, userID, payload)
+					if len(unjoined) > 0 && markup != nil {
+						promptMsg, err := m.Reply("<b>Pʟᴇᴀꜱᴇ Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟs Tᴏ Gᴇᴛ Yᴏᴜʀ Rᴇǫᴜᴇꜱᴛᴇᴅ Mᴏᴠɪᴇ Fɪʟᴇ 🚀</b>", &telegram.SendOptions{
+							ParseMode:   "html",
+							ReplyMarkup: markup,
+						})
+						if err != nil {
+							return err
+						}
+
+						var promptMsgID int32
+						if promptMsg != nil {
+							promptMsgID = promptMsg.ID
+						}
+
+						checkSuccess := p.appCtx.FSub.CheckLoopSubDynamic(context.Background(), p.appCtx.Client, userID, m.ChatID(), promptMsgID, payload, unjoined...)
+						if checkSuccess {
+							if p.appCtx.Client != nil && promptMsgID != 0 {
+								_, _ = p.appCtx.Client.DeleteMessages(m.ChatID(), []int32{promptMsgID})
+							}
+						} else {
+							return nil
+						}
+					}
+				}
+			}
+
+			// Execute search through autofilter plugin
+			if p.appCtx != nil && p.appCtx.Registry != nil {
+				if plug := p.appCtx.Registry.GetPlugin("autofilter"); plug != nil {
+					if af, ok := plug.(interface {
+						ExecuteSearch(m *telegram.NewMessage, query string) error
+					}); ok {
+						return af.ExecuteSearch(m, query)
+					}
+				}
+			}
+		}
+
+		// 5. Media delivery deep link: file_<id>, filep_<id>, or direct file ID
 		if p.appCtx != nil && p.appCtx.Delivery != nil {
 			var fileID string
 			protectContent := false

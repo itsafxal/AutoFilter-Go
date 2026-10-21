@@ -14,6 +14,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/fsub"
+	"github.com/itsafxal/MYTGBOTZ/internal/oldbot"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 	"github.com/itsafxal/MYTGBOTZ/internal/stream"
@@ -27,6 +28,7 @@ type App struct {
 	Registry          *plugins.Registry
 	AppContext        *plugins.AppContext
 	BotService        *telegram.BotService
+	OldBotService     *oldbot.Service
 	DBManager         *database.DatabaseManager
 	DeliveryService   delivery.MediaDeliveryService
 	SearchService     search.SearchService
@@ -92,12 +94,21 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	reg := plugins.NewRegistry(appCtx)
 	botService := telegram.NewBotService(cfg, logger, reg, appCtx)
 
+	oldBotService := oldbot.NewService(oldbot.Config{
+		Tokens:          cfg.OldBotTokens,
+		AppID:           cfg.AppID,
+		AppHash:         cfg.AppHash,
+		MainBotUsername: "",
+	}, searchService, logger)
+	botService.SetOldBotService(oldBotService)
+
 	return &App{
 		Config:            cfg,
 		Logger:            logger,
 		Registry:          reg,
 		AppContext:        appCtx,
 		BotService:        botService,
+		OldBotService:     oldBotService,
 		DBManager:         dbManager,
 		DeliveryService:   deliveryService,
 		SearchService:     searchService,
@@ -218,6 +229,10 @@ func (a *App) Shutdown() error {
 		if err := a.BotService.Stop(); err != nil {
 			errs = append(errs, fmt.Errorf("bot shutdown error: %w", err))
 		}
+	}
+
+	if a.OldBotService != nil {
+		a.OldBotService.Stop()
 	}
 
 	if a.DBManager != nil {

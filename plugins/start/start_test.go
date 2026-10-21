@@ -32,6 +32,16 @@ func TestStartPlugin_PayloadValidation(t *testing.T) {
 		t.Errorf("expected valid payload, got has=%v, valid=%v", valid.HasPayload, valid.IsValid)
 	}
 
+	validOldBot := commands.ValidateStartPayload([]string{"/start", "from_oldbot"})
+	if !validOldBot.HasPayload || !validOldBot.IsValid {
+		t.Errorf("expected valid from_oldbot payload, got has=%v, valid=%v", validOldBot.HasPayload, validOldBot.IsValid)
+	}
+
+	validSearch := commands.ValidateStartPayload([]string{"/start", "q_S0dG"})
+	if !validSearch.HasPayload || !validSearch.IsValid {
+		t.Errorf("expected valid q_ search payload, got has=%v, valid=%v", validSearch.HasPayload, validSearch.IsValid)
+	}
+
 	invalid := commands.ValidateStartPayload([]string{"/start", "invalid payload!"})
 	if !invalid.HasPayload || invalid.IsValid {
 		t.Errorf("expected invalid payload to fail validation")

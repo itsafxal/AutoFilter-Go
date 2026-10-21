@@ -118,6 +118,14 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 	if m == nil || m.IsChannel() || m.IsChannelPost() {
 		return nil
 	}
+	return p.ExecuteSearch(m, m.Text())
+}
+
+// ExecuteSearch performs search for rawQuery and replies to message m with interactive filter results.
+func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
+	if m == nil || m.IsChannel() || m.IsChannelPost() {
+		return nil
+	}
 
 	user := m.Sender
 	if user == nil && m.Client != nil {
@@ -144,7 +152,7 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		return nil
 	}
 
-	query := strings.TrimSpace(m.Text())
+	query := strings.TrimSpace(rawQuery)
 	if !search.IsValidSearchText(query) {
 		return nil
 	}

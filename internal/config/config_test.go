@@ -726,3 +726,58 @@ func TestLoadFromEnv_MaintenanceMode(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnv_OldBotTokens(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("DATABASE_URI", "mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true")
+	os.Setenv("OWNER_ID", "12345678")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("DATABASE_URI")
+		os.Unsetenv("OWNER_ID")
+		os.Unsetenv("OLD_BOT_TOKENS")
+		os.Unsetenv("OLD_BOT_TOKEN_1")
+		os.Unsetenv("OLD_BOT_TOKEN_2")
+	}()
+
+	// 1. Defaults (empty)
+	cfgDefault, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfgDefault.HasOldBots() {
+		t.Errorf("expected HasOldBots to be false by default")
+	}
+	if len(cfgDefault.OldBotTokens) != 0 {
+		t.Errorf("expected 0 old bot tokens, got %d", len(cfgDefault.OldBotTokens))
+	}
+
+	// 2. OLD_BOT_TOKENS comma separated
+	os.Setenv("OLD_BOT_TOKENS", "token_a, token_b")
+	cfgTokens, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfgTokens.HasOldBots() {
+		t.Errorf("expected HasOldBots to be true")
+	}
+	if len(cfgTokens.OldBotTokens) != 2 || cfgTokens.OldBotTokens[0] != "token_a" || cfgTokens.OldBotTokens[1] != "token_b" {
+		t.Errorf("expected [token_a, token_b], got %+v", cfgTokens.OldBotTokens)
+	}
+
+	// 3. OLD_BOT_TOKEN_1 and OLD_BOT_TOKEN_2 individual envs with deduplication
+	os.Unsetenv("OLD_BOT_TOKENS")
+	os.Setenv("OLD_BOT_TOKEN_1", "tok_one")
+	os.Setenv("OLD_BOT_TOKEN_2", "tok_two")
+	cfgEnvs, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfgEnvs.OldBotTokens) != 2 || cfgEnvs.OldBotTokens[0] != "tok_one" || cfgEnvs.OldBotTokens[1] != "tok_two" {
+		t.Errorf("expected [tok_one, tok_two], got %+v", cfgEnvs.OldBotTokens)
+	}
+}
+

@@ -65,6 +65,19 @@ func (r *Registry) Register(plugins ...Plugin) error {
 	return nil
 }
 
+// GetPlugin returns a registered plugin by name (case-insensitive), or nil if not found.
+func (r *Registry) GetPlugin(name string) Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, p := range r.plugins {
+		if strings.EqualFold(p.Name(), name) {
+			return p
+		}
+	}
+	return nil
+}
+
 // Validate validates all registered plugins, their command names, aliases, handlers,
 // and detects duplicates and conflicts.
 func (r *Registry) Validate() error {
