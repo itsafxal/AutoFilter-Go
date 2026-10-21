@@ -525,11 +525,11 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if !cfg.EnablePremiumEmoji {
 		t.Errorf("expected EnablePremiumEmoji to default to true")
 	}
-	if cfg.PrevButtonEmojiID != 5447183459602669338 {
-		t.Errorf("expected default PrevButtonEmojiID 5447183459602669338, got %d", cfg.PrevButtonEmojiID)
+	if cfg.PrevButtonEmojiID != 5469982030773120950 {
+		t.Errorf("expected default PrevButtonEmojiID 5469982030773120950, got %d", cfg.PrevButtonEmojiID)
 	}
-	if cfg.NextButtonEmojiID != 5449683594425410231 {
-		t.Errorf("expected default NextButtonEmojiID 5449683594425410231, got %d", cfg.NextButtonEmojiID)
+	if cfg.NextButtonEmojiID != 5469715085670772857 {
+		t.Errorf("expected default NextButtonEmojiID 5469715085670772857, got %d", cfg.NextButtonEmojiID)
 	}
 	if cfg.PageButtonEmojiID != 5837048052061311256 {
 		t.Errorf("expected default PageButtonEmojiID 5837048052061311256, got %d", cfg.PageButtonEmojiID)
@@ -540,8 +540,17 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if cfg.LanguageButtonEmojiID != 5276011261757265100 {
 		t.Errorf("expected default LanguageButtonEmojiID 5276011261757265100, got %d", cfg.LanguageButtonEmojiID)
 	}
-	if cfg.FastDownloadButtonEmojiID != 5195033767969839232 {
-		t.Errorf("expected default FastDownloadButtonEmojiID 5195033767969839232, got %d", cfg.FastDownloadButtonEmojiID)
+	if cfg.MultiLangButtonEmojiID != 5256169350368353876 {
+		t.Errorf("expected default MultiLangButtonEmojiID 5256169350368353876, got %d", cfg.MultiLangButtonEmojiID)
+	}
+	if cfg.SelectLanguageEmojiID != 5447410659077661506 {
+		t.Errorf("expected default SelectLanguageEmojiID 5447410659077661506, got %d", cfg.SelectLanguageEmojiID)
+	}
+	if cfg.SelectQualityEmojiID != 5334544901428229844 {
+		t.Errorf("expected default SelectQualityEmojiID 5334544901428229844, got %d", cfg.SelectQualityEmojiID)
+	}
+	if cfg.FastDownloadButtonEmojiID != 6156513311585211842 {
+		t.Errorf("expected default FastDownloadButtonEmojiID 6156513311585211842, got %d", cfg.FastDownloadButtonEmojiID)
 	}
 	if cfg.GreetingPrefixEmojiID != 5472055112702629499 {
 		t.Errorf("expected default GreetingPrefixEmojiID 5472055112702629499, got %d", cfg.GreetingPrefixEmojiID)
@@ -581,6 +590,9 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	os.Setenv("PAGE_BUTTON_EMOJI_ID", "111")
 	os.Setenv("QUALITY_BUTTON_EMOJI_ID", "222")
 	os.Setenv("LANGUAGE_BUTTON_EMOJI_ID", "333")
+	os.Setenv("MULTI_LANG_BUTTON_EMOJI_ID", "334")
+	os.Setenv("SELECT_LANGUAGE_EMOJI_ID", "335")
+	os.Setenv("SELECT_QUALITY_EMOJI_ID", "336")
 	os.Setenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID", "444")
 	os.Setenv("GREETING_PREFIX_EMOJI_ID", "554")
 	os.Setenv("GREETING_EMOJI_ID", "555")
@@ -614,6 +626,15 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	}
 	if cfg2.LanguageButtonEmojiID != 333 {
 		t.Errorf("expected LanguageButtonEmojiID 333, got %d", cfg2.LanguageButtonEmojiID)
+	}
+	if cfg2.MultiLangButtonEmojiID != 334 {
+		t.Errorf("expected MultiLangButtonEmojiID 334, got %d", cfg2.MultiLangButtonEmojiID)
+	}
+	if cfg2.SelectLanguageEmojiID != 335 {
+		t.Errorf("expected SelectLanguageEmojiID 335, got %d", cfg2.SelectLanguageEmojiID)
+	}
+	if cfg2.SelectQualityEmojiID != 336 {
+		t.Errorf("expected SelectQualityEmojiID 336, got %d", cfg2.SelectQualityEmojiID)
 	}
 	if cfg2.FastDownloadButtonEmojiID != 444 {
 		t.Errorf("expected FastDownloadButtonEmojiID 444, got %d", cfg2.FastDownloadButtonEmojiID)

@@ -305,10 +305,10 @@ func (p *Plugin) buildFastDownloadKeyboard(downloadURL string) *telegram.ReplyIn
 	btnText := "⚡ Fast Download ⚡"
 	var emojiID int64
 	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.EnablePremiumEmoji {
-		btnText = "Fast Download ⚡"
+		btnText = "Fast Download"
 		emojiID = p.appCtx.Config.FastDownloadButtonEmojiID
 		if emojiID == 0 {
-			emojiID = 5195033767969839232
+			emojiID = 6156513311585211842
 		}
 	}
 

@@ -328,7 +328,10 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 			PageButtonEmojiID:         5837048052061311256,
 			QualityButtonEmojiID:      5276251908774858442,
 			LanguageButtonEmojiID:     5276011261757265100,
-			FastDownloadButtonEmojiID: 5195033767969839232,
+			MultiLangButtonEmojiID:    5256169350368353876,
+			SelectLanguageEmojiID:     5447410659077661506,
+			SelectQualityEmojiID:      5334544901428229844,
+			FastDownloadButtonEmojiID: 6156513311585211842,
 			GreetingPrefixEmojiID:     5472055112702629499,
 			GreetingEmojiID:           5427232022252764138,
 			QueryEmojiID:              5190859184312167965,
@@ -506,6 +509,9 @@ func TestAutofilter_MessageText_PremiumEmoji(t *testing.T) {
 	}
 
 	langText := plugin.formatLanguagesMenuText("KGF", "PandaBot")
+	if !strings.Contains(langText, `<emoji id="5447410659077661506">🌐</emoji> <b>Select Desired Language</b>`) {
+		t.Errorf("expected languages menu with select language header emoji tag, got:\n%s", langText)
+	}
 	if !strings.Contains(langText, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
 		t.Errorf("expected languages menu with query emoji tag, got:\n%s", langText)
 	}
@@ -517,6 +523,9 @@ func TestAutofilter_MessageText_PremiumEmoji(t *testing.T) {
 	}
 
 	qualText := plugin.formatQualitiesMenuText("KGF", "PandaBot")
+	if !strings.Contains(qualText, `<emoji id="5334544901428229844">🎞</emoji> <b>Select Desired Quality</b>`) {
+		t.Errorf("expected qualities menu with select quality header emoji tag, got:\n%s", qualText)
+	}
 	if !strings.Contains(qualText, `<emoji id="5190859184312167965">📁</emoji> Query : KGF`) {
 		t.Errorf("expected qualities menu with query emoji tag, got:\n%s", qualText)
 	}
@@ -596,6 +605,33 @@ func TestAutofilter_LanguagesKeyboard(t *testing.T) {
 	}
 	if backBtn.Style == nil || !backBtn.Style.BgDanger {
 		t.Errorf("expected back button in languages menu to have Danger (Red) style")
+	}
+
+	// Test with Premium Emoji enabled
+	plugin := New(&plugins.AppContext{
+		Config: &config.Config{
+			EnablePremiumEmoji:     true,
+			MultiLangButtonEmojiID: 5256169350368353876,
+		},
+	})
+	kbPremium := plugin.buildLanguagesKeyboard("testkey")
+	if kbPremium == nil {
+		t.Fatalf("expected non-empty premium languages keyboard")
+	}
+	var foundMultiLang bool
+	for _, row := range kbPremium.Rows {
+		for _, b := range row.Buttons {
+			btn, ok := b.(*telegram.KeyboardButtonCallback)
+			if ok && btn.Text == "Multi Lang" {
+				foundMultiLang = true
+				if btn.Style == nil || btn.Style.Icon != 5256169350368353876 {
+					t.Errorf("expected multi lang button icon 5256169350368353876, got %v", btn.Style)
+				}
+			}
+		}
+	}
+	if !foundMultiLang {
+		t.Errorf("expected to find 'Multi Lang' button with premium emoji in languages keyboard")
 	}
 }
 

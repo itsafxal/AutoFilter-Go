@@ -529,7 +529,7 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	markup := buildLanguagesKeyboard(searchKey)
+	markup := p.buildLanguagesKeyboard(searchKey)
 
 	botName := p.getBotName(cb.Client)
 	menuText := p.formatLanguagesMenuText(p.getDisplayQuery(sess), botName)
@@ -1142,12 +1142,17 @@ func formatFileButtonLabelCustom(f search.MediaFile, hasIcon bool) string {
 	return label
 }
 
-func buildLanguagesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
+func (p *Plugin) buildLanguagesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
 	kb := telegram.NewKeyboard()
 	var currentRow []telegram.KeyboardButton
 
 	for i, lang := range languages {
-		btn := telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
+		var btn *telegram.KeyboardButtonCallback
+		if lang.Code == "multi" && p != nil && p.isPremiumEmojiEnabled() {
+			btn = telegram.Button.Data("Multi Lang", fmt.Sprintf("fl#%s#%s", lang.Code, searchKey)).Icon(p.getMultiLangEmojiID())
+		} else {
+			btn = telegram.Button.Data(lang.Label, fmt.Sprintf("fl#%s#%s", lang.Code, searchKey))
+		}
 		currentRow = append(currentRow, btn)
 		if (i+1)%2 == 0 || i == len(languages)-1 {
 			kb.AddRow(currentRow...)
@@ -1158,6 +1163,10 @@ func buildLanguagesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
 	// Back to results button (Danger / Red)
 	kb.AddRow(telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ꜰɪʟᴇs ↭", fmt.Sprintf("back#%s", searchKey)).Danger())
 	return kb.Build()
+}
+
+func buildLanguagesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
+	return (&Plugin{}).buildLanguagesKeyboard(searchKey)
 }
 
 func buildQualitiesKeyboard(searchKey string) *telegram.ReplyInlineMarkup {
@@ -1207,14 +1216,14 @@ func (p *Plugin) getPrevEmojiID() int64 {
 	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.PrevButtonEmojiID != 0 {
 		return p.appCtx.Config.PrevButtonEmojiID
 	}
-	return 5447183459602669338
+	return 5469982030773120950
 }
 
 func (p *Plugin) getNextEmojiID() int64 {
 	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.NextButtonEmojiID != 0 {
 		return p.appCtx.Config.NextButtonEmojiID
 	}
-	return 5449683594425410231
+	return 5469715085670772857
 }
 
 func (p *Plugin) getPageButtonEmojiID() int64 {
@@ -1236,6 +1245,27 @@ func (p *Plugin) getLanguageEmojiID() int64 {
 		return p.appCtx.Config.LanguageButtonEmojiID
 	}
 	return 5276011261757265100
+}
+
+func (p *Plugin) getMultiLangEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.MultiLangButtonEmojiID != 0 {
+		return p.appCtx.Config.MultiLangButtonEmojiID
+	}
+	return 5256169350368353876
+}
+
+func (p *Plugin) getSelectLanguageEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.SelectLanguageEmojiID != 0 {
+		return p.appCtx.Config.SelectLanguageEmojiID
+	}
+	return 5447410659077661506
+}
+
+func (p *Plugin) getSelectQualityEmojiID() int64 {
+	if p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.SelectQualityEmojiID != 0 {
+		return p.appCtx.Config.SelectQualityEmojiID
+	}
+	return 5334544901428229844
 }
 
 func (p *Plugin) getGreetingPrefixEmojiID() int64 {
@@ -1579,10 +1609,11 @@ func (p *Plugin) formatLanguagesMenuText(query string, botName string) string {
 	deleteMins := p.getFilterDeleteMinutes()
 	if p.isPremiumEmojiEnabled() {
 		return fmt.Sprintf(
-			"🌐 <b>Select Desired Language</b>\n\n"+
+			"<emoji id=\"%d\">🌐</emoji> <b>Select Desired Language</b>\n\n"+
 				"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
 				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
 				"©%s <emoji id=\"%d\">🗡️</emoji>",
+			p.getSelectLanguageEmojiID(),
 			p.getQueryEmojiID(),
 			html.EscapeString(query),
 			p.getNotePrefixEmojiID(),
@@ -1615,10 +1646,11 @@ func (p *Plugin) formatQualitiesMenuText(query string, botName string) string {
 	deleteMins := p.getFilterDeleteMinutes()
 	if p.isPremiumEmojiEnabled() {
 		return fmt.Sprintf(
-			"🎞 <b>Select Desired Quality</b>\n\n"+
+			"<emoji id=\"%d\">🎞</emoji> <b>Select Desired Quality</b>\n\n"+
 				"<emoji id=\"%d\">📁</emoji> Query : %s\n\n"+
 				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
 				"©%s <emoji id=\"%d\">🗡️</emoji>",
+			p.getSelectQualityEmojiID(),
 			p.getQueryEmojiID(),
 			html.EscapeString(query),
 			p.getNotePrefixEmojiID(),

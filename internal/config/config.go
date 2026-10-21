@@ -128,10 +128,10 @@ type Config struct {
 	// EnablePremiumEmoji specifies whether custom emoji IDs are used for buttons and messages (default: true).
 	EnablePremiumEmoji bool
 
-	// PrevButtonEmojiID defines the Telegram custom emoji ID for the Previous button (default: 5447183459602669338).
+	// PrevButtonEmojiID defines the Telegram custom emoji ID for the Previous button (default: 5469982030773120950).
 	PrevButtonEmojiID int64
 
-	// NextButtonEmojiID defines the Telegram custom emoji ID for the Next button (default: 5449683594425410231).
+	// NextButtonEmojiID defines the Telegram custom emoji ID for the Next button (default: 5469715085670772857).
 	NextButtonEmojiID int64
 
 	// PageButtonEmojiID defines the Telegram custom emoji ID for the Page indicator button (default: 5837048052061311256).
@@ -143,7 +143,16 @@ type Config struct {
 	// LanguageButtonEmojiID defines the Telegram custom emoji ID for the Language button (default: 5276011261757265100).
 	LanguageButtonEmojiID int64
 
-	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 5195033767969839232).
+	// MultiLangButtonEmojiID defines the Telegram custom emoji ID for the Multi Lang button in languages menu (default: 5256169350368353876).
+	MultiLangButtonEmojiID int64
+
+	// SelectLanguageEmojiID defines the Telegram custom emoji ID for 'Select Desired Language' header (default: 5447410659077661506).
+	SelectLanguageEmojiID int64
+
+	// SelectQualityEmojiID defines the Telegram custom emoji ID for 'Select Desired Quality' header (default: 5334544901428229844).
+	SelectQualityEmojiID int64
+
+	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 6156513311585211842).
 	FastDownloadButtonEmojiID int64
 
 	// GreetingPrefixEmojiID defines the Telegram custom emoji ID after 'Hey' in result text (default: 5472055112702629499).
@@ -384,14 +393,14 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
-	prevEmojiID := int64(5447183459602669338)
+	prevEmojiID := int64(5469982030773120950)
 	if pEmojiStr := strings.TrimSpace(os.Getenv("PREV_BUTTON_EMOJI_ID")); pEmojiStr != "" {
 		if val, err := strconv.ParseInt(pEmojiStr, 10, 64); err == nil && val != 0 {
 			prevEmojiID = val
 		}
 	}
 
-	nextEmojiID := int64(5449683594425410231)
+	nextEmojiID := int64(5469715085670772857)
 	if nEmojiStr := strings.TrimSpace(os.Getenv("NEXT_BUTTON_EMOJI_ID")); nEmojiStr != "" {
 		if val, err := strconv.ParseInt(nEmojiStr, 10, 64); err == nil && val != 0 {
 			nextEmojiID = val
@@ -419,7 +428,28 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
-	fastDownloadButtonEmojiID := int64(5195033767969839232)
+	multiLangButtonEmojiID := int64(5256169350368353876)
+	if s := strings.TrimSpace(os.Getenv("MULTI_LANG_BUTTON_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			multiLangButtonEmojiID = val
+		}
+	}
+
+	selectLanguageEmojiID := int64(5447410659077661506)
+	if s := strings.TrimSpace(os.Getenv("SELECT_LANGUAGE_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			selectLanguageEmojiID = val
+		}
+	}
+
+	selectQualityEmojiID := int64(5334544901428229844)
+	if s := strings.TrimSpace(os.Getenv("SELECT_QUALITY_EMOJI_ID")); s != "" {
+		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
+			selectQualityEmojiID = val
+		}
+	}
+
+	fastDownloadButtonEmojiID := int64(6156513311585211842)
 	if s := strings.TrimSpace(os.Getenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID")); s != "" {
 		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
 			fastDownloadButtonEmojiID = val
@@ -559,6 +589,9 @@ func LoadFromEnv() (*Config, error) {
 		PageButtonEmojiID:        pageButtonEmojiID,
 		QualityButtonEmojiID:     qualityButtonEmojiID,
 		LanguageButtonEmojiID:    languageButtonEmojiID,
+		MultiLangButtonEmojiID:   multiLangButtonEmojiID,
+		SelectLanguageEmojiID:    selectLanguageEmojiID,
+		SelectQualityEmojiID:     selectQualityEmojiID,
 		FastDownloadButtonEmojiID: fastDownloadButtonEmojiID,
 		GreetingPrefixEmojiID:    greetingPrefixEmojiID,
 		GreetingEmojiID:          greetingEmojiID,

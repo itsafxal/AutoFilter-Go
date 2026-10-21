@@ -138,15 +138,15 @@ func TestStreamPlugin_FastDownloadKeyboardStyles(t *testing.T) {
 	pluginPremium := New(&plugins.AppContext{
 		Config: &config.Config{
 			EnablePremiumEmoji:        true,
-			FastDownloadButtonEmojiID: 5195033767969839232,
+			FastDownloadButtonEmojiID: 6156513311585211842,
 		},
 	})
 	kbPremium := pluginPremium.buildFastDownloadKeyboard("https://stream.example.com/dl/xyz")
 	dlBtnPremium := kbPremium.Rows[0].Buttons[0].(*telegram.KeyboardButtonURL)
-	if dlBtnPremium.Text != "Fast Download ⚡" {
-		t.Errorf("expected button text 'Fast Download ⚡', got %q", dlBtnPremium.Text)
+	if dlBtnPremium.Text != "Fast Download" {
+		t.Errorf("expected button text 'Fast Download', got %q", dlBtnPremium.Text)
 	}
-	if dlBtnPremium.Style == nil || dlBtnPremium.Style.Icon != 5195033767969839232 {
-		t.Errorf("expected custom emoji icon 5195033767969839232, got %v", dlBtnPremium.Style)
+	if dlBtnPremium.Style == nil || dlBtnPremium.Style.Icon != 6156513311585211842 {
+		t.Errorf("expected custom emoji icon 6156513311585211842, got %v", dlBtnPremium.Style)
 	}
 }
