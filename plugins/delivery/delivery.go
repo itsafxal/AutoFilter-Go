@@ -137,11 +137,25 @@ func (p *Plugin) HandleGetFile(m *telegram.NewMessage) error {
 	return replyErr
 }
 
+func (p *Plugin) isMaintenanceMode() bool {
+	return p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.MaintenanceMode
+}
+
 // HandleFileCallback redirects users clicking a file button in a group/channel to private chat.
 // Format: file#<file_id>
 func (p *Plugin) HandleFileCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
+	}
+
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, err := cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return err
+		}
 	}
 
 	botUsername := "bot"
@@ -172,6 +186,20 @@ func (p *Plugin) HandleFileCallback(cb *telegram.CallbackQuery) error {
 func (p *Plugin) HandleCheckSubCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
+	}
+
+	if p.isMaintenanceMode() {
+		userID := cb.SenderID
+		if userID == 0 && cb.Sender != nil {
+			userID = cb.Sender.ID
+		}
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+		if !isAdmin {
+			_, err := cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return err
+		}
 	}
 
 	data := cb.DataString()

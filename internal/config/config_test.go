@@ -650,3 +650,58 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnv_MaintenanceMode(t *testing.T) {
+	os.Setenv("BOT_TOKEN", "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ")
+	os.Setenv("API_ID", "123456")
+	os.Setenv("API_HASH", "abcdef0123456789abcdef0123456789")
+	os.Setenv("DATABASE_URI", "mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true")
+	os.Setenv("OWNER_ID", "12345678")
+	defer func() {
+		os.Unsetenv("BOT_TOKEN")
+		os.Unsetenv("API_ID")
+		os.Unsetenv("API_HASH")
+		os.Unsetenv("DATABASE_URI")
+		os.Unsetenv("OWNER_ID")
+		os.Unsetenv("MAINTENANCE_MODE")
+	}()
+
+	// 1. Default should be false
+	cfg1, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg1.MaintenanceMode {
+		t.Errorf("expected default MaintenanceMode to be false, got true")
+	}
+
+	// 2. Set to true
+	os.Setenv("MAINTENANCE_MODE", "true")
+	cfg2, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg2.MaintenanceMode {
+		t.Errorf("expected MaintenanceMode to be true, got false")
+	}
+
+	// 3. Set to 1
+	os.Setenv("MAINTENANCE_MODE", "1")
+	cfg3, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg3.MaintenanceMode {
+		t.Errorf("expected MaintenanceMode to be true, got false")
+	}
+
+	// 4. Set to false
+	os.Setenv("MAINTENANCE_MODE", "false")
+	cfg4, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg4.MaintenanceMode {
+		t.Errorf("expected MaintenanceMode to be false, got true")
+	}
+}
+

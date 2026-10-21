@@ -218,7 +218,7 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 // wrapMessageHandler wraps a message handler with channel filtering, panic recovery, and structured logging.
 func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 	return func(m *telegram.NewMessage) (err error) {
-		if !mh.AllowChannel && m != nil && (m.IsChannel() || m.IsChannelPost()) {
+		if !mh.AllowChannel && m != nil && m.Message != nil && (m.IsChannel() || m.IsChannelPost()) {
 			// Never reply or process ambient messages in broadcast channels unless handler explicitly opted in
 			return nil
 		}
@@ -264,7 +264,7 @@ func (r *Registry) wrapCallbackHandler(cb CallbackDefinition) CallbackHandlerFun
 // wrapHandler wraps a command handler with channel filtering, admin protection and panic recovery.
 func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 	return func(m *telegram.NewMessage) (err error) {
-		if m != nil && (m.IsChannel() || m.IsChannelPost()) {
+		if m != nil && m.Message != nil && (m.IsChannel() || m.IsChannelPost()) {
 			// Never reply or process commands in broadcast channels
 			return nil
 		}
@@ -280,11 +280,38 @@ func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 			}
 		}()
 
+		// Enforce MaintenanceMode: only /start works for non-admins
+		if r.appCtx != nil && r.appCtx.Config != nil && r.appCtx.Config.MaintenanceMode {
+			var userID int64
+			if m != nil {
+				if m.Sender != nil && m.Sender.ID != 0 {
+					userID = m.Sender.ID
+				} else if m.Message != nil {
+					userID = m.SenderID()
+				}
+			}
+			if !r.appCtx.Config.IsAdmin(userID) {
+				if cmd.Name != "start" {
+					if r.appCtx.Logger != nil {
+						r.appCtx.Logger.Info("command blocked due to maintenance mode",
+							"command", cmd.Name,
+							"user_id", userID,
+						)
+					}
+					return nil
+				}
+			}
+		}
+
 		// Enforce AdminOnly if configured
 		if cmd.AdminOnly && r.appCtx != nil && r.appCtx.Config != nil {
 			var userID int64
 			if m != nil {
-				userID = m.SenderID()
+				if m.Sender != nil && m.Sender.ID != 0 {
+					userID = m.Sender.ID
+				} else if m.Message != nil {
+					userID = m.SenderID()
+				}
 			}
 			if !r.appCtx.Config.IsAdmin(userID) {
 				if r.appCtx.Logger != nil {

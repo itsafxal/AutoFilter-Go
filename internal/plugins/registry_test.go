@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/config"
 )
 
 type mockPlugin struct {
@@ -391,6 +392,63 @@ func TestRegistry_ChannelExclusion(t *testing.T) {
 	_ = msgHandler(pmMsg)
 	if !calledMsg {
 		t.Error("expected message handler to be called for private chat")
+	}
+}
+
+func TestRegistry_WrapHandler_MaintenanceMode(t *testing.T) {
+	cfg := &config.Config{
+		MaintenanceMode: true,
+		OwnerID:         100,
+		Admins:          []int64{200},
+	}
+	appCtx := &AppContext{
+		Config: cfg,
+	}
+	reg := NewRegistry(appCtx)
+
+	calledStart := false
+	startCmd := CommandDefinition{
+		Name: "start",
+		Handler: func(m *telegram.NewMessage) error {
+			calledStart = true
+			return nil
+		},
+	}
+
+	calledPing := false
+	pingCmd := CommandDefinition{
+		Name: "ping",
+		Handler: func(m *telegram.NewMessage) error {
+			calledPing = true
+			return nil
+		},
+	}
+
+	wrappedStart := reg.wrapHandler(startCmd)
+	wrappedPing := reg.wrapHandler(pingCmd)
+
+	// 1. Non-admin user (ID: 999) calling /start -> should execute
+	nonAdminMsg := &telegram.NewMessage{
+		Sender: &telegram.UserObj{ID: 999},
+	}
+	_ = wrappedStart(nonAdminMsg)
+	if !calledStart {
+		t.Error("expected /start to be executed for non-admin in maintenance mode")
+	}
+
+	// 2. Non-admin user (ID: 999) calling /ping -> should be blocked
+	_ = wrappedPing(nonAdminMsg)
+	if calledPing {
+		t.Error("expected /ping to be BLOCKED for non-admin in maintenance mode")
+	}
+
+	// 3. Admin user (ID: 200) calling /ping -> should execute
+	adminMsg := &telegram.NewMessage{
+		Sender: &telegram.UserObj{ID: 200},
+	}
+	_ = wrappedPing(adminMsg)
+	if !calledPing {
+		t.Error("expected /ping to be executed for admin in maintenance mode")
 	}
 }
 

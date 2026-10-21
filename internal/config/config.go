@@ -121,6 +121,10 @@ type Config struct {
 	// EnableFastDownloadButton specifies whether the "⚡ Get Fast Download" button is added to delivered media (default: true).
 	EnableFastDownloadButton bool
 
+	// MaintenanceMode specifies whether maintenance mode is active.
+	// When true, only admins can search/receive results in groups and PM; non-admins can only use /start (default: false).
+	MaintenanceMode bool
+
 	// EnablePremiumEmoji specifies whether custom emoji IDs are used for buttons and messages (default: true).
 	EnablePremiumEmoji bool
 
@@ -366,6 +370,13 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
+	maintenanceMode := false
+	if mmStr := strings.TrimSpace(os.Getenv("MAINTENANCE_MODE")); mmStr != "" {
+		if val, err := strconv.ParseBool(mmStr); err == nil {
+			maintenanceMode = val
+		}
+	}
+
 	enablePremiumEmoji := true
 	if peStr := strings.TrimSpace(os.Getenv("ENABLE_PREMIUM_EMOJI")); peStr != "" {
 		if val, err := strconv.ParseBool(peStr); err == nil {
@@ -541,6 +552,7 @@ func LoadFromEnv() (*Config, error) {
 		StreamPort:               streamPort,
 		StreamBindAddr:           streamBindAddr,
 		EnableFastDownloadButton: enableFastDownloadBtn,
+		MaintenanceMode:          maintenanceMode,
 		EnablePremiumEmoji:       enablePremiumEmoji,
 		PrevButtonEmojiID:        prevEmojiID,
 		NextButtonEmojiID:        nextEmojiID,

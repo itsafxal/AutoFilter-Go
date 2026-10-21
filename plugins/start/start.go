@@ -217,6 +217,10 @@ func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
 	return nil
 }
 
+func (p *Plugin) isMaintenanceMode() bool {
+	return p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.MaintenanceMode
+}
+
 // HandleStart handles the /start command in private and group chats.
 func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 	botUsername := "bot"
@@ -231,6 +235,19 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 
 	// Handle Group and Supergroup chats
 	if m.IsGroup() {
+		if p.isMaintenanceMode() {
+			var userID int64
+			if m.Sender != nil {
+				userID = m.Sender.ID
+			} else {
+				userID = m.SenderID()
+			}
+			isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+			if !isAdmin {
+				return nil
+			}
+		}
+
 		chatTitle := "Chat"
 		if m.Channel != nil && m.Channel.Title != "" {
 			chatTitle = m.Channel.Title
@@ -323,6 +340,18 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 					userID = user.ID
 				} else {
 					userID = m.SenderID()
+				}
+
+				if p.isMaintenanceMode() {
+					isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+					if !isAdmin {
+						welcomeText, replyMarkup := p.buildWelcomeContent(user, botUsername)
+						_, err := m.Reply("⚠️ <b>Bot is currently under maintenance. File delivery is temporarily paused.</b>\n\n"+welcomeText, &telegram.SendOptions{
+							ParseMode:   "html",
+							ReplyMarkup: replyMarkup,
+						})
+						return err
+					}
 				}
 
 				// Force Subscribe Verification Flow matching legacy TGxCyberBot

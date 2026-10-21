@@ -137,10 +137,24 @@ func (p *Plugin) HandleFastDownloadCommand(m *telegram.NewMessage) error {
 	return err
 }
 
+func (p *Plugin) isMaintenanceMode() bool {
+	return p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.MaintenanceMode
+}
+
 // HandleFastDownloadCallback handles the callback query when the Fast Download button is clicked.
 func (p *Plugin) HandleFastDownloadCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
+	}
+
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, err := cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return err
+		}
 	}
 
 	data := cb.DataString()

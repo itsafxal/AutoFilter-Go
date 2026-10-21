@@ -772,5 +772,56 @@ func TestAutofilter_GroupSession_Isolation(t *testing.T) {
 	}
 }
 
+func TestAutofilter_MaintenanceMode(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_maint.sqlite3")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{
+		SQLiteDBPath:    dbPath,
+		SyncBatchSize:   100,
+		MaintenanceMode: true,
+		OwnerID:         999,
+		Admins:          []int64{888},
+	}
+	dbManager := database.NewDatabaseManager(cfg, logger)
+	if err := dbManager.Init(context.Background()); err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer dbManager.Close()
+
+	searchService := search.NewService(dbManager, logger)
+	appCtx := &plugins.AppContext{
+		Config: cfg,
+		Logger: logger,
+		DB:     dbManager,
+		Search: searchService,
+	}
+	plugin := New(appCtx)
+
+	if !plugin.isMaintenanceMode() {
+		t.Fatalf("expected maintenance mode to be true")
+	}
+
+	// Non-admin message in group or DM should be completely ignored (return nil)
+	nonAdminMsg := &telegram.NewMessage{
+		Sender: &telegram.UserObj{ID: 12345},
+		Chat:   &telegram.ChatObj{ID: -10012345},
+		Message: &telegram.MessageObj{
+			Message: "avatar",
+		},
+	}
+
+	err := plugin.HandleTextMessage(nonAdminMsg)
+	if err != nil {
+		t.Errorf("expected nil error for non-admin message in maintenance mode, got %v", err)
+	}
+
+	// Maintenance disabled: should reflect false
+	cfg.MaintenanceMode = false
+	if plugin.isMaintenanceMode() {
+		t.Errorf("expected maintenance mode to be false")
+	}
+}
+
 
 

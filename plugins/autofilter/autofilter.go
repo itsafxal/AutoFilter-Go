@@ -149,6 +149,22 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 		return nil
 	}
 
+	// In maintenance mode, only admins receive search results (both in group and PM).
+	// Groups and non-admin users receive no search responses.
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+		if !isAdmin {
+			if p.appCtx != nil && p.appCtx.Logger != nil {
+				p.appCtx.Logger.Info("autofilter query blocked: maintenance mode active",
+					"query", query,
+					"user_id", userID,
+					"chat_id", m.ChatID(),
+				)
+			}
+			return nil
+		}
+	}
+
 	if p.appCtx == nil || p.appCtx.Search == nil {
 		return nil
 	}
@@ -314,6 +330,16 @@ func (p *Plugin) HandlePaginationCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
+	}
+
 	parts := strings.Split(cb.DataString(), "|")
 	if len(parts) != 3 {
 		_, _ = cb.Answer("Invalid pagination data", &telegram.CallbackOptions{Alert: true})
@@ -392,6 +418,16 @@ func (p *Plugin) HandleSpellCheckCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
+	}
+
 	parts := strings.Split(cb.DataString(), "#")
 	if len(parts) != 3 {
 		_, _ = cb.Answer("Invalid suggestion data", &telegram.CallbackOptions{Alert: true})
@@ -458,6 +494,16 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
+	}
+
 	parts := strings.SplitN(cb.DataString(), "#", 2)
 	if len(parts) != 2 {
 		return nil
@@ -506,6 +552,16 @@ func (p *Plugin) HandleLanguagesCallback(cb *telegram.CallbackQuery) error {
 func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
+	}
+
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
 	}
 
 	parts := strings.Split(cb.DataString(), "#")
@@ -579,6 +635,16 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
+	}
+
 	parts := strings.SplitN(cb.DataString(), "#", 2)
 	if len(parts) != 2 {
 		return nil
@@ -627,6 +693,16 @@ func (p *Plugin) HandleQualitiesCallback(cb *telegram.CallbackQuery) error {
 func (p *Plugin) HandleFilterQualityCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
+	}
+
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
 	}
 
 	parts := strings.Split(cb.DataString(), "#")
@@ -700,6 +776,16 @@ func (p *Plugin) HandleBackToFilesCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
+	}
+
 	parts := strings.Split(cb.DataString(), "#")
 	if len(parts) != 2 {
 		return nil
@@ -769,6 +855,16 @@ func (p *Plugin) HandleBackToFilesCallback(cb *telegram.CallbackQuery) error {
 func (p *Plugin) HandleBackToAllFilesCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
+	}
+
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
+		if !isAdmin {
+			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
+				Alert: true,
+			})
+			return nil
+		}
 	}
 
 	parts := strings.Split(cb.DataString(), "#")
@@ -1101,6 +1197,10 @@ func formatBytes(bytes int64) string {
 
 func (p *Plugin) isPremiumEmojiEnabled() bool {
 	return p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.EnablePremiumEmoji
+}
+
+func (p *Plugin) isMaintenanceMode() bool {
+	return p != nil && p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.MaintenanceMode
 }
 
 func (p *Plugin) getPrevEmojiID() int64 {
