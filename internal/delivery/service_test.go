@@ -669,7 +669,7 @@ func TestDelivery_FastDownloadButton(t *testing.T) {
 	}
 
 	// 4. Test premium emoji icon and label for Fast Download button
-	svc.SetPremiumEmojiConfig(true, 5195033767969839232)
+	svc.SetPremiumEmojiConfig(true, 5992513524440502236)
 	mock.fallbackErr = nil
 	_, err = svc.Deliver(context.Background(), 12345, "vid123", DeliveryOptions{UserID: 111})
 	if err != nil {
@@ -686,11 +686,11 @@ func TestDelivery_FastDownloadButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected KeyboardButtonCallback, got %T", kb.Rows[0].Buttons[0])
 	}
-	if dlBtn.Text != "Fast Download ⚡" {
-		t.Errorf("expected button text 'Fast Download ⚡', got %q", dlBtn.Text)
+	if dlBtn.Text != "Fast Download" {
+		t.Errorf("expected button text 'Fast Download', got %q", dlBtn.Text)
 	}
-	if dlBtn.Style == nil || dlBtn.Style.Icon != 5195033767969839232 {
-		t.Errorf("expected custom emoji icon 5195033767969839232, got %v", dlBtn.Style)
+	if dlBtn.Style == nil || dlBtn.Style.Icon != 5992513524440502236 {
+		t.Errorf("expected custom emoji icon 5992513524440502236, got %v", dlBtn.Style)
 	}
 	if dlBtn.Style == nil || !dlBtn.Style.BgDanger {
 		t.Errorf("expected Danger (Red) style on fast download button")

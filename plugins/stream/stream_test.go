@@ -133,4 +133,20 @@ func TestStreamPlugin_FastDownloadKeyboardStyles(t *testing.T) {
 	if dlBtnBlue.Style == nil || !dlBtnBlue.Style.BgPrimary {
 		t.Errorf("expected Fast Download button with 'blue' style to have BgPrimary style, got %v", dlBtnBlue.Style)
 	}
+
+	// 3. Premium Emoji enabled
+	pluginPremium := New(&plugins.AppContext{
+		Config: &config.Config{
+			EnablePremiumEmoji:        true,
+			FastDownloadButtonEmojiID: 5992513524440502236,
+		},
+	})
+	kbPremium := pluginPremium.buildFastDownloadKeyboard("https://stream.example.com/dl/xyz")
+	dlBtnPremium := kbPremium.Rows[0].Buttons[0].(*telegram.KeyboardButtonURL)
+	if dlBtnPremium.Text != "Fast Download" {
+		t.Errorf("expected button text 'Fast Download', got %q", dlBtnPremium.Text)
+	}
+	if dlBtnPremium.Style == nil || dlBtnPremium.Style.Icon != 5992513524440502236 {
+		t.Errorf("expected custom emoji icon 5992513524440502236, got %v", dlBtnPremium.Style)
+	}
 }

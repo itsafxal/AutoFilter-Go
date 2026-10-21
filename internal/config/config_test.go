@@ -540,8 +540,8 @@ func TestLoadFromEnv_PremiumEmoji(t *testing.T) {
 	if cfg.LanguageButtonEmojiID != 5276011261757265100 {
 		t.Errorf("expected default LanguageButtonEmojiID 5276011261757265100, got %d", cfg.LanguageButtonEmojiID)
 	}
-	if cfg.FastDownloadButtonEmojiID != 5195033767969839232 {
-		t.Errorf("expected default FastDownloadButtonEmojiID 5195033767969839232, got %d", cfg.FastDownloadButtonEmojiID)
+	if cfg.FastDownloadButtonEmojiID != 5992513524440502236 {
+		t.Errorf("expected default FastDownloadButtonEmojiID 5992513524440502236, got %d", cfg.FastDownloadButtonEmojiID)
 	}
 	if cfg.GreetingEmojiID != 5427232022252764138 {
 		t.Errorf("expected default GreetingEmojiID 5427232022252764138, got %d", cfg.GreetingEmojiID)

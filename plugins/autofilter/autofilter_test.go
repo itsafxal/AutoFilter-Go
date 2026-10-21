@@ -328,7 +328,7 @@ func TestAutofilter_Pagination_PremiumEmoji(t *testing.T) {
 			PageButtonEmojiID:         5837048052061311256,
 			QualityButtonEmojiID:      5276251908774858442,
 			LanguageButtonEmojiID:     5276011261757265100,
-			FastDownloadButtonEmojiID: 5195033767969839232,
+			FastDownloadButtonEmojiID: 5992513524440502236,
 			GreetingEmojiID:           5427232022252764138,
 			QueryEmojiID:              5190859184312167965,
 			PageTextEmojiID:           5836954069586946866,

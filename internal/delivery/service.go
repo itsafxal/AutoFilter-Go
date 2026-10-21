@@ -366,9 +366,9 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		if s.enablePremiumEmoji {
 			emojiID := s.fastDownloadEmojiID
 			if emojiID == 0 {
-				emojiID = 5195033767969839232
+				emojiID = 5992513524440502236
 			}
-			btn = telegram.Button.Data("Fast Download ⚡", fmt.Sprintf("fast_download#%s", cleanID)).Icon(emojiID).Danger()
+			btn = telegram.Button.Data("Fast Download", fmt.Sprintf("fast_download#%s", cleanID)).Icon(emojiID).Danger()
 		} else {
 			btn = telegram.Button.Data("⚡ Fast Download", fmt.Sprintf("fast_download#%s", cleanID)).Danger()
 		}

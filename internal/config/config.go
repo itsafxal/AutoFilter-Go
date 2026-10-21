@@ -139,7 +139,7 @@ type Config struct {
 	// LanguageButtonEmojiID defines the Telegram custom emoji ID for the Language button (default: 5276011261757265100).
 	LanguageButtonEmojiID int64
 
-	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 5195033767969839232).
+	// FastDownloadButtonEmojiID defines the Telegram custom emoji ID for the Fast Download button (default: 5992513524440502236).
 	FastDownloadButtonEmojiID int64
 
 	// GreetingEmojiID defines the Telegram custom emoji ID for the greeting in result text (default: 5427232022252764138).
@@ -399,7 +399,7 @@ func LoadFromEnv() (*Config, error) {
 		}
 	}
 
-	fastDownloadButtonEmojiID := int64(5195033767969839232)
+	fastDownloadButtonEmojiID := int64(5992513524440502236)
 	if s := strings.TrimSpace(os.Getenv("FAST_DOWNLOAD_BUTTON_EMOJI_ID")); s != "" {
 		if val, err := strconv.ParseInt(s, 10, 64); err == nil && val != 0 {
 			fastDownloadButtonEmojiID = val
