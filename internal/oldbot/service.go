@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 )
 
@@ -178,6 +179,8 @@ func (s *Service) handleStart(m *telegram.NewMessage) {
 		return
 	}
 
+	plugins.EnsurePeerCached(m, 2*time.Second)
+
 	mainUser := s.cfg.MainBotUsername
 	mainBotLink := fmt.Sprintf("https://t.me/%s?start=from_oldbot", mainUser)
 	if mainUser == "" {
@@ -200,10 +203,16 @@ func (s *Service) handleStart(m *telegram.NewMessage) {
 		AddRow(telegram.Button.URL("🚀 Switch To Main Bot 🚀", mainBotLink)).
 		Build()
 
-	_, _ = m.Reply(text, &telegram.SendOptions{
+	_, err := m.Reply(text, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: replyMarkup,
 	})
+	if err != nil && m.Peer != nil && m.Client != nil {
+		_, _ = m.Client.SendMessage(m.Peer, text, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: replyMarkup,
+		})
+	}
 }
 
 // handleMessage handles user movie queries in old bots and generates redirect buttons to the main bot.
@@ -211,6 +220,8 @@ func (s *Service) handleMessage(m *telegram.NewMessage) {
 	if m == nil || m.IsChannel() || m.IsChannelPost() {
 		return
 	}
+
+	plugins.EnsurePeerCached(m, 2*time.Second)
 
 	// Commands other than /start (e.g., /help, /about) get migration redirect
 	if m.IsCommand() || strings.HasPrefix(m.Text(), "/") {
@@ -231,10 +242,16 @@ func (s *Service) handleMessage(m *telegram.NewMessage) {
 		replyMarkup := telegram.NewKeyboard().
 			AddRow(telegram.Button.URL("🚀 Open Main Bot 🚀", mainBotLink)).
 			Build()
-		_, _ = m.Reply(text, &telegram.SendOptions{
+		_, err := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: replyMarkup,
 		})
+		if err != nil && m.Peer != nil && m.Client != nil {
+			_, _ = m.Client.SendMessage(m.Peer, text, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: replyMarkup,
+			})
+		}
 		return
 	}
 
@@ -291,10 +308,16 @@ func (s *Service) handleMessage(m *telegram.NewMessage) {
 		// Bottom Button: Direct Main Bot link
 		kb.AddRow(telegram.Button.URL("🚀 Switch To Main Bot 🚀", mainHomeURL))
 
-		_, _ = m.Reply(text, &telegram.SendOptions{
+		_, err := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: kb.Build(),
 		})
+		if err != nil && m.Peer != nil && m.Client != nil {
+			_, _ = m.Client.SendMessage(m.Peer, text, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: kb.Build(),
+			})
+		}
 		return
 	}
 
@@ -311,10 +334,16 @@ func (s *Service) handleMessage(m *telegram.NewMessage) {
 		AddRow(telegram.Button.URL("🚀 Switch To Main Bot 🚀", mainHomeURL)).
 		Build()
 
-	_, _ = m.Reply(text, &telegram.SendOptions{
+	_, err := m.Reply(text, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: replyMarkup,
 	})
+	if err != nil && m.Peer != nil && m.Client != nil {
+		_, _ = m.Client.SendMessage(m.Peer, text, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: replyMarkup,
+		})
+	}
 }
 
 // BuildSearchDeepLinkPayload encodes a query string into a safe Telegram start deep-link payload.

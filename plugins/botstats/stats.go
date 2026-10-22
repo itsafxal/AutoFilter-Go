@@ -210,7 +210,7 @@ func (p *Plugin) HandleStats(m *telegram.NewMessage) error {
 
 	if p.isMaintenanceMode() {
 		var userID int64
-		if m.Sender != nil {
+		if m.Sender != nil && m.Sender.ID != 0 {
 			userID = m.Sender.ID
 		} else {
 			userID = m.SenderID()

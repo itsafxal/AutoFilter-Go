@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
@@ -235,6 +236,8 @@ func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 			// Never reply or process ambient messages in broadcast channels unless handler explicitly opted in
 			return nil
 		}
+		// Ensure sender/chat peer is fully resolved and cached before handling
+		EnsurePeerCached(m, 2*time.Second)
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in message handler: %v", rec)
@@ -281,6 +284,8 @@ func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 			// Never reply or process commands in broadcast channels
 			return nil
 		}
+		// Ensure sender/chat peer is fully resolved and cached before handling
+		EnsurePeerCached(m, 2*time.Second)
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("panic in command /%s: %v", cmd.Name, rec)
@@ -470,7 +475,6 @@ func (r *Registry) GenerateAdminHelpText() string {
 	sb.WriteString("<i>Admin privileges verified. All bot commands including administrative and force-subscribe controls are listed above.</i>")
 	return strings.TrimSpace(sb.String())
 }
-
 
 // PluginCount returns the number of registered plugins.
 func (r *Registry) PluginCount() int {

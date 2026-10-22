@@ -385,41 +385,46 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		ReplyMarkup: replyMarkup,
 	}
 
+	var targetPeer any = chatID
+	if opts.RecipientPeer != nil {
+		targetPeer = opts.RecipientPeer
+	}
+
 	// 8. Dispatch to appropriate Telegram send method with video fallback
 	switch mediaType {
 	case "video":
 		methodUsed = "SendVideo"
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, mediaOpts)
 		// If SendVideo failed due to video container format incompatibility, fallback to SendDocument
 		if err != nil && isBadMediaRequest(err) {
 			s.logger.Warn("sendVideo failed with format constraint, falling back to sendDocument", "error", err)
 			methodUsed = "SendDocument"
 			fallbackOpts := *mediaOpts
 			fallbackOpts.ForceDocument = true
-			sentMsg, err = sender.SendMedia(chatID, mediaToSend, &fallbackOpts)
+			sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, &fallbackOpts)
 		}
 
 	case "audio":
 		methodUsed = "SendAudio"
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, mediaOpts)
 
 	case "photo":
 		methodUsed = "SendPhoto"
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, mediaOpts)
 
 	case "animation":
 		methodUsed = "SendAnimation"
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, mediaOpts)
 
 	case "voice":
 		methodUsed = "SendVoice"
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, mediaOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, mediaOpts)
 
 	default: // "document" or unspecified
 		methodUsed = "SendDocument"
 		docOpts := *mediaOpts
 		docOpts.ForceDocument = true
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, &docOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, &docOpts)
 	}
 
 	// If Telegram rejected with BUTTON_URL_INVALID or BUTTON_DATA_INVALID, retry without markup to guarantee delivery
@@ -427,7 +432,19 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 		s.logger.Warn("sendMedia failed with button error, retrying without replyMarkup", "error", err)
 		fallbackOpts := *mediaOpts
 		fallbackOpts.ReplyMarkup = nil
-		sentMsg, err = sender.SendMedia(chatID, mediaToSend, &fallbackOpts)
+		sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, &fallbackOpts)
+	}
+
+	// If rejected because peer is missing from cache, sync difference and retry once
+	if err != nil && strings.Contains(err.Error(), "missing from cache") {
+		s.logger.Warn("sendMedia failed with missing from cache, attempting to sync difference and retry", "chat_id", chatID, "error", err)
+		if client, ok := sender.(*telegram.Client); ok {
+			pts := client.ExportPts()
+			if pts > 0 {
+				_, _ = client.GetDifference(pts, 100)
+			}
+			sentMsg, err = sender.SendMedia(targetPeer, mediaToSend, mediaOpts)
+		}
 	}
 
 	// 9. Handle Telegram errors

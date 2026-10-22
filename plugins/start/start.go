@@ -214,10 +214,13 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 	if m.IsGroup() {
 		if p.isMaintenanceMode() {
 			var userID int64
-			if m.Sender != nil {
+			if m.Sender != nil && m.Sender.ID != 0 {
 				userID = m.Sender.ID
 			} else {
 				userID = m.SenderID()
+			}
+			if userID == 0 {
+				userID = m.ChatID()
 			}
 			isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
 			if !isAdmin {
@@ -256,12 +259,31 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 
 	// Handle Private chats
 	user := m.Sender
-	if user != nil && p.appCtx != nil && p.appCtx.DB != nil && p.appCtx.DB.UserRepo() != nil {
-		userName := user.FirstName
-		if user.LastName != "" {
-			userName += " " + user.LastName
+	if (user == nil || user.ID == 0) && m.Client != nil {
+		if sender, err := m.GetSender(); err == nil && sender != nil && sender.ID != 0 {
+			user = sender
+			m.Sender = sender
 		}
-		_ = p.appCtx.DB.UserRepo().AddUser(context.Background(), user.ID, userName)
+	}
+	var privateUserID int64
+	if user != nil && user.ID != 0 {
+		privateUserID = user.ID
+	} else {
+		privateUserID = m.SenderID()
+		if privateUserID == 0 {
+			privateUserID = m.ChatID()
+		}
+	}
+
+	if privateUserID != 0 && p.appCtx != nil && p.appCtx.DB != nil && p.appCtx.DB.UserRepo() != nil {
+		userName := ""
+		if user != nil && user.FirstName != "" {
+			userName = user.FirstName
+			if user.LastName != "" {
+				userName += " " + user.LastName
+			}
+		}
+		_ = p.appCtx.DB.UserRepo().AddUser(context.Background(), privateUserID, userName)
 	}
 
 	args := strings.Fields(m.Text())
@@ -320,10 +342,13 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 		// 4. Search deep-link from old bots or external buttons (q_<b64> or search_<query>)
 		if query, ok := oldbot.DecodeSearchDeepLinkPayload(payload); ok && query != "" {
 			var userID int64
-			if user != nil {
+			if user != nil && user.ID != 0 {
 				userID = user.ID
 			} else {
 				userID = m.SenderID()
+				if userID == 0 {
+					userID = m.ChatID()
+				}
 			}
 
 			// Force Subscribe Verification Flow if enabled
@@ -389,10 +414,13 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 
 			if fileID != "" {
 				var userID int64
-				if user != nil {
+				if user != nil && user.ID != 0 {
 					userID = user.ID
 				} else {
 					userID = m.SenderID()
+					if userID == 0 {
+						userID = m.ChatID()
+					}
 				}
 
 				if p.isMaintenanceMode() {
@@ -447,6 +475,7 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 				opts := delivery.DeliveryOptions{
 					UserID:         userID,
 					ProtectContent: protectContent,
+					RecipientPeer:  m.Peer,
 				}
 
 				res, err := p.appCtx.Delivery.Deliver(context.Background(), m.ChatID(), fileID, opts)
@@ -523,6 +552,12 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 	}
 	if err != nil || sentMsg == nil {
 		sentMsg, err = m.Reply(welcomeText, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: replyMarkup,
+		})
+	}
+	if err != nil && m.Client != nil && m.Peer != nil {
+		sentMsg, err = m.Client.SendMessage(m.Peer, welcomeText, &telegram.SendOptions{
 			ParseMode:   "html",
 			ReplyMarkup: replyMarkup,
 		})

@@ -157,7 +157,7 @@ func (p *Plugin) HandleRequest(m *telegram.NewMessage) error {
 
 	// If not found in library, record request
 	userMention := "Valued Member"
-	if m.Sender != nil {
+	if m.Sender != nil && m.Sender.ID != 0 {
 		if m.Sender.FirstName != "" {
 			userMention = commands.EscapeHTML(m.Sender.FirstName)
 		} else if m.Sender.Username != "" {

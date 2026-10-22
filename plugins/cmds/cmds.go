@@ -92,7 +92,7 @@ func (p *Plugin) HandleCmds(m *telegram.NewMessage) error {
 // HandleCmdc renders the interactive Admin Commands Master Panel with category buttons.
 func (p *Plugin) HandleCmdc(m *telegram.NewMessage) error {
 	var userID int64
-	if m.Sender != nil {
+	if m.Sender != nil && m.Sender.ID != 0 {
 		userID = m.Sender.ID
 	} else {
 		userID = m.SenderID()

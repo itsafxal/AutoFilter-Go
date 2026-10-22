@@ -2,6 +2,8 @@ package delivery
 
 import (
 	"time"
+
+	"github.com/amarnathcjd/gogram/telegram"
 )
 
 // MediaDetails represents normalized media information retrieved from
@@ -37,6 +39,9 @@ type DeliveryOptions struct {
 
 	// EnableFastDownload optionally overrides the service-level fast download button configuration.
 	EnableFastDownload *bool
+
+	// RecipientPeer optionally specifies the direct MTProto InputPeer for delivery, avoiding peer cache lookups.
+	RecipientPeer telegram.InputPeer
 }
 
 // DeliveryResult contains structured metadata about a completed media delivery.

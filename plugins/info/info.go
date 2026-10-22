@@ -79,7 +79,7 @@ func BuildBotInfoReport(botUser *telegram.UserObj, startTime time.Time) string {
 
 // BuildUserInfoReport builds safe user profile details.
 func BuildUserInfoReport(user *telegram.UserObj) string {
-	if user == nil {
+	if user == nil || user.ID == 0 {
 		return "⚠️ <b>User Profile Details:</b> <i>User information not available.</i>"
 	}
 
@@ -179,7 +179,7 @@ func (p *Plugin) HandleInfo(m *telegram.NewMessage) error {
 	sb.WriteString(botReport)
 
 	// If in private chat, append requesting user details
-	if m.IsPrivate() && m.Sender != nil {
+	if m.IsPrivate() && m.Sender != nil && m.Sender.ID != 0 {
 		sb.WriteString("\n\n")
 		sb.WriteString(BuildUserInfoReport(m.Sender))
 	}

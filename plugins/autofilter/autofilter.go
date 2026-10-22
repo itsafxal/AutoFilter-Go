@@ -128,19 +128,23 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 	}
 
 	user := m.Sender
-	if user == nil && m.Client != nil {
-		if sender, err := m.GetSender(); err == nil && sender != nil {
+	if (user == nil || user.ID == 0) && m.Client != nil {
+		if sender, err := m.GetSender(); err == nil && sender != nil && sender.ID != 0 {
 			user = sender
+			m.Sender = sender
 		}
 	}
 
 	var userID int64
 	var userMention string
-	if user != nil {
+	if user != nil && user.ID != 0 {
 		userID = user.ID
 		userMention = formatUserMention(user)
 	} else {
 		userID = m.SenderID()
+		if userID == 0 {
+			userID = m.ChatID()
+		}
 		if userID != 0 {
 			userMention = fmt.Sprintf(`<a href="tg://user?id=%d">User</a>`, userID)
 		} else {
@@ -217,6 +221,13 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
+		if replyErr != nil && m.Client != nil && m.Peer != nil {
+			replyMsg, replyErr = m.Client.SendMessage(m.Peer, text, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: kb,
+				ReplyID:     m.ID,
+			})
+		}
 		if replyErr != nil {
 			if isIgnorableChatError(replyErr) {
 				if p.appCtx.Logger != nil {
@@ -261,6 +272,13 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 			ParseMode:   "html",
 			ReplyMarkup: kb,
 		})
+		if replyErr != nil && m.Client != nil && m.Peer != nil {
+			replyMsg, replyErr = m.Client.SendMessage(m.Peer, text, &telegram.SendOptions{
+				ParseMode:   "html",
+				ReplyMarkup: kb,
+				ReplyID:     m.ID,
+			})
+		}
 		if replyErr != nil {
 			if isIgnorableChatError(replyErr) {
 				if p.appCtx.Logger != nil {
@@ -294,6 +312,12 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 	replyMsg, replyErr := m.Reply(notFoundText, &telegram.SendOptions{
 		ParseMode: "html",
 	})
+	if replyErr != nil && m.Client != nil && m.Peer != nil {
+		replyMsg, replyErr = m.Client.SendMessage(m.Peer, notFoundText, &telegram.SendOptions{
+			ParseMode: "html",
+			ReplyID:   m.ID,
+		})
+	}
 	if replyErr != nil {
 		if isIgnorableChatError(replyErr) {
 			if p.appCtx.Logger != nil {
