@@ -1,6 +1,7 @@
 package search
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -95,3 +96,18 @@ func TestIsValidSearchText(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractQueryTitle(t *testing.T) {
+	input := "📕 Name ➜ : Monster - The Lizzie Borden Story S01E08 Carnival -@MNTGX.-.mkv\n\n📗 Size ➜ : 247.81 MB\n\npowered by #mntgx"
+	expected := "Monster - The Lizzie Borden Story S01E08 Carnival -@MNTGX.-.mkv"
+	got := ExtractQueryTitle(input)
+	if got != expected {
+		t.Errorf("ExtractQueryTitle() = %q, want %q", got, expected)
+	}
+
+	norm := NormalizeText(got)
+	if !strings.Contains(norm, "monster") || !strings.Contains(norm, "lizzie") {
+		t.Errorf("expected normalized text to contain 'monster' and 'lizzie', got %q", norm)
+	}
+}
+

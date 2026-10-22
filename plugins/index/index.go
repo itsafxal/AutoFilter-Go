@@ -802,7 +802,7 @@ func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatID
 			baseDelay = time.Duration(parsed) * time.Millisecond
 		}
 	}
-	minDelay := 600 * time.Millisecond
+	minDelay := 800 * time.Millisecond
 	maxDelay := 3000 * time.Millisecond
 
 	// 1. Fetcher Worker (Dedicated Telegram MTProto Producer)
@@ -813,7 +813,7 @@ func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatID
 
 		currentDelay := baseDelay
 		consecutiveSuccess := 0
-		const chunkSize = 100
+		const chunkSize = 200
 
 		for currentID := startMsgID; currentID <= endMsgID; currentID += chunkSize {
 			if atomic.LoadInt32(&p.cancelFlag) == 1 {

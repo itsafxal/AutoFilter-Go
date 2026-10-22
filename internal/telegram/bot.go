@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -263,9 +264,24 @@ func (s *BotService) notifyAdminsOnRestart(botUser *telegram.UserObj) {
 	}
 
 	for adminID := range recipients {
+		if !s.client.IdInCache(adminID) {
+			pts := s.client.ExportPts()
+			if pts > 0 {
+				_, _ = s.client.GetDifference(pts, 100)
+			}
+		}
 		_, err := s.client.SendMessage(adminID, msgText, &telegram.SendOptions{
 			ParseMode: "html",
 		})
+		if err != nil && strings.Contains(err.Error(), "missing from cache") {
+			pts := s.client.ExportPts()
+			if pts > 0 {
+				_, _ = s.client.GetDifference(pts, 100)
+				_, err = s.client.SendMessage(adminID, msgText, &telegram.SendOptions{
+					ParseMode: "html",
+				})
+			}
+		}
 		if err != nil {
 			s.logger.Warn("could not send restart notification to admin (admin might need to /start the bot first)",
 				"admin_id", adminID,

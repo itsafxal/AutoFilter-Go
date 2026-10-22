@@ -255,7 +255,7 @@ func (s *Service) handleMessage(m *telegram.NewMessage) {
 		return
 	}
 
-	query := strings.TrimSpace(m.Text())
+	query := search.ExtractQueryTitle(strings.TrimSpace(m.Text()))
 	if !search.IsValidSearchText(query) {
 		return
 	}

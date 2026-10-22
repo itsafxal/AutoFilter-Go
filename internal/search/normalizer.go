@@ -60,6 +60,8 @@ var (
 	reExtensions  = regexp.MustCompile(`(?i)\.(mkv|mp4|avi|webm|flv|mov|m4v|3gp|zip|rar|tar|gz|7z)$`)
 	reReleaseTags = regexp.MustCompile(`(?i)\b(1080p|720p|480p|360p|2160p|4k|576p|hdr|webrip|web-dl|web|bluray|hdrip|dvdrip|brrip|x264|x265|hevc|h264|esub|esubs|msub|sub|subtitle|subtitles|aac\d*(\.\d+)?|ddp5\.1|dd5\.1)\b`)
 	reSeasonEp    = regexp.MustCompile(`(?i)\b(?:s|season)[\s._-]*(\d{1,2})[\s._-]*(?:e|ep|episode)[\s._-]*(\d{1,2})\b`)
+	reNameLabel   = regexp.MustCompile(`(?i)^[^\w]*(?:name|title|file|movie)[\s:➜\-=]+(.+)$`)
+	reIgnoreLines = regexp.MustCompile(`(?i)^[^\w]*(?:size|quality|language|audio|powered|join|link|download|uploaded)[\s:➜\-=]+`)
 )
 
 // NormalizeText cleans up raw search query text.
@@ -216,4 +218,47 @@ func IsValidSearchText(text string) bool {
 		}
 	}
 	return hasLetterOrDigit
+}
+
+// ExtractQueryTitle inspects multi-line forwarded message captions or complex formatted
+// search queries (e.g., "📕 Name ➜ : Monster S01E08\n📗 Size ➜ : 250MB") and extracts the actual movie title.
+func ExtractQueryTitle(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if !strings.Contains(raw, "\n") {
+		return raw
+	}
+
+	lines := strings.Split(raw, "\n")
+	// 1. First priority: a line starting with "Name:", "Title:", "File:", etc.
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if m := reNameLabel.FindStringSubmatch(trimmed); len(m) > 1 {
+			val := strings.TrimSpace(m[1])
+			if val != "" {
+				return val
+			}
+		}
+	}
+
+	// 2. Second priority: a line containing a media file extension (.mkv, .mp4, etc.)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if reExtensions.MatchString(trimmed) {
+			if m := reNameLabel.FindStringSubmatch(trimmed); len(m) > 1 {
+				return strings.TrimSpace(m[1])
+			}
+			return trimmed
+		}
+	}
+
+	// 3. Third priority: pick the first non-empty line that isn't metadata (Size, Powered by, etc.)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || reIgnoreLines.MatchString(trimmed) || strings.HasPrefix(strings.ToLower(trimmed), "powered by") {
+			continue
+		}
+		return trimmed
+	}
+
+	return raw
 }

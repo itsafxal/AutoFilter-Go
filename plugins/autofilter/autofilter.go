@@ -156,6 +156,7 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 		return nil
 	}
 
+	rawQuery = search.ExtractQueryTitle(rawQuery)
 	query := strings.TrimSpace(rawQuery)
 	if !search.IsValidSearchText(query) {
 		return nil
