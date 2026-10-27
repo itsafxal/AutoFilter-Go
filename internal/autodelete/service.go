@@ -386,6 +386,12 @@ func (s *Service) RunWeeklyTrash(ctx context.Context) (int64, error) {
 		}
 	}
 
+	// Purge any remaining expired records past the cutoff
+	_, _ = db.ExecContext(ctx, "DELETE FROM sent_messages WHERE sent_at <= ?;", cutoff)
+
+	// Safety cap: keep at most 20,000 newest records to strictly prevent multi-gigabyte disk bloat over days
+	_, _ = db.ExecContext(ctx, "DELETE FROM sent_messages WHERE id NOT IN (SELECT id FROM sent_messages ORDER BY id DESC LIMIT 20000);")
+
 	s.mu.Lock()
 	s.lastTrash = time.Now()
 	s.lastCount = totalDeleted
@@ -417,9 +423,9 @@ func (s *Service) GetStats(ctx context.Context) (TrashStats, error) {
 	return stats, nil
 }
 
-// runAutoDeleteLoop processes scheduled deletions continuously.
+// runAutoDeleteLoop processes scheduled deletions with low CPU idle overhead.
 func (s *Service) runAutoDeleteLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -512,9 +518,20 @@ func (s *Service) processScheduledDeletions(ctx context.Context) (int64, error) 
 	// Prune from scheduled_deletions
 	s.deleteScheduledRecords(idList)
 
-	// Also prune from sent_messages so we don't attempt to delete them again during weekly trash
-	for _, it := range items {
-		_, _ = db.Exec("DELETE FROM sent_messages WHERE chat_id = ? AND message_id = ?;", it.ChatID, it.MessageID)
+	// Also prune from sent_messages in batch so we don't attempt to delete them again during weekly trash
+	if len(items) > 0 {
+		var b strings.Builder
+		b.WriteString("DELETE FROM sent_messages WHERE (chat_id, message_id) IN (")
+		args := make([]any, 0, len(items)*2)
+		for i, it := range items {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString("(?,?)")
+			args = append(args, it.ChatID, it.MessageID)
+		}
+		b.WriteString(");")
+		_, _ = db.ExecContext(ctx, b.String(), args...)
 	}
 
 	s.logger.Debug("processed expired scheduled deletions", "count", len(items))

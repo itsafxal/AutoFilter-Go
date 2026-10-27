@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/debug"
+	"strconv"
 	"syscall"
 
 	"github.com/itsafxal/MYTGBOTZ/internal/app"
@@ -35,9 +39,44 @@ func main() {
 	}
 }
 
+func initRuntimeTuning(logger *slog.Logger) {
+	// 1. GC tuning: trigger collection at 60% heap growth if GOGC is not explicitly defined
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(60)
+	}
+
+	// 2. Memory limit: default to 512 MiB if GOMEMLIMIT is not explicitly set
+	if os.Getenv("GOMEMLIMIT") == "" {
+		memLimitMB := 512
+		if raw := os.Getenv("MAX_MEMORY_MB"); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				memLimitMB = parsed
+			}
+		}
+		debug.SetMemoryLimit(int64(memLimitMB) * 1024 * 1024)
+		if logger != nil {
+			logger.Info("configured runtime memory limit for low-spec VPS protection",
+				"limit_mb", memLimitMB,
+				"gogc", 60,
+			)
+		}
+	}
+
+	// 3. CPU concurrency: throttle max CPU cores if specified
+	if rawCPU := os.Getenv("MAX_CPU_CORES"); rawCPU != "" {
+		if cores, err := strconv.Atoi(rawCPU); err == nil && cores > 0 {
+			runtime.GOMAXPROCS(cores)
+			if logger != nil {
+				logger.Info("configured runtime CPU core limit", "max_cores", cores)
+			}
+		}
+	}
+}
+
 func run() error {
 	// 1. Initial logger for bootstrapping
 	bootstrapLogger := logging.NewLogger(config.LogLevelInfo, os.Stdout)
+	initRuntimeTuning(bootstrapLogger)
 	bootstrapLogger.Info("starting bot application initialization...")
 
 	// 2. Load and validate environment configuration

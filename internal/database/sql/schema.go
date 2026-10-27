@@ -90,15 +90,16 @@ func (m *DBManager) initSchema(ctx context.Context) error {
 		}
 	}
 
-	// Verify and populate FTS5 index if media table has existing records
-	var ftsCount int
-	row := m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM media_fts;")
-	if err := row.Scan(&ftsCount); err != nil || ftsCount == 0 {
+	// Verify and populate FTS5 index only if media table has records and media_fts is empty
+	var dummy int
+	errFts := m.db.QueryRowContext(ctx, "SELECT 1 FROM media_fts LIMIT 1;").Scan(&dummy)
+	if errFts != nil {
+		// media_fts has no rows yet; populate only if media table has existing rows
 		var mediaCount int
 		rowMedia := m.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM media;")
 		if errMedia := rowMedia.Scan(&mediaCount); errMedia == nil && mediaCount > 0 {
 			if m.logger != nil {
-				m.logger.Info("populating FTS5 trigram search index for existing records...", "total_records", mediaCount)
+				m.logger.Info("populating initial FTS5 trigram search index for existing records...", "total_records", mediaCount)
 			}
 			_, _ = m.db.ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');")
 		}

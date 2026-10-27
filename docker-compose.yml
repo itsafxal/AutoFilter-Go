@@ -13,6 +13,21 @@ services:
       - OWNER_ID=${OWNER_ID}
       - ADMINS=${ADMINS}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - GOMEMLIMIT=${GOMEMLIMIT:-512MiB}
+      - GOGC=${GOGC:-60}
+      - SYNC_BATCH_SIZE=${SYNC_BATCH_SIZE:-1500}
+    # VPS resource guards: prevents container from exhausting VPS RAM or pegging 100% CPU
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+        reservations:
+          cpus: "0.2"
+          memory: 128M
+    mem_limit: 768m
+    mem_reservation: 128m
+    cpus: 1.5
     ports:
       - "8080:8080"
     logging:

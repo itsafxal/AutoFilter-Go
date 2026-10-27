@@ -60,6 +60,14 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Category:    "General",
 			Handler:     p.HandleStats,
 		},
+		{
+			Name:        "vacuum",
+			Description: "Reclaim and compact SQLite database and WAL files",
+			Usage:       "/vacuum",
+			Category:    "Admin",
+			AdminOnly:   true,
+			Handler:     p.HandleVacuum,
+		},
 	}
 }
 
@@ -67,6 +75,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 	return []plugins.CallbackDefinition{
 		{Prefix: "stats_refresh", Handler: p.HandleRefreshCallback},
+		{Prefix: "stats_vacuum", Handler: p.HandleVacuumCallback},
 		{Prefix: "close_data", Handler: p.HandleCloseCallback},
 	}
 }
@@ -135,13 +144,23 @@ func (p *Plugin) gatherStats(ctx context.Context) BotStats {
 		}
 	}
 
-	// 6. SQLite Size
+	// 6. SQLite Size (Total physical space on disk: .sqlite3 + .sqlite3-wal + .sqlite3-shm)
 	sqlitePath := "media.sqlite3"
 	if p.appCtx.Config != nil && p.appCtx.Config.SQLiteDBPath != "" {
 		sqlitePath = p.appCtx.Config.SQLiteDBPath
 	}
+	var totalSQLBytes int64
 	if fi, err := os.Stat(sqlitePath); err == nil && fi.Size() > 0 {
-		stats.SQLSizeMB = float64(fi.Size()) / (1024.0 * 1024.0)
+		totalSQLBytes += fi.Size()
+	}
+	if fi, err := os.Stat(sqlitePath + "-wal"); err == nil && fi.Size() > 0 {
+		totalSQLBytes += fi.Size()
+	}
+	if fi, err := os.Stat(sqlitePath + "-shm"); err == nil && fi.Size() > 0 {
+		totalSQLBytes += fi.Size()
+	}
+	if totalSQLBytes > 0 {
+		stats.SQLSizeMB = float64(totalSQLBytes) / (1024.0 * 1024.0)
 	}
 
 	return stats
@@ -195,11 +214,97 @@ func (p *Plugin) buildStatsContent(ctx context.Context) (string, *telegram.Reply
 	replyMarkup := telegram.NewKeyboard().
 		AddRow(
 			telegram.Button.Data("🔄 Rᴇғʀᴇsʜ", "stats_refresh"),
+			telegram.Button.Data("🧹 Vᴀᴄᴜᴜᴍ DB", "stats_vacuum"),
+		).
+		AddRow(
 			telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
 		).
 		Build()
 
 	return text, replyMarkup
+}
+
+// HandleVacuum compacts and reclaims physical disk space from SQLite database and WAL files.
+func (p *Plugin) HandleVacuum(m *telegram.NewMessage) error {
+	if m.IsChannel() || m.IsChannelPost() {
+		return nil
+	}
+	var userID int64
+	if m.Sender != nil && m.Sender.ID != 0 {
+		userID = m.Sender.ID
+	} else {
+		userID = m.SenderID()
+	}
+	isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+	if !isAdmin {
+		return nil
+	}
+
+	reply, _ := m.Reply("⏳ <b>Vacuuming SQLite Database...</b>\n<i>Truncating WAL, compacting FTS5, and reclaiming disk space...</i>", &telegram.SendOptions{
+		ParseMode: "html",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	if p.appCtx.DB != nil && p.appCtx.DB.SQLManager() != nil {
+		_ = p.appCtx.DB.SQLManager().CheckpointWAL(ctx)
+		_ = p.appCtx.DB.SQLManager().IncrementalVacuum(ctx)
+		_ = p.appCtx.DB.SQLManager().OptimizeFTS(ctx)
+		_ = p.appCtx.DB.SQLManager().Vacuum(ctx)
+	}
+
+	text, replyMarkup := p.buildStatsContent(ctx)
+	msgText := fmt.Sprintf("✅ <b>Database Compacted Successfully!</b>\n\n%s", text)
+	if reply != nil {
+		_, err := reply.Edit(msgText, &telegram.SendOptions{
+			ParseMode:   "html",
+			ReplyMarkup: replyMarkup,
+		})
+		return err
+	}
+	_, err := m.Reply(msgText, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: replyMarkup,
+	})
+	return err
+}
+
+// HandleVacuumCallback handles the interactive vacuum button click on /stats.
+func (p *Plugin) HandleVacuumCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
+	var userID int64
+	if cb.Sender != nil && cb.Sender.ID != 0 {
+		userID = cb.Sender.ID
+	} else {
+		userID = cb.SenderID
+	}
+	isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+	if !isAdmin {
+		_, err := cb.Answer("⛔ Only bot administrators can vacuum the database.", &telegram.CallbackOptions{Alert: true})
+		return err
+	}
+
+	_, _ = cb.Answer("🧹 Compacting database & reclaiming disk space...", &telegram.CallbackOptions{Alert: false})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	if p.appCtx.DB != nil && p.appCtx.DB.SQLManager() != nil {
+		_ = p.appCtx.DB.SQLManager().CheckpointWAL(ctx)
+		_ = p.appCtx.DB.SQLManager().IncrementalVacuum(ctx)
+		_ = p.appCtx.DB.SQLManager().OptimizeFTS(ctx)
+		_ = p.appCtx.DB.SQLManager().Vacuum(ctx)
+	}
+
+	text, replyMarkup := p.buildStatsContent(ctx)
+	_, _ = cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: replyMarkup,
+	})
+	return nil
 }
 
 // HandleStats renders the bot statistics overview.

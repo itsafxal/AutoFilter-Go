@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -24,10 +25,12 @@ type Syncer struct {
 	mu          sync.RWMutex
 }
 
-// NewSyncer constructs a new Syncer.
+// NewSyncer constructs a new Syncer tuned for low memory usage.
 func NewSyncer(dbManager *DBManager, mediaRepo *mongodb.MediaRepository, logger *slog.Logger, batchSize int) *Syncer {
 	if batchSize <= 0 {
-		batchSize = 20000
+		batchSize = 1500
+	} else if batchSize > 2500 {
+		batchSize = 2000
 	}
 	return &Syncer{
 		dbManager: dbManager,
@@ -122,8 +125,9 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 	}
 
 	// Check if SQLite already contains all expected records from a previous run
+	// Check if SQLite already contains expected records from a previous run (95% threshold)
 	existingRows, _ := s.GetTotalRows(ctx)
-	if existingRows > 0 && totalExpected > 0 && existingRows >= int64(float64(totalExpected)*0.98) {
+	if existingRows > 0 && totalExpected > 0 && existingRows >= int64(float64(totalExpected)*0.95) {
 		s.logger.Info("SQLite media table already contains expected records; marking complete",
 			"existing_records", existingRows,
 			"expected_records", totalExpected,
@@ -141,6 +145,12 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 
 	if existingRows > 0 {
 		s.logger.Info(fmt.Sprintf("⚡ Resuming media migration: %d / %d files already cached in SQLite, streaming remaining...", existingRows, totalExpected))
+	} else {
+		// Only drop secondary indexes for a completely blank database to avoid massive index rebuilds on existing data
+		s.logger.Info("fresh database detected: optimizing SQLite for initial bulk ingestion...")
+		if err := s.dropSecondaryIndexes(ctx); err != nil {
+			s.logger.Warn("failed to drop secondary indexes", "error", err)
+		}
 	}
 
 	// Mark sync status as in-progress
@@ -148,11 +158,6 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		s.logger.Warn("failed to set sync status in-progress", "error", err)
 	}
 
-	// 3. Performance optimizations: Drop secondary indexes and enable bulk pragmas
-	s.logger.Info("optimizing SQLite for high-speed bulk ingestion: disabling secondary indexes and tuning pragmas...")
-	if err := s.dropSecondaryIndexes(ctx); err != nil {
-		s.logger.Warn("failed to drop secondary indexes", "error", err)
-	}
 	if err := s.setBulkPragmas(ctx); err != nil {
 		s.logger.Warn("failed to set bulk pragmas", "error", err)
 	}
@@ -164,24 +169,32 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 			_ = s.ensureIndexes(context.Background())
 		}
 		_ = s.setNormalPragmas(context.Background())
+		debug.FreeOSMemory()
 	}()
 
 	shards := s.mediaRepo.Shards()
 	var totalSaved int64
 
-	// 4. Stream all media shards concurrently using a high-throughput slice-batch pipeline
+	// 4. Stream all media shards using a controlled-memory batch pipeline (capped queue size to avoid RAM bloat)
 	type shardBatch struct {
 		label string
 		docs  []mongodb.MediaDoc
 	}
 
-	batchChan := make(chan shardBatch, 100)
+	batchSize := s.batchSize
+	if batchSize <= 0 {
+		batchSize = 5000
+	}
+
+	// High-throughput streaming buffer
+	batchChan := make(chan shardBatch, 30)
 	errChan := make(chan error, len(shards))
 	var wg sync.WaitGroup
 
-	s.logger.Info("🚀 Launching concurrent parallel migration across all MongoDB media clusters...",
+	s.logger.Info("🚀 Launching high-speed migration across MongoDB media clusters...",
 		"clusters", len(shards),
 		"total_expected", totalExpected,
+		"batch_size", batchSize,
 	)
 
 	for i, shard := range shards {
@@ -189,7 +202,7 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		if i < len(shardCounts) {
 			shardExpected = shardCounts[i].Count
 		}
-		s.logger.Info(fmt.Sprintf("  • Streaming cluster [%s] (approx. %d files) in parallel...", shard.Label, shardExpected),
+		s.logger.Info(fmt.Sprintf("  • Streaming cluster [%s] (approx. %d files)...", shard.Label, shardExpected),
 			"cluster", shard.Label,
 			"expected_files", shardExpected,
 		)
@@ -198,7 +211,7 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		go func(idx int, sh mongodb.MediaShard) {
 			defer wg.Done()
 			shardStart := time.Now()
-			streamed, err := s.mediaRepo.StreamShardBatches(ctx, idx, 5000, func(batch []mongodb.MediaDoc) error {
+			streamed, err := s.mediaRepo.StreamShardBatches(ctx, idx, batchSize, func(batch []mongodb.MediaDoc) error {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -237,6 +250,11 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		s.totalSaved = totalSaved
 		s.mu.Unlock()
 
+		// Free OS memory periodically on large migrations
+		if totalSaved > 0 && totalSaved%50000 == 0 {
+			debug.FreeOSMemory()
+		}
+
 		if time.Since(lastLog) >= 2*time.Second {
 			var pct float64
 			if totalExpected > 0 {
@@ -263,19 +281,20 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 	default:
 	}
 
-	// 5. Rebuild search indexes
+	// 5. Ensure search indexes exist
 	indexStart := time.Now()
-	s.logger.Info("⚡ Building SQLite search indexes for fast querying...")
+	s.logger.Info("⚡ Verifying SQLite search indexes for fast querying...")
 	if err := s.ensureIndexes(ctx); err != nil {
 		s.logger.Error("failed to create search indexes", "error", err)
 		return nil, fmt.Errorf("failed building indexes: %w", err)
 	}
 	indexesRebuilt = true
 	indexDuration := time.Since(indexStart)
-	s.logger.Info("✨ Search indexes built successfully", "duration", indexDuration.Round(time.Millisecond).String())
+	s.logger.Info("✨ Search indexes verified successfully", "duration", indexDuration.Round(time.Millisecond).String())
 
-	// 6. Restore normal runtime pragmas
+	// 6. Restore normal runtime pragmas and free heap
 	_ = s.setNormalPragmas(ctx)
+	debug.FreeOSMemory()
 
 	// 7. Update sync metadata
 	if err := s.setSyncMetadata(ctx, "is_complete", "true"); err != nil {
@@ -396,12 +415,17 @@ func (s *Syncer) ensureIndexes(ctx context.Context) error {
 		}
 	}
 
-	// Rebuild FTS5 trigram search index after bulk sync in single linear pass (matching TGxCyberBot lines 450-454)
-	var mediaCount int64
-	_ = s.dbManager.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM media;").Scan(&mediaCount)
-	if mediaCount > 0 {
-		if _, err := s.dbManager.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');"); err != nil {
-			s.logger.Warn("failed to rebuild FTS5 index", "error", err)
+	// Rebuild FTS5 trigram search index ONLY if media_fts is empty
+	var dummy int
+	errFts := s.dbManager.DB().QueryRowContext(ctx, "SELECT 1 FROM media_fts LIMIT 1;").Scan(&dummy)
+	if errFts != nil {
+		var mediaCount int64
+		_ = s.dbManager.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM media;").Scan(&mediaCount)
+		if mediaCount > 0 {
+			s.logger.Info("building initial FTS5 trigram search index...", "records", mediaCount)
+			if _, err := s.dbManager.DB().ExecContext(ctx, "INSERT INTO media_fts(media_fts) VALUES('rebuild');"); err != nil {
+				s.logger.Warn("failed to rebuild FTS5 index", "error", err)
+			}
 		}
 	}
 
@@ -411,10 +435,10 @@ func (s *Syncer) ensureIndexes(ctx context.Context) error {
 func (s *Syncer) setBulkPragmas(ctx context.Context) error {
 	queries := []string{
 		"PRAGMA journal_mode = WAL;",
-		"PRAGMA synchronous = OFF;",
-		"PRAGMA cache_size = -262144;",  // 256 MB cache
-		"PRAGMA mmap_size = 268435456;", // 256 MB memory-mapped I/O (matching TGxCyberBot line 370)
-		"PRAGMA temp_store = MEMORY;",
+		"PRAGMA synchronous = NORMAL;",
+		"PRAGMA cache_size = -16000;",  // 16 MB cache (was 256 MB)
+		"PRAGMA mmap_size = 16777216;", // 16 MB memory-mapped I/O (was 256 MB)
+		"PRAGMA temp_store = FILE;",    // File-backed temporary storage (was MEMORY)
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {
@@ -427,8 +451,9 @@ func (s *Syncer) setBulkPragmas(ctx context.Context) error {
 func (s *Syncer) setNormalPragmas(ctx context.Context) error {
 	queries := []string{
 		"PRAGMA synchronous = NORMAL;",
-		"PRAGMA cache_size = -64000;",
-		"PRAGMA mmap_size = 268435456;",
+		"PRAGMA cache_size = -8000;",   // 8 MB runtime cache
+		"PRAGMA mmap_size = 16777216;", // 16 MB mmap
+		"PRAGMA temp_store = FILE;",
 	}
 	for _, q := range queries {
 		if _, err := s.dbManager.DB().ExecContext(ctx, q); err != nil {

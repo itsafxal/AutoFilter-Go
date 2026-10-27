@@ -48,6 +48,10 @@ RUN chmod 0755 /app/bot && \
 # Switch to non-root user (UID 10001)
 USER 10001:10001
 
+# Set default Go runtime memory tuning for low-spec VPS protection
+ENV GOMEMLIMIT=512MiB
+ENV GOGC=60
+
 # Expose HTTP streaming & download server port
 EXPOSE 8080
 

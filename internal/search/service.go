@@ -36,8 +36,8 @@ func NewService(dbManager *database.DatabaseManager, logger *slog.Logger) *Servi
 	return &Service{
 		dbManager:   dbManager,
 		logger:      logger,
-		resultCache: newLRUCache(5000, 10*time.Minute),
-		sugCache:    newLRUCache(2000, 15*time.Minute),
+		resultCache: newLRUCache(500, 5*time.Minute),
+		sugCache:    newLRUCache(300, 10*time.Minute),
 	}
 }
 
@@ -124,20 +124,28 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 					DateSaved: doc.Date,
 				}
 				mongoCandidates = append(mongoCandidates, mf)
-				// Opportunistically cache to SQLite so future queries are instant
-				go func(rec MediaFile) {
-					_ = s.dbManager.SaveMedia(context.Background(), appsql.MediaRecord{
-						FileID:    rec.FileID,
-						FileRef:   rec.FileRef,
-						FileName:  rec.FileName,
-						FileSize:  rec.FileSize,
-						Size:      rec.Size,
-						FileType:  rec.FileType,
-						MimeType:  rec.MimeType,
-						Caption:   rec.Caption,
-						DateSaved: rec.DateSaved,
-					})
-				}(mf)
+			}
+			// Opportunistically cache to SQLite in a single background batch
+			if len(mongoCandidates) > 0 && s.dbManager != nil {
+				go func(candidates []MediaFile) {
+					recs := make([]appsql.MediaRecord, 0, len(candidates))
+					for _, rec := range candidates {
+						recs = append(recs, appsql.MediaRecord{
+							FileID:    rec.FileID,
+							FileRef:   rec.FileRef,
+							FileName:  rec.FileName,
+							FileSize:  rec.FileSize,
+							Size:      rec.Size,
+							FileType:  rec.FileType,
+							MimeType:  rec.MimeType,
+							Caption:   rec.Caption,
+							DateSaved: rec.DateSaved,
+						})
+					}
+					if s.dbManager.SqlMediaRepo() != nil {
+						_ = s.dbManager.SqlMediaRepo().BulkSaveMedia(context.Background(), recs)
+					}
+				}(mongoCandidates)
 			}
 			matchedFiles = FilterAndRankStrict(query, mongoCandidates)
 			if filter.Language != "" || filter.Quality != "" {
@@ -609,6 +617,16 @@ func (c *lruCache) set(key string, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	now := time.Now()
+	// Purge expired entries when capacity is reached
+	if len(c.items) >= c.maxSize {
+		for k, it := range c.items {
+			if now.After(it.expiresAt) {
+				delete(c.items, k)
+			}
+		}
+	}
+	// Still over capacity? Remove one entry
 	if len(c.items) >= c.maxSize {
 		for k := range c.items {
 			delete(c.items, k)
@@ -618,7 +636,7 @@ func (c *lruCache) set(key string, value any) {
 
 	c.items[key] = cacheItem{
 		value:     value,
-		expiresAt: time.Now().Add(c.ttl),
+		expiresAt: now.Add(c.ttl),
 	}
 }
 

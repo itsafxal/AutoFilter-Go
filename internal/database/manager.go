@@ -135,7 +135,7 @@ func (m *DatabaseManager) Init(ctx context.Context) error {
 			isComplete, _ := m.syncer.IsSyncComplete(ctx)
 			hasData, _ := m.syncer.HasData(ctx)
 			count, _ := m.syncer.GetTotalRows(ctx)
-			if (isComplete && hasData) || (hasData && count >= 500000) {
+			if isComplete && hasData {
 				m.logger.Info("SQLite media table is already populated and synchronized; skipping full migration",
 					"existing_records", count,
 				)
