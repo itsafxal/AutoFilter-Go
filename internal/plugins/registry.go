@@ -236,6 +236,13 @@ func (r *Registry) wrapMessageHandler(mh MessageDefinition) HandlerFunc {
 			// Never reply or process ambient messages in broadcast channels unless handler explicitly opted in
 			return nil
 		}
+		// Never process messages sent by the bot itself (prevents reply loops)
+		if m != nil && m.Message != nil && r.appCtx != nil && r.appCtx.BotUser != nil {
+			senderID := m.SenderID()
+			if senderID != 0 && senderID == r.appCtx.BotUser.ID {
+				return nil
+			}
+		}
 		// Ensure sender/chat peer is fully resolved and cached before handling
 		EnsurePeerCached(m, 2*time.Second)
 		defer func() {
@@ -283,6 +290,13 @@ func (r *Registry) wrapHandler(cmd CommandDefinition) HandlerFunc {
 		if m != nil && m.Message != nil && (m.IsChannel() || m.IsChannelPost()) {
 			// Never reply or process commands in broadcast channels
 			return nil
+		}
+		// Never process commands sent by the bot itself (prevents reply loops)
+		if m != nil && m.Message != nil && r.appCtx != nil && r.appCtx.BotUser != nil {
+			senderID := m.SenderID()
+			if senderID != 0 && senderID == r.appCtx.BotUser.ID {
+				return nil
+			}
 		}
 		// Ensure sender/chat peer is fully resolved and cached before handling
 		EnsurePeerCached(m, 2*time.Second)

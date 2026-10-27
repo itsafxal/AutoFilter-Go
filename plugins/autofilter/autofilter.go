@@ -90,6 +90,21 @@ func (p *Plugin) MessageHandlers() []plugins.MessageDefinition {
 				if m.IsCommand() || strings.HasPrefix(m.Text(), "/") {
 					return false
 				}
+				// In DMs: skip any forwarded file/document silently.
+				// Admin-forwarded files are handled by the index plugin; non-admin forwarded
+				// files must receive no reply at all.
+				if m.IsPrivate() {
+					if (m.IsForward() || (m.Message != nil && m.Message.FwdFrom != nil)) &&
+						(m.Document() != nil || m.Video() != nil || m.Audio() != nil) {
+						return false
+					}
+				}
+				// In groups: skip messages containing URLs/links to prevent link-triggered replies.
+				if !m.IsPrivate() {
+					if messageHasLink(m) {
+						return false
+					}
+				}
 				return true
 			},
 			Handler: p.HandleTextMessage,
@@ -354,6 +369,27 @@ func isIgnorableChatError(err error) bool {
 		strings.Contains(msg, "INPUT_USER_DEACTIVATED") ||
 		strings.Contains(msg, "BOT_METHOD_INVALID") ||
 		strings.Contains(msg, "PEER_ID_INVALID")
+}
+
+// messageHasLink returns true if the message contains a URL/link, either detected via
+// Telegram message entities (MessageEntityURL, MessageEntityTextURL) or by regex scanning the text.
+func messageHasLink(m *telegram.NewMessage) bool {
+	if m == nil || m.Message == nil {
+		return false
+	}
+	// Check Telegram message entities for URL types
+	for _, entity := range m.Message.Entities {
+		switch entity.(type) {
+		case *telegram.MessageEntityURL,
+			*telegram.MessageEntityTextURL:
+			return true
+		}
+	}
+	// Also check plain text for URL patterns
+	if urlRegex.MatchString(m.Message.Message) {
+		return true
+	}
+	return false
 }
 
 // HandlePaginationCallback processes next/back navigation buttons.
@@ -984,6 +1020,8 @@ var (
 	reBrackets     = regexp.MustCompile(`\[[^\]]*\]|\([^\)]*\)|\{[^\}]*\}`)
 	reCleanChars   = regexp.MustCompile(`[._]+`)
 	reYearFind     = regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
+	// urlRegex detects http/https URLs and www-prefixed domain patterns in message text.
+	urlRegex       = regexp.MustCompile(`(?i)https?://[^\s]+|(?:^|\s)www\.[^\s]+`)
 )
 
 func canonicalLanguage(raw string) string {

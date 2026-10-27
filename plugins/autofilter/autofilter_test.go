@@ -859,5 +859,69 @@ func TestAutofilter_MaintenanceMode(t *testing.T) {
 	}
 }
 
-
-
+func TestAutofilter_MessageHasLink(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     *telegram.NewMessage
+		wantURL bool
+	}{
+		{
+			name: "plain text no link",
+			msg: &telegram.NewMessage{
+				Message: &telegram.MessageObj{Message: "KGF Chapter 2"},
+			},
+			wantURL: false,
+		},
+		{
+			name: "message with https URL",
+			msg: &telegram.NewMessage{
+				Message: &telegram.MessageObj{Message: "check https://example.com for info"},
+			},
+			wantURL: true,
+		},
+		{
+			name: "message with http URL",
+			msg: &telegram.NewMessage{
+				Message: &telegram.MessageObj{Message: "http://t.me/channel/123"},
+			},
+			wantURL: true,
+		},
+		{
+			name: "message with URL entity",
+			msg: &telegram.NewMessage{
+				Message: &telegram.MessageObj{
+					Message: "click here",
+					Entities: []telegram.MessageEntity{
+						&telegram.MessageEntityURL{Offset: 0, Length: 10},
+					},
+				},
+			},
+			wantURL: true,
+		},
+		{
+			name: "message with TextUrl entity",
+			msg: &telegram.NewMessage{
+				Message: &telegram.MessageObj{
+					Message: "click here",
+					Entities: []telegram.MessageEntity{
+						&telegram.MessageEntityTextURL{Offset: 0, Length: 10, URL: "https://example.com"},
+					},
+				},
+			},
+			wantURL: true,
+		},
+		{
+			name:    "nil message",
+			msg:     nil,
+			wantURL: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := messageHasLink(tc.msg)
+			if got != tc.wantURL {
+				t.Errorf("messageHasLink() = %v, want %v", got, tc.wantURL)
+			}
+		})
+	}
+}
