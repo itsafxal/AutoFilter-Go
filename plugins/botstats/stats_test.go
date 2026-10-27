@@ -15,8 +15,8 @@ func TestStatsPlugin_Metadata(t *testing.T) {
 	}
 
 	cmds := p.Commands()
-	if len(cmds) != 1 {
-		t.Fatalf("expected 1 command, got %d", len(cmds))
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(cmds))
 	}
 	if cmds[0].Name != "stats" {
 		t.Errorf("expected command name 'stats', got %q", cmds[0].Name)
@@ -27,10 +27,13 @@ func TestStatsPlugin_Metadata(t *testing.T) {
 	if cmds[0].Handler == nil {
 		t.Error("expected non-nil handler")
 	}
+	if cmds[1].Name != "vacuum" {
+		t.Errorf("expected command name 'vacuum', got %q", cmds[1].Name)
+	}
 
 	cbs := p.CallbackHandlers()
-	if len(cbs) != 2 {
-		t.Errorf("expected 2 callback handlers, got %d", len(cbs))
+	if len(cbs) != 3 {
+		t.Errorf("expected 3 callback handlers, got %d", len(cbs))
 	}
 }
 
@@ -81,6 +84,24 @@ func TestStatsPlugin_FormatMessage(t *testing.T) {
 	}
 }
 
+func TestStatsPlugin_FormatMessage_Blocked(t *testing.T) {
+	sampleStats := BotStats{
+		TotalFiles: 295745,
+		TotalUsers: 1420,
+		TotalChats: 85,
+		DB1SizeMB:  12.45,
+		DB2SizeMB:  513.20,
+		DB3SizeMB:  162.80,
+		SQLSizeMB:  84.50,
+		DB2Blocked: true,
+	}
+
+	msg := FormatStatsMessage(sampleStats)
+	if !strings.Contains(msg, "• 𝐃𝐁𝟐: 513.20 𝐌𝐁 ⚠️ [FULL]") {
+		t.Errorf("expected DB2 FULL indicator, got: %s", msg)
+	}
+}
+
 func TestStatsPlugin_BuildStatsContent(t *testing.T) {
 	appCtx := &plugins.AppContext{}
 	p := New(appCtx)
@@ -89,7 +110,7 @@ func TestStatsPlugin_BuildStatsContent(t *testing.T) {
 	if !strings.Contains(text, "📈 𝐁𝐨𝐭 𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬 𝐎𝐯𝐞𝐫𝐯𝐢𝐞𝐰 📊") {
 		t.Errorf("unexpected stats text: %s", text)
 	}
-	if markup == nil || len(markup.Rows) != 1 || len(markup.Rows[0].Buttons) != 2 {
-		t.Fatalf("expected 1 row with 2 buttons, got %v", markup)
+	if markup == nil || len(markup.Rows) < 2 {
+		t.Fatalf("expected at least 2 rows of buttons, got %v", markup)
 	}
 }

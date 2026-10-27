@@ -435,16 +435,39 @@ func (m *DatabaseManager) SaveMediaLiveAlternating(ctx context.Context, doc mong
 	m.mu.RUnlock()
 
 	var shardLabel string
+	var mongoErr error
 	if mongoRepo != nil {
 		lbl, err := mongoRepo.SaveMediaAlternating(ctx, doc)
 		if err != nil {
-			return "", err
+			mongoErr = err
+		} else {
+			shardLabel = lbl
 		}
-		shardLabel = lbl
 	}
 
+	var sqlErr error
 	if sqlRepo != nil {
-		_ = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+		sqlErr = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+	}
+
+	if mongoErr != nil {
+		if mongodb.IsQuotaOrWriteBlockedError(mongoErr) {
+			if m.logger != nil {
+				m.logger.Warn("⚠️ MongoDB storage quota exceeded; media persisted into local SQLite runtime",
+					"file_id", doc.FileID,
+					"file_name", doc.FileName,
+					"error", mongoErr,
+				)
+			}
+			if sqlErr == nil {
+				return "SQLite (Cloud Full)", nil
+			}
+		}
+		return "", mongoErr
+	}
+
+	if sqlErr != nil {
+		return shardLabel, sqlErr
 	}
 
 	return shardLabel, nil
@@ -457,17 +480,35 @@ func (m *DatabaseManager) SaveMediaLive(ctx context.Context, doc mongodb.MediaDo
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
 
+	var mongoErr error
 	if mongoRepo != nil {
 		if err := mongoRepo.SaveMedia(ctx, doc, shardIndex); err != nil {
-			return err
+			mongoErr = err
 		}
 	}
 
+	var sqlErr error
 	if sqlRepo != nil {
-		_ = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+		sqlErr = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
 	}
 
-	return nil
+	if mongoErr != nil {
+		if mongodb.IsQuotaOrWriteBlockedError(mongoErr) {
+			if m.logger != nil {
+				m.logger.Warn("⚠️ MongoDB storage quota exceeded; media persisted into local SQLite runtime",
+					"file_id", doc.FileID,
+					"file_name", doc.FileName,
+					"error", mongoErr,
+				)
+			}
+			if sqlErr == nil {
+				return nil
+			}
+		}
+		return mongoErr
+	}
+
+	return sqlErr
 }
 
 // BulkSaveMedia saves a batch of documents to MongoDB and SQLite.
@@ -477,11 +518,9 @@ func (m *DatabaseManager) BulkSaveMedia(ctx context.Context, docs []mongodb.Medi
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
 
+	var mongoErr error
 	if mongoRepo != nil {
-		saved, duplicates, err = mongoRepo.BulkSaveMedia(ctx, docs, shardIndex)
-		if err != nil {
-			return saved, duplicates, err
-		}
+		saved, duplicates, mongoErr = mongoRepo.BulkSaveMedia(ctx, docs, shardIndex)
 	}
 
 	if sqlRepo != nil {
@@ -489,7 +528,24 @@ func (m *DatabaseManager) BulkSaveMedia(ctx context.Context, docs []mongodb.Medi
 		for _, d := range docs {
 			records = append(records, MediaDocToRecord(d))
 		}
-		_ = sqlRepo.BulkSaveMedia(ctx, records)
+		if sqlErr := sqlRepo.BulkSaveMedia(ctx, records); sqlErr == nil {
+			if saved == 0 {
+				saved = len(records)
+			}
+		}
+	}
+
+	if mongoErr != nil {
+		if mongodb.IsQuotaOrWriteBlockedError(mongoErr) {
+			if m.logger != nil {
+				m.logger.Warn("⚠️ MongoDB storage quota exceeded during bulk save; cached batch into SQLite runtime",
+					"records", len(docs),
+					"error", mongoErr,
+				)
+			}
+			return saved, duplicates, nil
+		}
+		return saved, duplicates, mongoErr
 	}
 
 	return saved, duplicates, nil
@@ -502,11 +558,9 @@ func (m *DatabaseManager) BulkSaveMediaAlternating(ctx context.Context, docs []m
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
 
+	var mongoErr error
 	if mongoRepo != nil {
-		saved, duplicates, err = mongoRepo.BulkSaveMediaAlternating(ctx, docs, chunkSize)
-		if err != nil {
-			return saved, duplicates, err
-		}
+		saved, duplicates, mongoErr = mongoRepo.BulkSaveMediaAlternating(ctx, docs, chunkSize)
 	}
 
 	if sqlRepo != nil {
@@ -514,7 +568,24 @@ func (m *DatabaseManager) BulkSaveMediaAlternating(ctx context.Context, docs []m
 		for _, d := range docs {
 			records = append(records, MediaDocToRecord(d))
 		}
-		_ = sqlRepo.BulkSaveMedia(ctx, records)
+		if sqlErr := sqlRepo.BulkSaveMedia(ctx, records); sqlErr == nil {
+			if saved == 0 {
+				saved = len(records)
+			}
+		}
+	}
+
+	if mongoErr != nil {
+		if mongodb.IsQuotaOrWriteBlockedError(mongoErr) {
+			if m.logger != nil {
+				m.logger.Warn("⚠️ MongoDB storage quota exceeded during alternating bulk save; cached batch into SQLite runtime",
+					"records", len(docs),
+					"error", mongoErr,
+				)
+			}
+			return saved, duplicates, nil
+		}
+		return saved, duplicates, mongoErr
 	}
 
 	return saved, duplicates, nil

@@ -32,6 +32,8 @@ type BotStats struct {
 	DB2SizeMB  float64
 	DB3SizeMB  float64
 	SQLSizeMB  float64
+	DB2Blocked bool
+	DB3Blocked bool
 }
 
 // Plugin implements the /stats and /status command plugin.
@@ -82,14 +84,33 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 
 // FormatStatsMessage formats the bot statistics overview matching STATUS_TXT template.
 func FormatStatsMessage(stats BotStats) string {
+	db2Extra := ""
+	if stats.DB2Blocked || stats.DB2SizeMB >= 510.0 {
+		db2Extra = " ⚠️ [FULL]"
+	}
+	db3Extra := ""
+	if stats.DB3Blocked || stats.DB3SizeMB >= 510.0 {
+		db3Extra = " ⚠️ [FULL]"
+	}
+
 	return fmt.Sprintf(
-		StatusTemplate,
+		"📈 𝐁𝐨𝐭 𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬 𝐎𝐯𝐞𝐫𝐯𝐢𝐞𝐰 📊\n\n"+
+			"📚 𝐓𝐨𝐭𝐚𝐥 𝐅𝐢𝐥𝐞𝐬: %d\n"+
+			"👥 𝐓𝐨𝐭𝐚𝐥 𝐔𝐬𝐞𝐫𝐬: %d\n"+
+			"💬 𝐓𝐨𝐭𝐚𝐥 𝐂𝐡𝐚𝐭𝐬: %d\n\n"+
+			"💾 𝐃𝐚𝐭𝐚𝐛𝐚𝐬𝐞 𝐒𝐢𝐳𝐞𝐬:\n"+
+			"• 𝐃𝐁𝟏: %.2f 𝐌𝐁\n"+
+			"• 𝐃𝐁𝟐: %.2f 𝐌𝐁%s\n"+
+			"• 𝐃𝐁𝟑: %.2f 𝐌𝐁%s\n"+
+			"• 𝐒𝐐𝐋: %.2f 𝐌𝐁",
 		stats.TotalFiles,
 		stats.TotalUsers,
 		stats.TotalChats,
 		stats.DB1SizeMB,
 		stats.DB2SizeMB,
+		db2Extra,
 		stats.DB3SizeMB,
+		db3Extra,
 		stats.SQLSizeMB,
 	)
 }
@@ -133,6 +154,8 @@ func (p *Plugin) gatherStats(ctx context.Context) BotStats {
 
 	// 5. DB2 & DB3 Sizes (from configured MongoDB media shards)
 	if mongoRepo := p.appCtx.DB.MongoMediaRepo(); mongoRepo != nil {
+		stats.DB2Blocked = mongoRepo.IsShardBlocked("DB2")
+		stats.DB3Blocked = mongoRepo.IsShardBlocked("DB3")
 		for _, shard := range mongoRepo.Shards() {
 			if shard.Col != nil && shard.Col.Database() != nil {
 				if shard.Label == "DB2" && stats.DB2SizeMB == 0 {

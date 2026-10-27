@@ -1,6 +1,7 @@
 package mongodb
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -145,4 +146,46 @@ func TestMediaRepository_EdgeCases(t *testing.T) {
 		t.Errorf("expected 0, 0, nil for nil repo BulkSaveMediaAlternating")
 	}
 }
+
+func TestIsQuotaOrWriteBlockedError(t *testing.T) {
+	if IsQuotaOrWriteBlockedError(nil) {
+		t.Error("expected false for nil error")
+	}
+
+	atlasErr := errors.New("(AtlasError) you are over your space quota, using 513 MB of 512 MB. Writes are blocked on your cluster.")
+	if !IsQuotaOrWriteBlockedError(atlasErr) {
+		t.Error("expected true for Atlas quota error")
+	}
+
+	otherErr := errors.New("connection reset by peer")
+	if IsQuotaOrWriteBlockedError(otherErr) {
+		t.Error("expected false for connection reset error")
+	}
+}
+
+func TestMediaRepository_ShardBlocking(t *testing.T) {
+	shards := []MediaShard{
+		{Label: "DB2", Col: nil},
+		{Label: "DB3", Col: nil},
+	}
+	repo := NewShardedMediaRepository(shards...)
+
+	if repo.IsShardBlocked("DB2") {
+		t.Error("expected DB2 to not be blocked initially")
+	}
+
+	repo.MarkShardBlocked("DB2")
+	if !repo.IsShardBlocked("DB2") {
+		t.Error("expected DB2 to be blocked after MarkShardBlocked")
+	}
+	if repo.IsShardBlocked("DB3") {
+		t.Error("expected DB3 to remain unblocked")
+	}
+
+	repo.ClearShardBlocked("DB2")
+	if repo.IsShardBlocked("DB2") {
+		t.Error("expected DB2 to be unblocked after ClearShardBlocked")
+	}
+}
+
 

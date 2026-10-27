@@ -248,8 +248,10 @@ type ShardCount struct {
 // MediaRepository provides read access to the authoritative MongoDB media collections
 // across sharded database clusters (e.g. DB2, DB3).
 type MediaRepository struct {
-	shards  []MediaShard
-	counter uint64
+	shards        []MediaShard
+	counter       uint64
+	blockedMu     sync.RWMutex
+	blockedShards map[string]time.Time
 }
 
 // NewMediaRepository creates a new MediaRepository referencing configured databases with DB1..DBn labels.
@@ -272,14 +274,16 @@ func NewMediaRepository(colName string, databases ...*mongo.Database) *MediaRepo
 	}
 
 	return &MediaRepository{
-		shards: shards,
+		shards:        shards,
+		blockedShards: make(map[string]time.Time),
 	}
 }
 
 // NewShardedMediaRepository creates a new MediaRepository from explicitly labeled shards.
 func NewShardedMediaRepository(shards ...MediaShard) *MediaRepository {
 	return &MediaRepository{
-		shards: shards,
+		shards:        shards,
+		blockedShards: make(map[string]time.Time),
 	}
 }
 
@@ -750,37 +754,140 @@ func (r *MediaRepository) BulkCheckFiles(ctx context.Context, fileIDs []string) 
 	return result, nil
 }
 
-// SaveMedia saves or upserts a MediaDoc document to the specified shard index.
-// If shardIndex is out of range, it defaults to shard 0.
-func (r *MediaRepository) SaveMedia(ctx context.Context, doc MediaDoc, shardIndex int) error {
+// IsQuotaOrWriteBlockedError reports whether an error indicates MongoDB Atlas or cluster
+// storage quota exhaustion or blocked writes.
+func IsQuotaOrWriteBlockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "space quota") ||
+		strings.Contains(msg, "writes are blocked") ||
+		strings.Contains(msg, "quota exceeded") ||
+		strings.Contains(msg, "storage quota")
+}
+
+// MarkShardBlocked marks a shard as write-blocked due to quota limits.
+func (r *MediaRepository) MarkShardBlocked(label string) {
+	if r == nil || label == "" {
+		return
+	}
+	r.blockedMu.Lock()
+	defer r.blockedMu.Unlock()
+	if r.blockedShards == nil {
+		r.blockedShards = make(map[string]time.Time)
+	}
+	r.blockedShards[label] = time.Now()
+}
+
+// IsShardBlocked checks if a shard is currently flagged as write-blocked.
+func (r *MediaRepository) IsShardBlocked(label string) bool {
+	if r == nil || label == "" {
+		return false
+	}
+	r.blockedMu.RLock()
+	defer r.blockedMu.RUnlock()
+	if r.blockedShards == nil {
+		return false
+	}
+	blockedAt, exists := r.blockedShards[label]
+	if !exists {
+		return false
+	}
+	// Re-attempt writes after 15 minutes in case storage was cleared or cluster tier was upgraded
+	if time.Since(blockedAt) > 15*time.Minute {
+		return false
+	}
+	return true
+}
+
+// ClearShardBlocked removes the blocked status for a shard upon a successful write.
+func (r *MediaRepository) ClearShardBlocked(label string) {
+	if r == nil || label == "" {
+		return
+	}
+	r.blockedMu.Lock()
+	defer r.blockedMu.Unlock()
+	if r.blockedShards != nil {
+		delete(r.blockedShards, label)
+	}
+}
+
+// SaveMediaWithFailover attempts to save or upsert a MediaDoc to the preferred shard.
+// If the preferred shard is blocked or returns a quota/write-blocked error, it automatically
+// fails over to any remaining healthy shards.
+func (r *MediaRepository) SaveMediaWithFailover(ctx context.Context, doc MediaDoc, preferredIdx int) (string, error) {
 	if r == nil || len(r.shards) == 0 {
-		return errors.New("no media shards configured")
+		return "", errors.New("no media shards configured")
 	}
 	if doc.FileID == "" {
-		return errors.New("cannot save media document with empty file_id")
+		return "", errors.New("cannot save media document with empty file_id")
 	}
 	if doc.Date.IsZero() {
 		doc.Date = time.Now().UTC()
 	}
 
-	idx := shardIndex
-	if idx < 0 || idx >= len(r.shards) {
-		idx = 0
-	}
-	shard := r.shards[idx]
-	if shard.Col == nil {
-		return fmt.Errorf("shard %s collection is nil", shard.Label)
+	n := len(r.shards)
+	startIdx := preferredIdx % n
+	if startIdx < 0 {
+		startIdx = 0
 	}
 
-	opts := options.Replace().SetUpsert(true)
-	_, err := shard.Col.ReplaceOne(ctx, bson.M{"_id": doc.FileID}, doc, opts)
-	if err != nil {
-		return fmt.Errorf("failed to save media %s to shard %s: %w", doc.FileID, shard.Label, err)
+	// First prioritize unblocked shards starting from startIdx
+	attemptIndices := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		idx := (startIdx + i) % n
+		if !r.IsShardBlocked(r.shards[idx].Label) {
+			attemptIndices = append(attemptIndices, idx)
+		}
 	}
-	return nil
+	// If all shards were marked blocked, still attempt all in case quota was cleared
+	if len(attemptIndices) == 0 {
+		for i := 0; i < n; i++ {
+			attemptIndices = append(attemptIndices, (startIdx+i)%n)
+		}
+	}
+
+	var lastErr error
+	opts := options.Replace().SetUpsert(true)
+
+	for _, idx := range attemptIndices {
+		shard := r.shards[idx]
+		if shard.Col == nil {
+			continue
+		}
+
+		_, err := shard.Col.ReplaceOne(ctx, bson.M{"_id": doc.FileID}, doc, opts)
+		if err == nil {
+			r.ClearShardBlocked(shard.Label)
+			return shard.Label, nil
+		}
+
+		lastErr = err
+		if IsQuotaOrWriteBlockedError(err) {
+			r.MarkShardBlocked(shard.Label)
+			continue
+		}
+
+		// Fatal or context canceled error
+		if ctx.Err() != nil {
+			return "", err
+		}
+	}
+
+	return "", fmt.Errorf("failed to save media %s across available shards (last error on %s): %w",
+		doc.FileID, r.shards[attemptIndices[len(attemptIndices)-1]].Label, lastErr)
 }
 
-// SaveMediaAlternating atomically alternates saves between media shards (DB2, DB3, etc.)
+// SaveMedia saves or upserts a MediaDoc document to the specified shard index.
+// If the target shard is blocked or over quota, it automatically fails over to a healthy shard.
+func (r *MediaRepository) SaveMedia(ctx context.Context, doc MediaDoc, shardIndex int) error {
+	_, err := r.SaveMediaWithFailover(ctx, doc, shardIndex)
+	return err
+}
+
+// SaveMediaAlternating atomically alternates saves between healthy media shards (DB2, DB3, etc.)
+// If a shard is full or returns a quota error, it automatically fails over to the next healthy shard.
 // Returns the label of the shard where the document was saved.
 func (r *MediaRepository) SaveMediaAlternating(ctx context.Context, doc MediaDoc) (string, error) {
 	if r == nil || len(r.shards) == 0 {
@@ -791,27 +898,21 @@ func (r *MediaRepository) SaveMediaAlternating(ctx context.Context, doc MediaDoc
 	if len(r.shards) > 1 {
 		idx = int((atomic.AddUint64(&r.counter, 1) - 1) % uint64(len(r.shards)))
 	}
-	err := r.SaveMedia(ctx, doc, idx)
-	if err != nil {
-		return "", err
-	}
-	return r.shards[idx].Label, nil
+	return r.SaveMediaWithFailover(ctx, doc, idx)
 }
 
 // BulkSaveMedia performs high-performance bulk insertion of MediaDocs to the specified shard index.
+// If the preferred shard is blocked or returns a quota error, it automatically fails over to a healthy shard.
 // Duplicate key errors are counted and skipped cleanly.
 func (r *MediaRepository) BulkSaveMedia(ctx context.Context, docs []MediaDoc, shardIndex int) (saved int, duplicates int, err error) {
 	if r == nil || len(r.shards) == 0 || len(docs) == 0 {
 		return 0, 0, nil
 	}
 
-	idx := shardIndex
-	if idx < 0 || idx >= len(r.shards) {
-		idx = 0
-	}
-	shard := r.shards[idx]
-	if shard.Col == nil {
-		return 0, 0, fmt.Errorf("shard %s collection is nil", shard.Label)
+	n := len(r.shards)
+	startIdx := shardIndex % n
+	if startIdx < 0 {
+		startIdx = 0
 	}
 
 	models := make([]mongo.WriteModel, 0, len(docs))
@@ -830,34 +931,67 @@ func (r *MediaRepository) BulkSaveMedia(ctx context.Context, docs []MediaDoc, sh
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
-	res, bErr := shard.Col.BulkWrite(ctx, models, opts)
-	if res != nil {
-		saved = int(res.InsertedCount)
+
+	attemptIndices := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		idx := (startIdx + i) % n
+		if !r.IsShardBlocked(r.shards[idx].Label) {
+			attemptIndices = append(attemptIndices, idx)
+		}
+	}
+	if len(attemptIndices) == 0 {
+		for i := 0; i < n; i++ {
+			attemptIndices = append(attemptIndices, (startIdx+i)%n)
+		}
 	}
 
-	if bErr != nil {
-		var bwe mongo.BulkWriteException
-		if errors.As(bErr, &bwe) {
-			hasOtherError := false
-			for _, we := range bwe.WriteErrors {
-				if we.Code == 11000 {
-					duplicates++
-				} else {
-					hasOtherError = true
+	var lastErr error
+	for _, idx := range attemptIndices {
+		shard := r.shards[idx]
+		if shard.Col == nil {
+			continue
+		}
+
+		res, bErr := shard.Col.BulkWrite(ctx, models, opts)
+		if res != nil {
+			saved = int(res.InsertedCount)
+		}
+
+		if bErr != nil {
+			var bwe mongo.BulkWriteException
+			if errors.As(bErr, &bwe) {
+				hasOtherError := false
+				for _, we := range bwe.WriteErrors {
+					if we.Code == 11000 {
+						duplicates++
+					} else {
+						hasOtherError = true
+					}
+				}
+				if !hasOtherError {
+					r.ClearShardBlocked(shard.Label)
+					return saved, duplicates, nil
 				}
 			}
-			if hasOtherError {
-				return saved, duplicates, bErr
+
+			if IsQuotaOrWriteBlockedError(bErr) {
+				r.MarkShardBlocked(shard.Label)
+				lastErr = bErr
+				continue
 			}
-			return saved, duplicates, nil
+
+			return saved, duplicates, bErr
 		}
-		return saved, duplicates, bErr
+
+		r.ClearShardBlocked(shard.Label)
+		return saved, duplicates, nil
 	}
 
-	return saved, duplicates, nil
+	return saved, duplicates, lastErr
 }
 
 // BulkSaveMediaAlternating saves docs in alternating batches (e.g. 100 to DB2, 100 to DB3).
+// If any shard is blocked or full, batches automatically failover to healthy shards.
 func (r *MediaRepository) BulkSaveMediaAlternating(ctx context.Context, docs []MediaDoc, chunkSize int) (saved int, duplicates int, err error) {
 	if r == nil || len(r.shards) == 0 || len(docs) == 0 {
 		return 0, 0, nil
@@ -885,4 +1019,5 @@ func (r *MediaRepository) BulkSaveMediaAlternating(ctx context.Context, docs []M
 
 	return saved, duplicates, nil
 }
+
 
