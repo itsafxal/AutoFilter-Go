@@ -976,11 +976,18 @@ func (p *Plugin) runIndexRangeOperation(progressMsg *telegram.NewMessage, chatID
 			stats.addProcessed(len(batch.messages))
 
 			if len(mediaDocs) > 0 {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				existMap, err := p.appCtx.DB.BulkCheckMediaExists(ctx, fileIDs)
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				existMap, err := p.appCtx.DB.BulkCheckMediaExistsByDocs(ctx, mediaDocs)
 				cancel()
 				if err != nil {
-					existMap = make(map[string]bool)
+					if p.appCtx.Logger != nil {
+						p.appCtx.Logger.Warn("⚠️ [Index] Pre-write deduplication check failed; skipping batch to prevent duplicate storage growth",
+							"error", err,
+							"batch_size", len(mediaDocs),
+						)
+					}
+					stats.addErrors(len(mediaDocs))
+					continue
 				}
 
 				var newDocs []mongodb.MediaDoc

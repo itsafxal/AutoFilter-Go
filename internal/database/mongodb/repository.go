@@ -754,6 +754,121 @@ func (r *MediaRepository) BulkCheckFiles(ctx context.Context, fileIDs []string) 
 	return result, nil
 }
 
+// FindByNameAndSize finds a media document across all shards matching original file name and size in bytes.
+func (r *MediaRepository) FindByNameAndSize(ctx context.Context, fileName string, fileSize int64) (*MediaDoc, error) {
+	if r == nil || len(r.shards) == 0 || fileName == "" || fileSize <= 0 {
+		return nil, nil
+	}
+
+	filter := bson.M{"file_name": fileName, "file_size": fileSize}
+	opts := options.FindOne()
+
+	for _, shard := range r.shards {
+		if shard.Col == nil {
+			continue
+		}
+		var doc MediaDoc
+		err := shard.Col.FindOne(ctx, filter, opts).Decode(&doc)
+		if err == nil {
+			return &doc, nil
+		}
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, err
+		}
+	}
+
+	return nil, nil
+}
+
+// BulkCheckFilesByMetadata checks if media documents already exist across shards by matching either _id OR (file_name, file_size).
+// Returns a map keyed by FileID with existence status (true = exists, false = new).
+func (r *MediaRepository) BulkCheckFilesByMetadata(ctx context.Context, docs []MediaDoc) (map[string]bool, error) {
+	result := make(map[string]bool, len(docs))
+	for _, d := range docs {
+		result[d.FileID] = false
+	}
+	if r == nil || len(r.shards) == 0 || len(docs) == 0 {
+		return result, nil
+	}
+
+	// 1. First pass: check by _id
+	fileIDs := make([]string, 0, len(docs))
+	for _, d := range docs {
+		if d.FileID != "" {
+			fileIDs = append(fileIDs, d.FileID)
+		}
+	}
+	if len(fileIDs) > 0 {
+		idMap, err := r.BulkCheckFiles(ctx, fileIDs)
+		if err == nil {
+			for id, exists := range idMap {
+				if exists {
+					result[id] = true
+				}
+			}
+		}
+	}
+
+	// 2. Second pass: for remaining unfound docs, check by (file_name, file_size)
+	var remaining []MediaDoc
+	for _, d := range docs {
+		if !result[d.FileID] && d.FileName != "" && d.FileSize > 0 {
+			remaining = append(remaining, d)
+		}
+	}
+
+	if len(remaining) == 0 {
+		return result, nil
+	}
+
+	const batchSize = 50
+	for i := 0; i < len(remaining); i += batchSize {
+		end := i + batchSize
+		if end > len(remaining) {
+			end = len(remaining)
+		}
+		chunk := remaining[i:end]
+
+		orFilters := make([]bson.M, 0, len(chunk))
+		for _, d := range chunk {
+			orFilters = append(orFilters, bson.M{
+				"file_name": d.FileName,
+				"file_size": d.FileSize,
+			})
+		}
+
+		filter := bson.M{"$or": orFilters}
+		opts := options.Find().SetProjection(bson.M{"file_name": 1, "file_size": 1})
+
+		for _, shard := range r.shards {
+			if shard.Col == nil {
+				continue
+			}
+			cur, err := shard.Col.Find(ctx, filter, opts)
+			if err != nil {
+				continue
+			}
+
+			for cur.Next(ctx) {
+				var found struct {
+					FileName string `bson:"file_name"`
+					FileSize int64  `bson:"file_size"`
+				}
+				if cur.Decode(&found) == nil {
+					for _, d := range chunk {
+						if d.FileName == found.FileName && d.FileSize == found.FileSize {
+							result[d.FileID] = true
+						}
+					}
+				}
+			}
+			cur.Close(context.Background())
+		}
+	}
+
+	return result, nil
+}
+
 // IsQuotaOrWriteBlockedError reports whether an error indicates MongoDB Atlas or cluster
 // storage quota exhaustion or blocked writes.
 func IsQuotaOrWriteBlockedError(err error) bool {
@@ -924,7 +1039,10 @@ func (r *MediaRepository) BulkSaveMedia(ctx context.Context, docs []MediaDoc, sh
 		if doc.Date.IsZero() {
 			doc.Date = now
 		}
-		models = append(models, mongo.NewInsertOneModel().SetDocument(doc))
+		models = append(models, mongo.NewReplaceOneModel().
+			SetFilter(bson.M{"_id": doc.FileID}).
+			SetReplacement(doc).
+			SetUpsert(true))
 	}
 	if len(models) == 0 {
 		return 0, 0, nil
@@ -954,7 +1072,7 @@ func (r *MediaRepository) BulkSaveMedia(ctx context.Context, docs []MediaDoc, sh
 
 		res, bErr := shard.Col.BulkWrite(ctx, models, opts)
 		if res != nil {
-			saved = int(res.InsertedCount)
+			saved = int(res.InsertedCount + res.UpsertedCount + res.ModifiedCount + res.MatchedCount)
 		}
 
 		if bErr != nil {
@@ -1019,5 +1137,3 @@ func (r *MediaRepository) BulkSaveMediaAlternating(ctx context.Context, docs []M
 
 	return saved, duplicates, nil
 }
-
-

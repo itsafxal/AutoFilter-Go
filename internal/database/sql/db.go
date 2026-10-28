@@ -182,10 +182,10 @@ func (m *DBManager) Vacuum(ctx context.Context) error {
 }
 
 // StartMaintenance launches a periodic background worker that controls SQLite disk size:
-// - Checkpoints WAL every 15 minutes to truncate the .wal file so it never grows to gigabytes
-// - Reclaims deleted free pages back to disk via incremental_vacuum every 15 minutes
-// - Optimizes FTS5 trigram indexes every 2 hours
-// - Vacuums database file if it exceeds 350 MB or every 24 hours to keep disk size minimal
+// - Checkpoints WAL every 15 minutes with TRUNCATE mode so .wal file stays minimal and never balloons
+// - Reclaims deleted free pages back to disk via incremental_vacuum every 15 minutes without copying tables
+// - Optimizes FTS5 trigram indexes periodically (every 6 hours)
+// - Avoids recursive full VACUUM cycles that duplicate file storage and trigger VPS OOM kills
 func (m *DBManager) StartMaintenance(ctx context.Context) {
 	m.writeLock.Lock()
 	if m.maintenanceRunning {
@@ -212,30 +212,26 @@ func (m *DBManager) StartMaintenance(ctx context.Context) {
 				cycles++
 				opCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 
-				// 1. Force WAL truncation to prevent .wal file from growing to 1GB-3GB
+				// 1. Force WAL truncation to prevent .wal file from growing
 				if err := m.CheckpointWAL(opCtx); err != nil {
 					m.logger.Debug("wal checkpoint error", "error", err)
 				}
 
-				// 2. Reclaim free pages back to disk
+				// 2. Reclaim free pages back to disk incrementally (CGO/pure-Go safe, zero copy)
 				if err := m.IncrementalVacuum(opCtx); err != nil {
 					m.logger.Debug("incremental vacuum error", "error", err)
 				}
 
-				// 3. Optimize FTS5 trigram indexes every 2 hours (cycle 8)
-				if cycles%8 == 0 {
+				// 3. Optimize FTS5 trigram indexes every 6 hours (cycle 24)
+				if cycles%24 == 0 {
 					if err := m.OptimizeFTS(opCtx); err != nil {
 						m.logger.Debug("fts5 optimize error", "error", err)
 					}
 				}
 
-				// 4. Auto-vacuum full defrag if DB file > 350MB or every 24 hours (cycle 96)
-				if cycles%96 == 0 || m.isFileSizeLarge(350*1024*1024) {
-					if err := m.Vacuum(opCtx); err != nil {
-						m.logger.Warn("periodic vacuum error", "error", err)
-					} else {
-						m.logger.Info("🎉 SQLite database compacted and vacuumed to minimal disk size")
-					}
+				// 4. If WAL file grows beyond 50MB between cycles, force truncate
+				if m.isWalLarge(50 * 1024 * 1024) {
+					_ = m.CheckpointWAL(opCtx)
 				}
 
 				cancel()
@@ -244,13 +240,9 @@ func (m *DBManager) StartMaintenance(ctx context.Context) {
 	}()
 }
 
-func (m *DBManager) isFileSizeLarge(thresholdBytes int64) bool {
+func (m *DBManager) isWalLarge(thresholdBytes int64) bool {
 	if m.dbPath == "" {
 		return false
-	}
-	fi, err := os.Stat(m.dbPath)
-	if err == nil && fi.Size() > thresholdBytes {
-		return true
 	}
 	fiWal, err := os.Stat(m.dbPath + "-wal")
 	if err == nil && fiWal.Size() > thresholdBytes {

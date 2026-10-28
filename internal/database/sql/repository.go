@@ -131,7 +131,6 @@ func (r *MediaRepository) GetLatestFiles(ctx context.Context, limit int) ([]Medi
 	return records, rows.Err()
 }
 
-
 // Search performs a basic substring search on the SQLite media table.
 func (r *MediaRepository) Search(ctx context.Context, keyword string, limit, offset int) ([]MediaRecord, int64, error) {
 	if r.dbManager == nil || r.dbManager.DB() == nil || keyword == "" {
@@ -308,6 +307,136 @@ func (r *MediaRepository) BulkCheckFiles(ctx context.Context, fileIDs []string) 
 			}
 		}
 		rows.Close()
+	}
+
+	return result, nil
+}
+
+// FileCheckItem represents identifier and metadata for duplicate checking.
+type FileCheckItem struct {
+	FileID   string
+	FileName string
+	FileSize int64
+}
+
+// GetFileByNameAndSize retrieves a media record by matching original file name and size in bytes.
+func (r *MediaRepository) GetFileByNameAndSize(ctx context.Context, fileName string, fileSize int64) (*MediaRecord, error) {
+	if r.dbManager == nil || r.dbManager.DB() == nil || fileName == "" || fileSize <= 0 {
+		return nil, nil
+	}
+
+	query := `
+		SELECT file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved
+		FROM media
+		WHERE file_name = ? AND file_size = ?
+		LIMIT 1;
+	`
+	row := r.dbManager.DB().QueryRowContext(ctx, query, fileName, fileSize)
+	var rec MediaRecord
+	var dateSaved sql.NullTime
+	err := row.Scan(
+		&rec.FileID,
+		&rec.FileRef,
+		&rec.FileName,
+		&rec.FileSize,
+		&rec.Size,
+		&rec.FileType,
+		&rec.MimeType,
+		&rec.Caption,
+		&dateSaved,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to fetch file by name and size: %w", err)
+	}
+	if dateSaved.Valid {
+		rec.DateSaved = dateSaved.Time
+	}
+	return &rec, nil
+}
+
+// BulkCheckMediaItems checks which items exist in SQLite by either file_id OR (file_name, file_size).
+// Returns a map keyed by FileID with existence status (true = exists, false = new).
+func (r *MediaRepository) BulkCheckMediaItems(ctx context.Context, items []FileCheckItem) (map[string]bool, error) {
+	result := make(map[string]bool, len(items))
+	if len(items) == 0 {
+		return result, nil
+	}
+	for _, it := range items {
+		result[it.FileID] = false
+	}
+	if r.dbManager == nil || r.dbManager.DB() == nil {
+		return result, nil
+	}
+
+	// 1. First pass: check by file_id
+	fileIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.FileID != "" {
+			fileIDs = append(fileIDs, it.FileID)
+		}
+	}
+	if len(fileIDs) > 0 {
+		idMap, err := r.BulkCheckFiles(ctx, fileIDs)
+		if err == nil {
+			for fid, exists := range idMap {
+				if exists {
+					result[fid] = true
+				}
+			}
+		}
+	}
+
+	// 2. Second pass: for any remaining unfound items, check by (file_name, file_size)
+	var remaining []FileCheckItem
+	for _, it := range items {
+		if !result[it.FileID] && it.FileName != "" && it.FileSize > 0 {
+			remaining = append(remaining, it)
+		}
+	}
+
+	if len(remaining) == 0 {
+		return result, nil
+	}
+
+	const batchSize = 50
+	for i := 0; i < len(remaining); i += batchSize {
+		end := i + batchSize
+		if end > len(remaining) {
+			end = len(remaining)
+		}
+		chunk := remaining[i:end]
+
+		conds := make([]string, len(chunk))
+		args := make([]any, 0, len(chunk)*2)
+		for j, it := range chunk {
+			conds[j] = "(file_name = ? AND file_size = ?)"
+			args = append(args, it.FileName, it.FileSize)
+		}
+
+		query := fmt.Sprintf("SELECT file_name, file_size FROM media WHERE %s;", strings.Join(conds, " OR "))
+		rows, err := r.dbManager.DB().QueryContext(ctx, query, args...)
+		if err != nil {
+			continue
+		}
+
+		matchedKeys := make(map[string]bool)
+		for rows.Next() {
+			var fn string
+			var fs int64
+			if scanErr := rows.Scan(&fn, &fs); scanErr == nil {
+				matchedKeys[fmt.Sprintf("%s|%d", fn, fs)] = true
+			}
+		}
+		rows.Close()
+
+		for _, it := range chunk {
+			if matchedKeys[fmt.Sprintf("%s|%d", it.FileName, it.FileSize)] {
+				result[it.FileID] = true
+			}
+		}
 	}
 
 	return result, nil

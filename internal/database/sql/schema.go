@@ -25,6 +25,7 @@ func (m *DBManager) initSchema(ctx context.Context) error {
 		`DROP INDEX IF EXISTS idx_date_saved;`,
 		`CREATE INDEX IF NOT EXISTS idx_media_file_name ON media (file_name);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_date_name ON media (date_saved DESC, file_name);`,
+		`CREATE INDEX IF NOT EXISTS idx_media_name_size ON media (file_name, file_size);`,
 
 		// 3. Ultra-fast Full-Text Search (FTS5 Trigram) for instant substring queries
 		`CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(

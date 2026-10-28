@@ -353,7 +353,7 @@ func MediaDocToRecord(doc mongodb.MediaDoc) sql.MediaRecord {
 	}
 }
 
-// CheckMediaExists checks if a media document already exists in SQLite or MongoDB.
+// CheckMediaExists checks if a media document already exists in SQLite or MongoDB by fileID.
 func (m *DatabaseManager) CheckMediaExists(ctx context.Context, fileID string) (bool, error) {
 	if fileID == "" {
 		return false, nil
@@ -374,6 +374,55 @@ func (m *DatabaseManager) CheckMediaExists(ctx context.Context, fileID string) (
 	// 2. Fallback to MongoDB check across shards
 	if mongoRepo != nil {
 		return mongoRepo.CheckFileExists(ctx, fileID)
+	}
+
+	return false, nil
+}
+
+// CheckMediaExistsByDoc checks if a media document already exists across SQLite and MongoDB shards
+// using both primary file_id and secondary (file_name, file_size) metadata.
+func (m *DatabaseManager) CheckMediaExistsByDoc(ctx context.Context, doc mongodb.MediaDoc) (bool, error) {
+	m.mu.RLock()
+	sqlRepo := m.sqlMediaRepo
+	mongoRepo := m.mongoMediaRepo
+	m.mu.RUnlock()
+
+	// 1. Fast SQLite primary-key index lookup
+	if sqlRepo != nil && doc.FileID != "" {
+		rec, err := sqlRepo.GetFileDetails(ctx, doc.FileID)
+		if err == nil && rec != nil && rec.FileID != "" {
+			return true, nil
+		}
+	}
+
+	// 2. Fast SQLite (file_name, file_size) index lookup
+	if sqlRepo != nil && doc.FileName != "" && doc.FileSize > 0 {
+		rec, err := sqlRepo.GetFileByNameAndSize(ctx, doc.FileName, doc.FileSize)
+		if err == nil && rec != nil && rec.FileID != "" {
+			return true, nil
+		}
+	}
+
+	// 3. MongoDB primary-key check across shards
+	if mongoRepo != nil && doc.FileID != "" {
+		exists, err := mongoRepo.CheckFileExists(ctx, doc.FileID)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+
+	// 4. MongoDB (file_name, file_size) check across shards
+	if mongoRepo != nil && doc.FileName != "" && doc.FileSize > 0 {
+		found, err := mongoRepo.FindByNameAndSize(ctx, doc.FileName, doc.FileSize)
+		if err != nil {
+			return false, err
+		}
+		if found != nil && found.FileID != "" {
+			return true, nil
+		}
 	}
 
 	return false, nil
@@ -414,11 +463,71 @@ func (m *DatabaseManager) BulkCheckMediaExists(ctx context.Context, fileIDs []st
 
 	if len(remaining) > 0 && mongoRepo != nil {
 		mongoMap, err := mongoRepo.BulkCheckFiles(ctx, remaining)
+		if err != nil {
+			return result, fmt.Errorf("mongo bulk check failed: %w", err)
+		}
+		for id, exists := range mongoMap {
+			if exists {
+				result[id] = true
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// BulkCheckMediaExistsByDocs checks a slice of media documents across SQLite and MongoDB shards
+// using both primary file_id and secondary (file_name, file_size) metadata.
+func (m *DatabaseManager) BulkCheckMediaExistsByDocs(ctx context.Context, docs []mongodb.MediaDoc) (map[string]bool, error) {
+	result := make(map[string]bool, len(docs))
+	for _, d := range docs {
+		result[d.FileID] = false
+	}
+	if len(docs) == 0 {
+		return result, nil
+	}
+
+	m.mu.RLock()
+	sqlRepo := m.sqlMediaRepo
+	mongoRepo := m.mongoMediaRepo
+	m.mu.RUnlock()
+
+	// 1. Fast SQLite multi-token metadata lookup
+	var remaining []mongodb.MediaDoc
+	if sqlRepo != nil {
+		items := make([]sql.FileCheckItem, 0, len(docs))
+		for _, d := range docs {
+			items = append(items, sql.FileCheckItem{
+				FileID:   d.FileID,
+				FileName: d.FileName,
+				FileSize: d.FileSize,
+			})
+		}
+		sqlMap, err := sqlRepo.BulkCheckMediaItems(ctx, items)
 		if err == nil {
-			for id, exists := range mongoMap {
-				if exists {
-					result[id] = true
+			for _, d := range docs {
+				if sqlMap[d.FileID] {
+					result[d.FileID] = true
+				} else {
+					remaining = append(remaining, d)
 				}
+			}
+		} else {
+			remaining = docs
+		}
+	} else {
+		remaining = docs
+	}
+
+	// 2. Authoritative MongoDB metadata check across all shards
+	if len(remaining) > 0 && mongoRepo != nil {
+		mongoMap, err := mongoRepo.BulkCheckFilesByMetadata(ctx, remaining)
+		if err != nil {
+			return result, fmt.Errorf("authoritative mongo bulk check failed: %w", err)
+		}
+		for _, d := range remaining {
+			if mongoMap[d.FileID] {
+				result[d.FileID] = true
 			}
 		}
 	}
@@ -428,11 +537,24 @@ func (m *DatabaseManager) BulkCheckMediaExists(ctx context.Context, fileIDs []st
 
 // SaveMediaLiveAlternating saves a media item atomically alternating across MongoDB clusters
 // (DB2 and DB3) and immediately inserts it into SQLite so it is instantly searchable.
+// If the document already exists in SQLite or MongoDB, it safely bypasses insertion.
 func (m *DatabaseManager) SaveMediaLiveAlternating(ctx context.Context, doc mongodb.MediaDoc) (string, error) {
 	m.mu.RLock()
 	mongoRepo := m.mongoMediaRepo
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
+
+	// Pre-write deduplication: check if file already exists across any shard or SQLite
+	exists, err := m.CheckMediaExistsByDoc(ctx, doc)
+	if err != nil {
+		return "", fmt.Errorf("deduplication check error: %w", err)
+	}
+	if exists {
+		if sqlRepo != nil {
+			_ = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+		}
+		return "Existing (Deduplicated)", nil
+	}
 
 	var shardLabel string
 	var mongoErr error
@@ -474,11 +596,23 @@ func (m *DatabaseManager) SaveMediaLiveAlternating(ctx context.Context, doc mong
 }
 
 // SaveMediaLive saves a media item to a specific MongoDB shard and to SQLite.
+// If the document already exists, duplicate write is skipped.
 func (m *DatabaseManager) SaveMediaLive(ctx context.Context, doc mongodb.MediaDoc, shardIndex int) error {
 	m.mu.RLock()
 	mongoRepo := m.mongoMediaRepo
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
+
+	exists, err := m.CheckMediaExistsByDoc(ctx, doc)
+	if err != nil {
+		return fmt.Errorf("deduplication check error: %w", err)
+	}
+	if exists {
+		if sqlRepo != nil {
+			_ = sqlRepo.SaveMedia(ctx, MediaDocToRecord(doc))
+		}
+		return nil
+	}
 
 	var mongoErr error
 	if mongoRepo != nil {
@@ -511,35 +645,60 @@ func (m *DatabaseManager) SaveMediaLive(ctx context.Context, doc mongodb.MediaDo
 	return sqlErr
 }
 
-// BulkSaveMedia saves a batch of documents to MongoDB and SQLite.
+// BulkSaveMedia saves a batch of documents to MongoDB and SQLite with strict pre-write deduplication.
 func (m *DatabaseManager) BulkSaveMedia(ctx context.Context, docs []mongodb.MediaDoc, shardIndex int) (saved int, duplicates int, err error) {
+	if len(docs) == 0 {
+		return 0, 0, nil
+	}
+
 	m.mu.RLock()
 	mongoRepo := m.mongoMediaRepo
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
 
-	var mongoErr error
-	if mongoRepo != nil {
-		saved, duplicates, mongoErr = mongoRepo.BulkSaveMedia(ctx, docs, shardIndex)
+	// 1. Perform strict batch deduplication check across SQLite and all MongoDB shards
+	existMap, checkErr := m.BulkCheckMediaExistsByDocs(ctx, docs)
+	if checkErr != nil {
+		return 0, 0, fmt.Errorf("pre-write deduplication check failed: %w", checkErr)
 	}
 
+	var toInsert []mongodb.MediaDoc
+	for _, d := range docs {
+		if existMap[d.FileID] {
+			duplicates++
+		} else {
+			toInsert = append(toInsert, d)
+		}
+	}
+
+	// Always ensure existing docs are cached in local SQLite
 	if sqlRepo != nil {
 		records := make([]sql.MediaRecord, 0, len(docs))
 		for _, d := range docs {
 			records = append(records, MediaDocToRecord(d))
 		}
-		if sqlErr := sqlRepo.BulkSaveMedia(ctx, records); sqlErr == nil {
-			if saved == 0 {
-				saved = len(records)
-			}
-		}
+		_ = sqlRepo.BulkSaveMedia(ctx, records)
+	}
+
+	if len(toInsert) == 0 {
+		return 0, duplicates, nil
+	}
+
+	var mongoErr error
+	if mongoRepo != nil {
+		s, d, mErr := mongoRepo.BulkSaveMedia(ctx, toInsert, shardIndex)
+		saved = s
+		duplicates += d
+		mongoErr = mErr
+	} else {
+		saved = len(toInsert)
 	}
 
 	if mongoErr != nil {
 		if mongodb.IsQuotaOrWriteBlockedError(mongoErr) {
 			if m.logger != nil {
 				m.logger.Warn("⚠️ MongoDB storage quota exceeded during bulk save; cached batch into SQLite runtime",
-					"records", len(docs),
+					"records", len(toInsert),
 					"error", mongoErr,
 				)
 			}
@@ -551,35 +710,64 @@ func (m *DatabaseManager) BulkSaveMedia(ctx context.Context, docs []mongodb.Medi
 	return saved, duplicates, nil
 }
 
-// BulkSaveMediaAlternating saves docs in alternating batches (100 to DB2, 100 to DB3, etc.) and to SQLite.
+// BulkSaveMediaAlternating saves docs in alternating batches with strict pre-write deduplication.
 func (m *DatabaseManager) BulkSaveMediaAlternating(ctx context.Context, docs []mongodb.MediaDoc, chunkSize int) (saved int, duplicates int, err error) {
+	if len(docs) == 0 {
+		return 0, 0, nil
+	}
+
 	m.mu.RLock()
 	mongoRepo := m.mongoMediaRepo
 	sqlRepo := m.sqlMediaRepo
 	m.mu.RUnlock()
 
-	var mongoErr error
-	if mongoRepo != nil {
-		saved, duplicates, mongoErr = mongoRepo.BulkSaveMediaAlternating(ctx, docs, chunkSize)
+	// 1. Perform strict batch deduplication check across SQLite and all MongoDB shards
+	existMap, checkErr := m.BulkCheckMediaExistsByDocs(ctx, docs)
+	if checkErr != nil {
+		return 0, 0, fmt.Errorf("pre-write deduplication check failed: %w", checkErr)
 	}
 
+	var toInsert []mongodb.MediaDoc
+	for _, d := range docs {
+		if existMap[d.FileID] {
+			duplicates++
+		} else {
+			toInsert = append(toInsert, d)
+		}
+	}
+
+	// Always ensure existing docs are cached in local SQLite
 	if sqlRepo != nil {
 		records := make([]sql.MediaRecord, 0, len(docs))
 		for _, d := range docs {
 			records = append(records, MediaDocToRecord(d))
 		}
-		if sqlErr := sqlRepo.BulkSaveMedia(ctx, records); sqlErr == nil {
-			if saved == 0 {
-				saved = len(records)
-			}
-		}
+		_ = sqlRepo.BulkSaveMedia(ctx, records)
+	}
+
+	if len(toInsert) == 0 {
+		return 0, duplicates, nil
+	}
+
+	if chunkSize <= 0 {
+		chunkSize = 100
+	}
+
+	var mongoErr error
+	if mongoRepo != nil {
+		s, d, mErr := mongoRepo.BulkSaveMediaAlternating(ctx, toInsert, chunkSize)
+		saved = s
+		duplicates += d
+		mongoErr = mErr
+	} else {
+		saved = len(toInsert)
 	}
 
 	if mongoErr != nil {
 		if mongodb.IsQuotaOrWriteBlockedError(mongoErr) {
 			if m.logger != nil {
 				m.logger.Warn("⚠️ MongoDB storage quota exceeded during alternating bulk save; cached batch into SQLite runtime",
-					"records", len(docs),
+					"records", len(toInsert),
 					"error", mongoErr,
 				)
 			}

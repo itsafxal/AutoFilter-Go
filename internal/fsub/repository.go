@@ -111,20 +111,29 @@ func (r *Repository) UpdateThreshold(ctx context.Context, key string, threshold 
 	return nil
 }
 
-// AddReq records a user's join request in the appropriate slot collection.
+// AddReq records a user's join request idempotently in the appropriate slot collection.
 func (r *Repository) AddReq(ctx context.Context, slot int, userID int64) error {
 	col := r.getReqCol(slot)
 	if col == nil {
 		return nil
 	}
-	doc := bson.M{
-		"user_id":    userID,
-		"id":         userID,
-		"created_at": time.Now(),
+	opts := options.Update().SetUpsert(true)
+	filter := bson.M{
+		"$or": []bson.M{
+			{"user_id": userID},
+			{"id": userID},
+		},
 	}
-	_, err := col.InsertOne(ctx, doc)
-	if err != nil && !mongo.IsDuplicateKeyError(err) {
-		return fmt.Errorf("failed to insert join request in slot %d: %w", slot, err)
+	update := bson.M{
+		"$set": bson.M{
+			"user_id":    userID,
+			"id":         userID,
+			"created_at": time.Now().UTC(),
+		},
+	}
+	_, err := col.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		return fmt.Errorf("failed to record join request in slot %d: %w", slot, err)
 	}
 	return nil
 }

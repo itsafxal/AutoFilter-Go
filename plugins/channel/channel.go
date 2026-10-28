@@ -85,8 +85,8 @@ func (p *Plugin) HandleChannelMedia(m *telegram.NewMessage) error {
 
 	ctx := context.Background()
 
-	// 1. Check for duplicates in SQLite (<0.1ms) and MongoDB
-	exists, err := p.appCtx.DB.CheckMediaExists(ctx, doc.FileID)
+	// 1. Check for duplicates in SQLite (<0.1ms) and MongoDB using both ID and (file_name, file_size)
+	exists, err := p.appCtx.DB.CheckMediaExistsByDoc(ctx, *doc)
 	if err == nil && exists {
 		if p.appCtx.Logger != nil {
 			p.appCtx.Logger.Info("⚠️ [Live Index] Skipped duplicate file",
@@ -96,6 +96,16 @@ func (p *Plugin) HandleChannelMedia(m *telegram.NewMessage) error {
 			)
 		}
 		return nil
+	}
+	if err != nil {
+		if p.appCtx.Logger != nil {
+			p.appCtx.Logger.Warn("⚠️ [Live Index] Pre-write deduplication check error; skipping insertion to prevent duplicate storage growth",
+				"file_name", doc.FileName,
+				"error", err,
+				"chat_id", chatID,
+			)
+		}
+		return err
 	}
 
 	// 2. Alternating save between DB2 and DB3 in MongoDB + update SQLite runtime
