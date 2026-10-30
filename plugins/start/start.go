@@ -120,7 +120,7 @@ func (p *Plugin) buildAboutContent() (string, *telegram.ReplyInlineMarkup) {
 			"‣ ᴍʏ ɴᴀᴍᴇ : <a href='https://t.me/%s'>%s</a>\n"+
 			"‣ ᴄʀᴇᴀᴛᴏʀ : <a href='%s'>ᴛʜɪs ᴘᴇʀsᴏɴ</a>\n"+
 			"‣ ᴅᴇᴠᴇʟᴏᴘᴇʀ : <a href='https://cybertg.vercel.app'>ᴄʏʙᴇʀ ᠰ ᴛɢ</a>\n"+
-			"‣ ʟɪʙʀᴀʀʏ : <a href='https://www.gogram.sbs/'>ᴘʏʀᴏɢʀᴀᴍ</a>\n"+
+			"‣ ʟɪʙʀᴀʀʏ : <a href='https://www.gogram.sbs/'>ɢᴏɢʀᴀᴍ</a>\n"+
 			"‣ ʟᴀɴɢᴜᴀɢᴇ : <a href='https://go.dev/'>Go </a>\n"+
 			"‣ ᴅᴀᴛᴀ ʙᴀsᴇ : <a href='https://www.mongodb.com/'>ᴍᴏɴɢᴏ ᴅʙ</a>\n"+
 			"‣ ʙᴏᴛ sᴇʀᴠᴇʀ : <a href='https://t.me/quickfastt'>ǫᴜɪᴄᴋ ꜰᴀsᴛ</a></b></blockquote>",
