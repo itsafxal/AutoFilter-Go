@@ -21,9 +21,9 @@ func (m *DBManager) initSchema(ctx context.Context) error {
 			date_saved TIMESTAMP
 		);`,
 
-		// 2. High-speed performance indexes (drop narrow date_saved index to avoid bad query planner choices)
+		// 2. High-speed performance indexes (drop narrow date_saved and redundant idx_media_file_name in favor of composite idx_media_name_size)
 		`DROP INDEX IF EXISTS idx_date_saved;`,
-		`CREATE INDEX IF NOT EXISTS idx_media_file_name ON media (file_name);`,
+		`DROP INDEX IF EXISTS idx_media_file_name;`,
 		`CREATE INDEX IF NOT EXISTS idx_media_date_name ON media (date_saved DESC, file_name);`,
 		`CREATE INDEX IF NOT EXISTS idx_media_name_size ON media (file_name, file_size);`,
 

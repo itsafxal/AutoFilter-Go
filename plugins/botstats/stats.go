@@ -272,9 +272,8 @@ func (p *Plugin) HandleVacuum(m *telegram.NewMessage) error {
 
 	if p.appCtx.DB != nil && p.appCtx.DB.SQLManager() != nil {
 		_ = p.appCtx.DB.SQLManager().CheckpointWAL(ctx)
-		_ = p.appCtx.DB.SQLManager().IncrementalVacuum(ctx)
 		_ = p.appCtx.DB.SQLManager().OptimizeFTS(ctx)
-		_ = p.appCtx.DB.SQLManager().Vacuum(ctx)
+		_ = p.appCtx.DB.SQLManager().IncrementalVacuum(ctx)
 	}
 
 	text, replyMarkup := p.buildStatsContent(ctx)
@@ -317,9 +316,8 @@ func (p *Plugin) HandleVacuumCallback(cb *telegram.CallbackQuery) error {
 
 	if p.appCtx.DB != nil && p.appCtx.DB.SQLManager() != nil {
 		_ = p.appCtx.DB.SQLManager().CheckpointWAL(ctx)
-		_ = p.appCtx.DB.SQLManager().IncrementalVacuum(ctx)
 		_ = p.appCtx.DB.SQLManager().OptimizeFTS(ctx)
-		_ = p.appCtx.DB.SQLManager().Vacuum(ctx)
+		_ = p.appCtx.DB.SQLManager().IncrementalVacuum(ctx)
 	}
 
 	text, replyMarkup := p.buildStatsContent(ctx)

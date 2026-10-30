@@ -67,6 +67,10 @@ func (m *DBManager) Open(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize SQLite schema: %w", err)
 	}
 
+	// Reclaim disk space from dropped indexes or replaced rows (safe in-place truncation)
+	_ = m.IncrementalVacuum(ctx)
+	_ = m.CheckpointWAL(ctx)
+
 	m.logger.Info("SQLite database initialized successfully with WAL mode", "path", m.dbPath)
 
 	// Launch background maintenance worker (WAL truncation & disk space reclamation)

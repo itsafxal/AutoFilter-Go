@@ -393,7 +393,7 @@ func (s *Syncer) dropSecondaryIndexes(ctx context.Context) error {
 func (s *Syncer) ensureIndexes(ctx context.Context) error {
 	queries := []string{
 		"DROP INDEX IF EXISTS idx_date_saved;",
-		"CREATE INDEX IF NOT EXISTS idx_media_file_name ON media (file_name);",
+		"DROP INDEX IF EXISTS idx_media_file_name;",
 		"CREATE INDEX IF NOT EXISTS idx_media_date_name ON media (date_saved DESC, file_name);",
 		"CREATE INDEX IF NOT EXISTS idx_media_name_size ON media (file_name, file_size);",
 		`CREATE VIRTUAL TABLE IF NOT EXISTS media_fts USING fts5(
