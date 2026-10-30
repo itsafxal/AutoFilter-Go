@@ -118,3 +118,83 @@ func TestStartPlugin_CallbacksAndContent(t *testing.T) {
 		t.Errorf("expected 1 row with 2 buttons in about markup, got %v", aMarkup)
 	}
 }
+
+func TestBatchDelivery_Formatting_Started(t *testing.T) {
+	// 1. Standard multi-item batch
+	text := FormatBatchStartedText("Somante Krithavu", 7)
+	if !strings.Contains(text, "📦 <b>Batch Delivery Started!</b>") {
+		t.Errorf("expected header '📦 <b>Batch Delivery Started!</b>', got:\n%s", text)
+	}
+	if !strings.Contains(text, "<b>Batch:</b> Somante Krithavu") {
+		t.Errorf("expected batch name in text, got:\n%s", text)
+	}
+	if !strings.Contains(text, "⏳ Preparing to deliver 7 items...") {
+		t.Errorf("expected '⏳ Preparing to deliver 7 items...', got:\n%s", text)
+	}
+
+	// 2. Single item batch unit
+	textSingle := FormatBatchStartedText("Single Movie", 1)
+	if !strings.Contains(textSingle, "⏳ Preparing to deliver 1 item...") {
+		t.Errorf("expected '⏳ Preparing to deliver 1 item...', got:\n%s", textSingle)
+	}
+
+	// 3. HTML escaping
+	textEscaped := FormatBatchStartedText("<Dangerous & Co>", 3)
+	if strings.Contains(textEscaped, "<Dangerous") {
+		t.Errorf("expected unescaped HTML tag to be escaped, got:\n%s", textEscaped)
+	}
+	if !strings.Contains(textEscaped, "&lt;Dangerous &amp; Co&gt;") {
+		t.Errorf("expected HTML entities in escaped text, got:\n%s", textEscaped)
+	}
+}
+
+func TestBatchDelivery_Formatting_CompleteSuccess(t *testing.T) {
+	text := FormatBatchCompleteText("Somante Krithavu", 7, 7)
+	if !strings.Contains(text, "✨ <b>Batch Delivery Complete!</b>") {
+		t.Errorf("expected success header '✨ <b>Batch Delivery Complete!</b>', got:\n%s", text)
+	}
+	if !strings.Contains(text, "📦 <b>Batch:</b> Somante Krithavu") {
+		t.Errorf("expected batch name in text, got:\n%s", text)
+	}
+	if !strings.Contains(text, "✅ <b>Delivered:</b> 7 / 7 items") {
+		t.Errorf("expected '✅ <b>Delivered:</b> 7 / 7 items', got:\n%s", text)
+	}
+	if strings.Contains(text, "⚠️") || strings.Contains(text, "Failed") {
+		t.Errorf("success text must not contain error indicators: %s", text)
+	}
+}
+
+func TestBatchDelivery_Formatting_PartialFailure(t *testing.T) {
+	text := FormatBatchCompleteText("Somante Krithavu", 5, 7)
+	if !strings.Contains(text, "⚠️ <b>Batch Delivery Completed with Errors</b>") {
+		t.Errorf("expected warning header '⚠️ <b>Batch Delivery Completed with Errors</b>', got:\n%s", text)
+	}
+	if !strings.Contains(text, "📦 <b>Batch:</b> Somante Krithavu") {
+		t.Errorf("expected batch name in text, got:\n%s", text)
+	}
+	if !strings.Contains(text, "✅ <b>Delivered:</b> 5") {
+		t.Errorf("expected '✅ <b>Delivered:</b> 5', got:\n%s", text)
+	}
+	if !strings.Contains(text, "❌ <b>Failed:</b> 2") {
+		t.Errorf("expected '❌ <b>Failed:</b> 2', got:\n%s", text)
+	}
+	if !strings.Contains(text, "📁 <b>Total:</b> 7 items") {
+		t.Errorf("expected '📁 <b>Total:</b> 7 items', got:\n%s", text)
+	}
+}
+
+func TestBatchDelivery_Formatting_AllFailure(t *testing.T) {
+	text := FormatBatchCompleteText("Somante Krithavu", 0, 7)
+	if !strings.Contains(text, "⚠️ <b>Batch Delivery Completed with Errors</b>") {
+		t.Errorf("expected warning header, got:\n%s", text)
+	}
+	if !strings.Contains(text, "✅ <b>Delivered:</b> 0") {
+		t.Errorf("expected '✅ <b>Delivered:</b> 0', got:\n%s", text)
+	}
+	if !strings.Contains(text, "❌ <b>Failed:</b> 7") {
+		t.Errorf("expected '❌ <b>Failed:</b> 7', got:\n%s", text)
+	}
+	if !strings.Contains(text, "📁 <b>Total:</b> 7 items") {
+		t.Errorf("expected '📁 <b>Total:</b> 7 items', got:\n%s", text)
+	}
+}

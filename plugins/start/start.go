@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
+	"github.com/itsafxal/AutoFilter-Go/internal/batch"
 	"github.com/itsafxal/AutoFilter-Go/internal/commands"
 	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
 	"github.com/itsafxal/AutoFilter-Go/internal/oldbot"
@@ -582,6 +583,16 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 	return err
 }
 
+// FormatBatchStartedText constructs the initial temporary status message text.
+func FormatBatchStartedText(batchName string, totalItems int) string {
+	return batch.FormatDeliveryStartedText(batchName, totalItems)
+}
+
+// FormatBatchCompleteText constructs the final completion message text.
+func FormatBatchCompleteText(batchName string, deliveredCount, totalItems int) string {
+	return batch.FormatDeliveryCompleteText(batchName, deliveredCount, totalItems)
+}
+
 func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, batchID string) error {
 	if p.appCtx == nil || p.appCtx.Batch == nil {
 		_, err := m.Reply("⚠️ <b>Batch service is unavailable.</b>", &telegram.SendOptions{ParseMode: "html"})
@@ -642,7 +653,7 @@ func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, ba
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	meta, err := p.appCtx.Batch.GetBatch(ctx, batchID)
@@ -657,19 +668,31 @@ func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, ba
 		return err
 	}
 
-	headerMsg, _ := m.Reply(fmt.Sprintf(
-		"📦 <b>Delivering Batch:</b> <b>%s</b>\n"+
-			"<i>Total items: %d. Delivering in exact sequential order, please wait...</i>",
-		commands.EscapeHTML(meta.BatchName),
-		len(items),
-	), &telegram.SendOptions{ParseMode: "html"})
-
 	chatID := m.ChatID()
+
+	// Step 1: Send initial temporary status message
+	statusText := FormatBatchStartedText(meta.BatchName, len(items))
+	var statusMsg *telegram.NewMessage
+	var statusErr error
+	if p.appCtx != nil && p.appCtx.Client != nil {
+		statusMsg, statusErr = p.appCtx.Client.SendMessage(chatID, statusText, &telegram.SendOptions{ParseMode: "html"})
+	}
+	if statusErr != nil || statusMsg == nil {
+		statusMsg, _ = m.Reply(statusText, &telegram.SendOptions{ParseMode: "html"})
+	}
+
 	deliveredCount := 0
 
+	// Step 2: Deliver all files in original stored order
 	for _, item := range items {
 		if item == nil {
 			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			break
+		default:
 		}
 
 		if item.ItemType == "text" {
@@ -677,11 +700,16 @@ func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, ba
 			if textToSend == "" {
 				textToSend = item.Caption
 			}
-			_, sendErr := m.Respond(textToSend, &telegram.SendOptions{ParseMode: "html"})
+			sent, sendErr := m.Respond(textToSend, &telegram.SendOptions{ParseMode: "html"})
 			if sendErr != nil {
-				_, _ = m.Respond(textToSend, &telegram.SendOptions{})
+				sent, sendErr = m.Respond(textToSend, &telegram.SendOptions{})
 			}
-			deliveredCount++
+			if sendErr == nil {
+				deliveredCount++
+				if sent != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+					_ = p.appCtx.AutoDelete.ScheduleFileDelete(chatID, sent.ID)
+				}
+			}
 			time.Sleep(150 * time.Millisecond)
 			continue
 		}
@@ -699,12 +727,13 @@ func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, ba
 			ForceDocument: item.ItemType == "document",
 		}
 
+		var sentMedia *telegram.NewMessage
 		var sendErr error
 		for attempt := 0; attempt < 3; attempt++ {
 			if p.appCtx.Client != nil {
-				_, sendErr = p.appCtx.Client.SendMedia(chatID, mediaToSend, mediaOpts)
+				sentMedia, sendErr = p.appCtx.Client.SendMedia(chatID, mediaToSend, mediaOpts)
 			} else {
-				_, sendErr = m.RespondMedia(mediaToSend, mediaOpts)
+				sentMedia, sendErr = m.RespondMedia(mediaToSend, mediaOpts)
 			}
 			if sendErr == nil {
 				break
@@ -718,19 +747,34 @@ func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, ba
 
 		if sendErr == nil {
 			deliveredCount++
+			if sentMedia != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+				_ = p.appCtx.AutoDelete.ScheduleFileDelete(chatID, sentMedia.ID)
+			}
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
 
-	if headerMsg != nil {
-		_, _ = headerMsg.Edit(fmt.Sprintf(
-			"✨ <b>Batch Delivery Complete!</b>\n\n"+
-				"📦 <b>Batch:</b> %s\n"+
-				"✅ <b>Delivered:</b> <code>%d / %d items</code>",
-			commands.EscapeHTML(meta.BatchName),
-			deliveredCount,
-			len(items),
-		), &telegram.SendOptions{ParseMode: "html"})
+	// Step 3: Remove only the initial temporary status message sent in Step 1
+	if statusMsg != nil {
+		if p.appCtx != nil && p.appCtx.Client != nil {
+			_, _ = p.appCtx.Client.DeleteMessages(chatID, []int32{statusMsg.ID})
+		} else {
+			_, _ = statusMsg.Delete()
+		}
+	}
+
+	// Step 4: Send a completely NEW completion message below all delivered files
+	completionText := FormatBatchCompleteText(meta.BatchName, deliveredCount, len(items))
+	var completionMsg *telegram.NewMessage
+	var compErr error
+	if p.appCtx != nil && p.appCtx.Client != nil {
+		completionMsg, compErr = p.appCtx.Client.SendMessage(chatID, completionText, &telegram.SendOptions{ParseMode: "html"})
+	}
+	if compErr != nil || completionMsg == nil {
+		completionMsg, _ = m.Respond(completionText, &telegram.SendOptions{ParseMode: "html"})
+	}
+	if completionMsg != nil && p.appCtx != nil && p.appCtx.AutoDelete != nil {
+		_ = p.appCtx.AutoDelete.TrackSentMessage(chatID, completionMsg.ID, "batch_complete")
 	}
 
 	return nil
