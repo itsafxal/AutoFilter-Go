@@ -1,13 +1,38 @@
 package cmds
 
 import (
+	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
-// Plugin implements the /cmds and /cmdc command plugin with interactive admin category navigation.
+// CategoryMeta describes a command category and its UI properties.
+type CategoryMeta struct {
+	ID        string
+	Name      string
+	Label     string
+	AdminOnly bool
+}
+
+// CanonicalCategories defines the ordered list of command categories.
+var CanonicalCategories = []CategoryMeta{
+	{ID: "gen", Name: "General", Label: "⚡ General", AdminOnly: false},
+	{ID: "user", Name: "User Commands", Label: "👤 User Tools", AdminOnly: false},
+	{ID: "media", Name: "File & Media", Label: "📁 File & Media", AdminOnly: false},
+	{ID: "batch", Name: "Batch Management", Label: "📦 Batch System", AdminOnly: false},
+	{ID: "fcb", Name: "FCB Commands", Label: "📢 FCB Controls", AdminOnly: true},
+	{ID: "gfilter", Name: "Global Filters", Label: "🏷️ Global Filters", AdminOnly: true},
+	{ID: "index", Name: "Indexing", Label: "🔍 Indexing", AdminOnly: true},
+	{ID: "group", Name: "Group Management", Label: "👥 Groups", AdminOnly: true},
+	{ID: "admin", Name: "Admin Commands", Label: "🛡️ Admin Controls", AdminOnly: true},
+	{ID: "dev", Name: "Developer Tools", Label: "💻 Developer Tools", AdminOnly: true},
+}
+
+// Plugin implements the /cmds, /cmd, and /cmdc interactive categorized command browser.
 type Plugin struct {
 	appCtx *plugins.AppContext
 }
@@ -27,37 +52,49 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 	return []plugins.CommandDefinition{
 		{
 			Name:        "cmds",
-			Aliases:     []string{"help"},
-			Description: "View list of available commands and usage guide",
-			Usage:       "/cmds",
+			Aliases:     []string{"help", "cmd"},
+			Description: "Explore the categorized command center and usage guide",
+			Usage:       "/cmd",
 			Category:    "General",
 			Handler:     p.HandleCmds,
 		},
 		{
 			Name:        "cmdc",
-			Description: "View all bot commands organized into interactive category menus (Admin Only)",
+			Description: "Open the admin command master center directly (Admin Only)",
 			Usage:       "/cmdc",
-			Category:    "Admin",
+			Category:    "Admin Commands",
 			AdminOnly:   true,
 			Handler:     p.HandleCmdc,
 		},
 	}
 }
 
-// CallbackHandlers returns the interactive callback query handlers for /cmdc navigation and close actions.
+// CallbackHandlers returns the interactive callback query handlers for category navigation.
 func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 	return []plugins.CallbackDefinition{
 		{
+			Prefix:  "cmd_cat#",
+			Handler: p.HandleCategoryCallback,
+		},
+		{
 			Prefix:  "cmdc_cat#",
-			Handler: p.HandleCmdcCategoryCallback,
+			Handler: p.HandleLegacyCategoryCallback,
+		},
+		{
+			Prefix:  "cmd_home",
+			Handler: p.HandleHomeCallback,
 		},
 		{
 			Prefix:  "cmdc_home",
-			Handler: p.HandleCmdcHomeCallback,
+			Handler: p.HandleHomeCallback,
 		},
 		{
 			Prefix:  "close_data",
 			Handler: p.HandleCloseCallback,
+		},
+		{
+			Prefix:  "noop",
+			Handler: p.HandleNoopCallback,
 		},
 	}
 }
@@ -69,27 +106,37 @@ func (p *Plugin) isAdmin(userID int64) bool {
 	return p.appCtx.Config.IsAdmin(userID) || p.appCtx.Config.IsOwner(userID)
 }
 
-// HandleCmds renders the user commands guide with a Red Close button.
+// findCategoryMeta finds category metadata by ID or Name.
+func findCategoryMeta(idOrName string) *CategoryMeta {
+	for i := range CanonicalCategories {
+		c := &CanonicalCategories[i]
+		if strings.EqualFold(c.ID, idOrName) || strings.EqualFold(c.Name, idOrName) {
+			return c
+		}
+	}
+	return nil
+}
+
+// HandleCmds renders the interactive command center.
 func (p *Plugin) HandleCmds(m *telegram.NewMessage) error {
-	helpText := "<b><u>🤖 BOT COMMANDS & USAGE GUIDE 🤖</u></b>\n\nNo commands registered."
-	if p.appCtx != nil && p.appCtx.Registry != nil {
-		helpText = p.appCtx.Registry.GenerateHelpText()
+	var userID int64
+	if m.Sender != nil && m.Sender.ID != 0 {
+		userID = m.Sender.ID
+	} else {
+		userID = m.SenderID()
 	}
 
-	replyMarkup := telegram.NewKeyboard().
-		AddRow(
-			telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
-		).
-		Build()
+	isAdmin := p.isAdmin(userID)
+	text, markup := p.buildMainMenu(isAdmin)
 
-	_, err := m.Reply(helpText, &telegram.SendOptions{
+	_, err := m.Reply(text, &telegram.SendOptions{
 		ParseMode:   "html",
-		ReplyMarkup: replyMarkup,
+		ReplyMarkup: markup,
 	})
 	return err
 }
 
-// HandleCmdc renders the interactive Admin Commands Master Panel with category buttons.
+// HandleCmdc renders the admin command center directly.
 func (p *Plugin) HandleCmdc(m *telegram.NewMessage) error {
 	var userID int64
 	if m.Sender != nil && m.Sender.ID != 0 {
@@ -105,7 +152,7 @@ func (p *Plugin) HandleCmdc(m *telegram.NewMessage) error {
 		return err
 	}
 
-	text, markup := p.buildCmdcMainMenu()
+	text, markup := p.buildMainMenu(true)
 	_, err := m.Reply(text, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
@@ -113,63 +160,103 @@ func (p *Plugin) HandleCmdc(m *telegram.NewMessage) error {
 	return err
 }
 
-// HandleCmdcCategoryCallback renders the commands for a selected category in-place.
-func (p *Plugin) HandleCmdcCategoryCallback(cb *telegram.CallbackQuery) error {
+// HandleCategoryCallback renders the commands for a selected category with pagination.
+func (p *Plugin) HandleCategoryCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	if !p.isAdmin(cb.SenderID) {
-		_, err := cb.Answer("⛔ This admin panel is restricted.", &telegram.CallbackOptions{
-			Alert: true,
-		})
+	parts := strings.Split(cb.DataString(), "#")
+	if len(parts) < 2 {
+		_, err := cb.Answer("Invalid category selection", &telegram.CallbackOptions{Alert: true})
 		return err
 	}
 
+	catID := parts[1]
+	page := 1
+	if len(parts) >= 3 {
+		if parsed, err := strconv.Atoi(parts[2]); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	meta := findCategoryMeta(catID)
+	if meta == nil {
+		_, err := cb.Answer("Category not found", &telegram.CallbackOptions{Alert: true})
+		return err
+	}
+
+	isAdmin := p.isAdmin(cb.SenderID)
+	if meta.AdminOnly && !isAdmin {
+		_, err := cb.Answer("⛔ Access Denied: Administrator privileges required.", &telegram.CallbackOptions{Alert: true})
+		return err
+	}
+
+	text, markup := p.buildCategoryView(meta, page, isAdmin)
+	_, _ = cb.Edit(text, &telegram.SendOptions{
+		ParseMode:   "html",
+		ReplyMarkup: markup,
+	})
+	_, _ = cb.Answer("")
+	return nil
+}
+
+// HandleLegacyCategoryCallback maps legacy category IDs to modern categories.
+func (p *Plugin) HandleLegacyCategoryCallback(cb *telegram.CallbackQuery) error {
+	if cb == nil {
+		return nil
+	}
 	parts := strings.SplitN(cb.DataString(), "#", 2)
 	if len(parts) < 2 {
 		_, err := cb.Answer("Invalid category", &telegram.CallbackOptions{Alert: true})
 		return err
 	}
 
-	cat := parts[1]
-	text, markup := p.buildCmdcCategoryView(cat)
-	_, editErr := cb.Edit(text, &telegram.SendOptions{
+	legacyCat := parts[1]
+	mappedID := legacyCat
+	switch legacyCat {
+	case "fsub":
+		mappedID = "fcb"
+	case "autodel", "caption":
+		mappedID = "admin"
+	case "media":
+		mappedID = "media"
+	case "general":
+		mappedID = "gen"
+	}
+
+	meta := findCategoryMeta(mappedID)
+	if meta == nil {
+		meta = findCategoryMeta("admin")
+	}
+
+	isAdmin := p.isAdmin(cb.SenderID)
+	if meta.AdminOnly && !isAdmin {
+		_, err := cb.Answer("⛔ Access Denied: Administrator privileges required.", &telegram.CallbackOptions{Alert: true})
+		return err
+	}
+
+	text, markup := p.buildCategoryView(meta, 1, isAdmin)
+	_, _ = cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
 	})
-	if editErr != nil {
-		_, _ = cb.Edit(text, &telegram.SendOptions{
-			ReplyMarkup: markup,
-		})
-	}
 	_, _ = cb.Answer("")
 	return nil
 }
 
-// HandleCmdcHomeCallback returns to the main /cmdc categories menu in-place.
-func (p *Plugin) HandleCmdcHomeCallback(cb *telegram.CallbackQuery) error {
+// HandleHomeCallback returns to the main categorized command menu in-place.
+func (p *Plugin) HandleHomeCallback(cb *telegram.CallbackQuery) error {
 	if cb == nil {
 		return nil
 	}
 
-	if !p.isAdmin(cb.SenderID) {
-		_, err := cb.Answer("⛔ This admin panel is restricted.", &telegram.CallbackOptions{
-			Alert: true,
-		})
-		return err
-	}
-
-	text, markup := p.buildCmdcMainMenu()
-	_, editErr := cb.Edit(text, &telegram.SendOptions{
+	isAdmin := p.isAdmin(cb.SenderID)
+	text, markup := p.buildMainMenu(isAdmin)
+	_, _ = cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
 		ReplyMarkup: markup,
 	})
-	if editErr != nil {
-		_, _ = cb.Edit(text, &telegram.SendOptions{
-			ReplyMarkup: markup,
-		})
-	}
 	_, _ = cb.Answer("")
 	return nil
 }
@@ -183,113 +270,157 @@ func (p *Plugin) HandleCloseCallback(cb *telegram.CallbackQuery) error {
 	return nil
 }
 
-// buildCmdcMainMenu constructs the interactive admin categories menu.
-func (p *Plugin) buildCmdcMainMenu() (string, *telegram.ReplyInlineMarkup) {
-	text := "👑 <b><u>BOT COMMANDS MASTER PANEL (ADMIN)</u></b> 👑\n\n" +
-		"Welcome, Administrator! Please choose a category below to view and manage commands:\n\n" +
-		"• 📢 <b>Force Subscribe</b> — Primary & secondary channels, join thresholds\n" +
-		"• ⏳ <b>Auto-Delete</b> — Search & file auto-delete timers, weekly trash cleanup\n" +
-		"• 📝 <b>Custom Caption</b> — Media file caption template & formatting tags\n" +
-		"• 📦 <b>Media & Delivery</b> — Direct retrieval, fast download & latest files\n" +
-		"• ⚙️ <b>General & System</b> — Ping, latency, ID tools & diagnostics\n\n" +
-		"<i>Select any button below to view detailed command usages:</i>"
-
-	markup := telegram.NewKeyboard().
-		AddRow(
-			telegram.Button.Data("📢 Force Subscribe", "cmdc_cat#fsub").Primary(),
-			telegram.Button.Data("⏳ Auto-Delete", "cmdc_cat#autodel").Primary(),
-		).
-		AddRow(
-			telegram.Button.Data("📝 Custom Caption", "cmdc_cat#caption").Primary(),
-			telegram.Button.Data("📦 Media & Files", "cmdc_cat#media").Primary(),
-		).
-		AddRow(
-			telegram.Button.Data("⚙️ General & System", "cmdc_cat#general").Primary(),
-		).
-		AddRow(
-			telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
-		).
-		Build()
-
-	return text, markup
+// HandleNoopCallback answers empty string for page indicator clicks.
+func (p *Plugin) HandleNoopCallback(cb *telegram.CallbackQuery) error {
+	if cb != nil {
+		_, _ = cb.Answer("")
+	}
+	return nil
 }
 
-// buildCmdcCategoryView renders the detailed commands for a chosen category.
-func (p *Plugin) buildCmdcCategoryView(category string) (string, *telegram.ReplyInlineMarkup) {
-	var text string
-
-	switch category {
-	case "fsub":
-		text = "👑 <b><u>📢 Force Subscribe (FSub) Controls</u></b>\n\n" +
-			"<b>⚡ Status & Overview:</b>\n" +
-			"• <code>/view_sub</code> — View active channels, IDs & request counts\n\n" +
-			"<b>⚡ Primary Channels:</b>\n" +
-			"• <code>/sub1 &lt;channel_id&gt;</code> — Set primary Channel 1 (or forward post)\n" +
-			"• <code>/sub2 &lt;channel_id&gt;</code> — Set primary Channel 2 (or forward post)\n" +
-			"• <code>/sub3 &lt;channel_id&gt;</code> — Set primary Channel 3 (or forward post)\n\n" +
-			"<b>⚡ Secondary Channels (Alternates):</b>\n" +
-			"• <code>/2sub1 &lt;channel_id&gt;</code> — Set secondary Channel 1\n" +
-			"• <code>/2sub2 &lt;channel_id&gt;</code> — Set secondary Channel 2\n" +
-			"• <code>/2sub3 &lt;channel_id&gt;</code> — Set secondary Channel 3\n\n" +
-			"<b>⚡ Thresholds (Auto-Switch):</b>\n" +
-			"• <code>/setcount1 &lt;count&gt;</code> — Request threshold for Channel 1\n" +
-			"• <code>/setcount2 &lt;count&gt;</code> — Request threshold for Channel 2\n" +
-			"• <code>/setcount3 &lt;count&gt;</code> — Request threshold for Channel 3\n\n" +
-			"<b>⚡ Removals:</b>\n" +
-			"• <code>/delsub1</code>, <code>/delsub2</code>, <code>/delsub3</code> — Remove primary channels\n" +
-			"• <code>/2delsub1</code>, <code>/2delsub2</code>, <code>/2delsub3</code> — Remove secondary channels\n\n" +
-			"💡 <i>Tip: Forward any message from your target channel directly to the bot with /sub1 to bind instantly.</i>"
-
-	case "autodel":
-		text = "👑 <b><u>⏳ Auto-Delete & Trash Controls</u></b>\n\n" +
-			"<b>⚡ Auto-Delete Timers:</b>\n" +
-			"• <code>/autodel</code> — View active auto-delete status & all timers\n" +
-			"• <code>/set_filter_del &lt;time&gt;</code> — Search results timer (e.g. <code>15m</code>, <code>1h</code>, <code>0</code>)\n" +
-			"• <code>/set_file_del &lt;time&gt;</code> — Delivered files timer (e.g. <code>30m</code>, <code>2h</code>, <code>0</code>)\n\n" +
-			"<b>⚡ Trash Cleanup:</b>\n" +
-			"• <code>/clean_trash</code> — Manually trigger weekly trash cleanup to delete old bot messages and protect from copyright strikes\n\n" +
-			"💡 <i>Duration formats: <code>15m</code> (15 mins), <code>1h</code> (1 hour), <code>1d</code> (1 day). Use <code>0</code> to disable.</i>"
-
-	case "caption":
-		text = "👑 <b><u>📝 Custom Caption Controls</u></b>\n\n" +
-			"<b>⚡ Template Management:</b>\n" +
-			"• <code>/view_caption</code> — View active caption template and live preview\n" +
-			"• <code>/set_caption &lt;template&gt;</code> — Set custom caption (or reply to text)\n" +
-			"• <code>/del_caption</code> — Reset custom caption back to system default\n\n" +
-			"💡 <i>Supported placeholders:</i>\n" +
-			"• <code>{filename}</code> — Original file name\n" +
-			"• <code>{size}</code> — Formatted file size\n" +
-			"• <code>{ext}</code> — File extension\n" +
-			"• <code>{quality}</code> — Detected resolution (e.g. 1080p, 720p)\n" +
-			"• <code>{year}</code> — Movie release year"
-
-	case "media":
-		text = "👑 <b><u>📦 Media & Delivery Commands</u></b>\n\n" +
-			"<b>⚡ File Retrieval & Direct Links:</b>\n" +
-			"• <code>/fastdl &lt;file_id&gt;</code> — Generate direct high-speed download link (or reply to file)\n" +
-			"• <code>/getfile &lt;file_id&gt;</code> — Retrieve and deliver media file by identifier\n" +
-			"• <code>/latest</code> — View recently added media files in database"
-
-	case "general":
-		text = "👑 <b><u>⚙️ General & System Commands</u></b>\n\n" +
-			"<b>⚡ Bot Diagnostics:</b>\n" +
-			"• <code>/start</code> — Welcome guide & deep-link processor\n" +
-			"• <code>/ping</code> — Check bot response latency, DB ping & system uptime\n" +
-			"• <code>/info</code> — Bot specifications & user inspection (or reply to user)\n" +
-			"• <code>/id</code> — Show chat ID, sender ID & replied message ID\n" +
-			"• <code>/cmds</code> — User-facing command directory & guide\n" +
-			"• <code>/cmdc</code> — Interactive admin commands master panel (Admin only)"
-
-	default:
-		text = "👑 <b><u>👑 Admin Commands</u></b>\n\nSelect a category from the menu."
+// buildMainMenu constructs the interactive categorized command browser menu.
+func (p *Plugin) buildMainMenu(isAdmin bool) (string, *telegram.ReplyInlineMarkup) {
+	totalCmds := 0
+	if p.appCtx != nil && p.appCtx.Registry != nil {
+		if isAdmin {
+			totalCmds = p.appCtx.Registry.CommandCount()
+		} else {
+			totalCmds = p.appCtx.Registry.PublicCommandCount()
+		}
 	}
 
-	markup := telegram.NewKeyboard().
-		AddRow(
-			telegram.Button.Data("◀️ Bᴀᴄᴋ ᴛᴏ Mᴇɴᴜ", "cmdc_home").Primary(),
-			telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
-		).
-		Build()
+	var sb strings.Builder
+	sb.WriteString("╭━━━━━━━━━━━━━━━━━━━━╮\n")
+	sb.WriteString("      🤖 <b>AutoFilter-Go COMMAND CENTER</b>\n")
+	sb.WriteString("╰━━━━━━━━━━━━━━━━━━━━╯\n\n")
+	sb.WriteString("Select a category below to explore available commands:\n\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n")
+	if isAdmin {
+		sb.WriteString(fmt.Sprintf("📊 <b>Total Commands:</b> <code>%d</code>", totalCmds))
+	} else {
+		sb.WriteString(fmt.Sprintf("📊 <b>Available Commands:</b> <code>%d</code>", totalCmds))
+	}
 
-	return text, markup
+	// Filter categories based on permissions
+	var visibleCategories []CategoryMeta
+	for _, cat := range CanonicalCategories {
+		if !cat.AdminOnly || isAdmin {
+			visibleCategories = append(visibleCategories, cat)
+		}
+	}
+
+	kb := telegram.NewKeyboard()
+	// Build 2-column inline buttons
+	for i := 0; i < len(visibleCategories); i += 2 {
+		btn1 := telegram.Button.Data(visibleCategories[i].Label, fmt.Sprintf("cmd_cat#%s#1", visibleCategories[i].ID)).Primary()
+		if i+1 < len(visibleCategories) {
+			btn2 := telegram.Button.Data(visibleCategories[i+1].Label, fmt.Sprintf("cmd_cat#%s#1", visibleCategories[i+1].ID)).Primary()
+			kb.AddRow(btn1, btn2)
+		} else {
+			kb.AddRow(btn1)
+		}
+	}
+
+	// Red Close button
+	kb.AddRow(
+		telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
+	)
+
+	return sb.String(), kb.Build()
+}
+
+const commandsPerPage = 6
+
+// buildCategoryView renders commands for a category with pagination.
+func (p *Plugin) buildCategoryView(meta *CategoryMeta, page int, isAdmin bool) (string, *telegram.ReplyInlineMarkup) {
+	var cmds []plugins.CommandDefinition
+	if p.appCtx != nil && p.appCtx.Registry != nil {
+		allGrouped := p.appCtx.Registry.CommandsByCategory(isAdmin)
+		cmds = allGrouped[meta.Name]
+	}
+
+	totalItems := len(cmds)
+	totalPages := int(math.Ceil(float64(totalItems) / float64(commandsPerPage)))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+
+	startIndex := (page - 1) * commandsPerPage
+	endIndex := startIndex + commandsPerPage
+	if endIndex > totalItems {
+		endIndex = totalItems
+	}
+
+	var pageCmds []plugins.CommandDefinition
+	if startIndex < totalItems {
+		pageCmds = cmds[startIndex:endIndex]
+	}
+
+	var sb strings.Builder
+	if totalPages > 1 {
+		sb.WriteString(fmt.Sprintf("<b><u>%s (Page %d/%d)</u></b>\n\n", strings.ToUpper(meta.Label), page, totalPages))
+	} else {
+		sb.WriteString(fmt.Sprintf("<b><u>%s</u></b>\n\n", strings.ToUpper(meta.Label)))
+	}
+
+	if len(pageCmds) == 0 {
+		sb.WriteString("<i>No commands currently registered in this category.</i>\n")
+	} else {
+		for _, cmd := range pageCmds {
+			usageStr := cmd.Usage
+			if usageStr == "" {
+				usageStr = "/" + cmd.Name
+			}
+
+			aliasStr := ""
+			if len(cmd.Aliases) > 0 {
+				aliasStr = fmt.Sprintf(" (aliases: <code>/%s</code>)", strings.Join(cmd.Aliases, ", /"))
+			}
+
+			adminBadge := ""
+			if cmd.AdminOnly {
+				adminBadge = " <i>[Admin]</i>"
+			}
+
+			sb.WriteString(fmt.Sprintf("• <b><code>%s</code></b>%s%s\n", usageStr, aliasStr, adminBadge))
+			sb.WriteString(fmt.Sprintf("  <i>%s</i>\n\n", cmd.Description))
+		}
+	}
+
+	kb := telegram.NewKeyboard()
+
+	// Add pagination row if multiple pages exist
+	if totalPages > 1 {
+		var prevBtn, pageIndicator, nextBtn telegram.KeyboardButton
+
+		if page > 1 {
+			prevBtn = telegram.Button.Data("◀️ Prev", fmt.Sprintf("cmd_cat#%s#%d", meta.ID, page-1)).Primary()
+		} else {
+			prevBtn = telegram.Button.Data("◀️", "noop")
+		}
+
+		pageIndicator = telegram.Button.Data(fmt.Sprintf("📄 %d/%d", page, totalPages), "noop")
+
+		if page < totalPages {
+			nextBtn = telegram.Button.Data("Next ▶️", fmt.Sprintf("cmd_cat#%s#%d", meta.ID, page+1)).Primary()
+		} else {
+			nextBtn = telegram.Button.Data("▶️", "noop")
+		}
+
+		kb.AddRow(prevBtn, pageIndicator, nextBtn)
+	}
+
+	// Navigation row: Back to Menu & Close
+	kb.AddRow(
+		telegram.Button.Data("◀️ Bᴀᴄᴋ ᴛᴏ Mᴇɴᴜ", "cmd_home").Primary(),
+		telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data").Danger(),
+	)
+
+	return strings.TrimSpace(sb.String()), kb.Build()
 }

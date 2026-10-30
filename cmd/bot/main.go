@@ -16,17 +16,19 @@ import (
 	"github.com/itsafxal/AutoFilter-Go/internal/logging"
 	"github.com/itsafxal/AutoFilter-Go/plugins/autodelete"
 	"github.com/itsafxal/AutoFilter-Go/plugins/autofilter"
+	batchPlugin "github.com/itsafxal/AutoFilter-Go/plugins/batch"
 	"github.com/itsafxal/AutoFilter-Go/plugins/botstats"
+	broadcastPlugin "github.com/itsafxal/AutoFilter-Go/plugins/broadcast"
 	"github.com/itsafxal/AutoFilter-Go/plugins/caption"
 	"github.com/itsafxal/AutoFilter-Go/plugins/channel"
 	"github.com/itsafxal/AutoFilter-Go/plugins/cmds"
 	"github.com/itsafxal/AutoFilter-Go/plugins/delivery"
 	"github.com/itsafxal/AutoFilter-Go/plugins/fsub"
 	"github.com/itsafxal/AutoFilter-Go/plugins/gfilter"
-	"github.com/itsafxal/AutoFilter-Go/plugins/id"
 	"github.com/itsafxal/AutoFilter-Go/plugins/index"
 	"github.com/itsafxal/AutoFilter-Go/plugins/info"
 	"github.com/itsafxal/AutoFilter-Go/plugins/latest"
+	"github.com/itsafxal/AutoFilter-Go/plugins/lifecycle"
 	"github.com/itsafxal/AutoFilter-Go/plugins/ping"
 	"github.com/itsafxal/AutoFilter-Go/plugins/start"
 	streamPlugin "github.com/itsafxal/AutoFilter-Go/plugins/stream"
@@ -108,7 +110,6 @@ func run() error {
 		start.New(application.AppContext),
 		cmds.New(application.AppContext),
 		ping.New(application.AppContext),
-		id.New(application.AppContext),
 		info.New(application.AppContext),
 		delivery.New(application.AppContext),
 		autofilter.New(application.AppContext),
@@ -121,6 +122,9 @@ func run() error {
 		index.New(application.AppContext),
 		botstats.New(application.AppContext),
 		gfilter.New(application.AppContext),
+		batchPlugin.New(application.AppContext),
+		broadcastPlugin.New(application.AppContext, application.BroadcastService),
+		lifecycle.New(application.AppContext),
 	)
 	if err != nil {
 		return fmt.Errorf("plugin registration failure: %w", err)

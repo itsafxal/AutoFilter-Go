@@ -224,6 +224,26 @@ func (r *Registry) AttachToClient(client *telegram.Client) error {
 				})
 			}
 		}
+
+		// Register participant update handlers if the plugin implements ParticipantPlugin
+		if partPlugin, ok := p.(ParticipantPlugin); ok {
+			for _, ph := range partPlugin.ParticipantHandlers() {
+				phCopy := ph
+				client.OnParticipant(func(upd *telegram.ParticipantUpdate) (err error) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							err = fmt.Errorf("panic in participant update handler: %v", rec)
+							if r.appCtx != nil && r.appCtx.Logger != nil {
+								r.appCtx.Logger.Error("panic recovered in participant update handler",
+									"panic", rec,
+								)
+							}
+						}
+					}()
+					return phCopy(upd)
+				})
+			}
+		}
 	}
 
 	return nil
@@ -488,6 +508,78 @@ func (r *Registry) GenerateAdminHelpText() string {
 
 	sb.WriteString("<i>Admin privileges verified. All bot commands including administrative and force-subscribe controls are listed above.</i>")
 	return strings.TrimSpace(sb.String())
+}
+
+// AllCommands returns a slice of all registered command definitions sorted alphabetically by Name.
+func (r *Registry) AllCommands() []CommandDefinition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]CommandDefinition, 0, len(r.commands))
+	for _, cmd := range r.commands {
+		result = append(result, cmd)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+// CategoryOrder returns the canonical display order of command categories.
+func (r *Registry) CategoryOrder() []string {
+	return []string{
+		"General",
+		"User Commands",
+		"File & Media",
+		"Batch Management",
+		"FCB Commands",
+		"Global Filters",
+		"Indexing",
+		"Group Management",
+		"Admin Commands",
+		"Developer Tools",
+	}
+}
+
+// CommandsByCategory returns commands grouped by their canonical Category name.
+// If includeAdmin is false, AdminOnly commands are excluded.
+// Commands within each category are sorted alphabetically by Name.
+func (r *Registry) CommandsByCategory(includeAdmin bool) map[string][]CommandDefinition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	grouped := make(map[string][]CommandDefinition)
+	for _, cmd := range r.commands {
+		if !includeAdmin && cmd.AdminOnly {
+			continue
+		}
+		cat := strings.TrimSpace(cmd.Category)
+		if cat == "" {
+			cat = "General"
+		}
+		grouped[cat] = append(grouped[cat], cmd)
+	}
+
+	for cat := range grouped {
+		sort.Slice(grouped[cat], func(i, j int) bool {
+			return grouped[cat][i].Name < grouped[cat][j].Name
+		})
+	}
+	return grouped
+}
+
+// PublicCommandCount returns the number of registered commands available to non-admins.
+func (r *Registry) PublicCommandCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	count := 0
+	for _, cmd := range r.commands {
+		if !cmd.AdminOnly {
+			count++
+		}
+	}
+	return count
 }
 
 // PluginCount returns the number of registered plugins.

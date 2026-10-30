@@ -14,10 +14,11 @@ import (
 	"github.com/itsafxal/AutoFilter-Go/internal/config"
 	deliveryCore "github.com/itsafxal/AutoFilter-Go/internal/delivery"
 	"github.com/itsafxal/AutoFilter-Go/internal/logging"
+	broadcastPlugin "github.com/itsafxal/AutoFilter-Go/plugins/broadcast"
 	"github.com/itsafxal/AutoFilter-Go/plugins/cmds"
 	"github.com/itsafxal/AutoFilter-Go/plugins/delivery"
-	"github.com/itsafxal/AutoFilter-Go/plugins/id"
 	"github.com/itsafxal/AutoFilter-Go/plugins/info"
+	lifecyclePlugin "github.com/itsafxal/AutoFilter-Go/plugins/lifecycle"
 	"github.com/itsafxal/AutoFilter-Go/plugins/ping"
 	"github.com/itsafxal/AutoFilter-Go/plugins/start"
 )
@@ -40,12 +41,11 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 		t.Fatalf("failed to initialize App: %v", err)
 	}
 
-	// Register all 5 foundational plugins
+	// Register foundational plugins
 	err = botApp.RegisterPlugins(
 		start.New(botApp.AppContext),
 		cmds.New(botApp.AppContext),
 		ping.New(botApp.AppContext),
-		id.New(botApp.AppContext),
 		info.New(botApp.AppContext),
 	)
 	if err != nil {
@@ -57,11 +57,11 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 		t.Fatalf("plugin validation failed: %v", err)
 	}
 
-	if botApp.Registry.PluginCount() != 5 {
-		t.Errorf("expected 5 plugins, got %d", botApp.Registry.PluginCount())
+	if botApp.Registry.PluginCount() != 4 {
+		t.Errorf("expected 4 plugins, got %d", botApp.Registry.PluginCount())
 	}
-	if botApp.Registry.CommandCount() != 6 {
-		t.Errorf("expected 6 primary commands, got %d", botApp.Registry.CommandCount())
+	if botApp.Registry.CommandCount() != 5 {
+		t.Errorf("expected 5 primary commands, got %d", botApp.Registry.CommandCount())
 	}
 
 	// Generate and inspect help guide
@@ -72,7 +72,6 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 		"• <code>/cmds</code>",
 		"• <code>/cmdc</code>",
 		"• <code>/ping</code>",
-		"• <code>/id</code>",
 		"• <code>/info</code>",
 
 		"(aliases: <code>/help</code>)",
@@ -197,12 +196,11 @@ func TestIntegration_MediaDeliveryWorkflow(t *testing.T) {
 		t.Fatalf("failed to init database: %v", err)
 	}
 
-	// Register all 6 plugins (start, cmds, ping, id, info, delivery)
+	// Register all 5 plugins (start, cmds, ping, info, delivery)
 	err = botApp.RegisterPlugins(
 		start.New(botApp.AppContext),
 		cmds.New(botApp.AppContext),
 		ping.New(botApp.AppContext),
-		id.New(botApp.AppContext),
 		info.New(botApp.AppContext),
 		delivery.New(botApp.AppContext),
 	)
@@ -228,5 +226,104 @@ func TestIntegration_MediaDeliveryWorkflow(t *testing.T) {
 	_, err = botApp.DeliveryService.Deliver(context.Background(), 12345, "missing_movie", deliveryCore.DeliveryOptions{})
 	if err == nil {
 		t.Error("expected error for non-existent movie, got nil")
+	}
+}
+
+func TestIntegration_BroadcastPluginRegistration(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := logging.NewLogger(config.LogLevelInfo, buf)
+
+	cfg := &config.Config{
+		BotToken:             "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+		AppID:                12345,
+		AppHash:              "0123456789abcdef0123456789abcdef",
+		OwnerID:              99887766,
+		Admins:               []int64{99887766},
+		BroadcastConcurrency: 15,
+		LogLevel:             config.LogLevelInfo,
+	}
+
+	botApp, err := app.New(cfg, logger)
+	if err != nil {
+		t.Fatalf("failed to initialize App: %v", err)
+	}
+
+	bp := broadcastPlugin.New(botApp.AppContext, botApp.BroadcastService)
+	if err := botApp.RegisterPlugins(bp); err != nil {
+		t.Fatalf("failed to register broadcast plugin: %v", err)
+	}
+
+	if err := botApp.ValidatePlugins(); err != nil {
+		t.Fatalf("failed to validate broadcast plugin: %v", err)
+	}
+
+	p := botApp.Registry.GetPlugin("broadcast")
+	if p == nil {
+		t.Fatal("expected 'broadcast' plugin to be registered")
+	}
+
+	cmdMap := make(map[string]bool)
+	for _, c := range p.Commands() {
+		cmdMap[c.Name] = true
+		if !c.AdminOnly {
+			t.Errorf("expected command %s to be AdminOnly", c.Name)
+		}
+	}
+
+	if !cmdMap["broadcast"] {
+		t.Error("expected 'broadcast' command to be registered")
+	}
+	if !cmdMap["cancel_broadcast"] {
+		t.Error("expected 'cancel_broadcast' command to be registered")
+	}
+	if !cmdMap["broadcast_stats"] {
+		t.Error("expected 'broadcast_stats' command to be registered")
+	}
+}
+
+func TestIntegration_LifecyclePluginRegistration(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := logging.NewLogger(config.LogLevelInfo, buf)
+
+	cfg := &config.Config{
+		BotToken: "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+		AppID:    12345,
+		AppHash:  "0123456789abcdef0123456789abcdef",
+		OwnerID:  99887766,
+		Admins:   []int64{99887766},
+		LogLevel: config.LogLevelInfo,
+	}
+
+	botApp, err := app.New(cfg, logger)
+	if err != nil {
+		t.Fatalf("failed to initialize App: %v", err)
+	}
+
+	lp := lifecyclePlugin.New(botApp.AppContext)
+	if err := botApp.RegisterPlugins(lp); err != nil {
+		t.Fatalf("failed to register lifecycle plugin: %v", err)
+	}
+
+	if err := botApp.ValidatePlugins(); err != nil {
+		t.Fatalf("failed to validate lifecycle plugin: %v", err)
+	}
+
+	p := botApp.Registry.GetPlugin("lifecycle")
+	if p == nil {
+		t.Fatal("expected 'lifecycle' plugin to be registered")
+	}
+
+	cmdMap := make(map[string]bool)
+	for _, c := range p.Commands() {
+		cmdMap[c.Name] = true
+		if !c.AdminOnly {
+			t.Errorf("expected command %s to be AdminOnly", c.Name)
+		}
+	}
+
+	for _, required := range []string{"leave", "disable", "enable", "groups"} {
+		if !cmdMap[required] {
+			t.Errorf("expected '%s' command to be registered", required)
+		}
 	}
 }

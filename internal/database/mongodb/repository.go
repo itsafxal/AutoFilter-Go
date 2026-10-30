@@ -141,6 +141,41 @@ func (r *UserRepository) RemoveBan(ctx context.Context, id int64) error {
 	return err
 }
 
+// DeleteUser removes a deactivated or permanently invalid user document.
+func (r *UserRepository) DeleteUser(ctx context.Context, id int64) error {
+	if r == nil || r.col == nil || id <= 0 {
+		return errors.New("invalid repository or user id")
+	}
+	_, err := r.col.DeleteOne(ctx, bson.M{"id": id})
+	return err
+}
+
+// ActiveUsersCount returns the count of active (non-banned) users.
+func (r *UserRepository) ActiveUsersCount(ctx context.Context) (int64, error) {
+	if r == nil || r.col == nil {
+		return 0, nil
+	}
+	filter := bson.M{
+		"ban_status.is_banned": bson.M{"$ne": true},
+	}
+	return r.col.CountDocuments(ctx, filter)
+}
+
+// GetActiveUsersCursor returns a cursor streaming active (non-banned) users with ID projection.
+func (r *UserRepository) GetActiveUsersCursor(ctx context.Context, skip int64) (*mongo.Cursor, error) {
+	if r == nil || r.col == nil {
+		return nil, errors.New("repository uninitialized")
+	}
+	findOpts := options.Find().SetProjection(bson.M{"id": 1}).SetSort(bson.M{"_id": 1})
+	if skip > 0 {
+		findOpts.SetSkip(skip)
+	}
+	filter := bson.M{
+		"ban_status.is_banned": bson.M{"$ne": true},
+	}
+	return r.col.Find(ctx, filter, findOpts)
+}
+
 // GroupRepository handles group persistence in the authoritative MongoDB "groups" collection.
 type GroupRepository struct {
 	col *mongo.Collection
@@ -231,6 +266,77 @@ func (r *GroupRepository) TotalGroupsCount(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	return r.col.CountDocuments(ctx, bson.M{})
+}
+
+// DeleteGroup removes an inaccessible, deleted or disabled group document.
+func (r *GroupRepository) DeleteGroup(ctx context.Context, id int64) error {
+	if r == nil || r.col == nil || id == 0 {
+		return errors.New("invalid repository or group id")
+	}
+	_, err := r.col.DeleteOne(ctx, bson.M{"id": id})
+	return err
+}
+
+// DisableGroup flags a group as disabled with an optional reason.
+func (r *GroupRepository) DisableGroup(ctx context.Context, id int64, reason string) error {
+	if r == nil || r.col == nil || id == 0 {
+		return errors.New("invalid repository or group id")
+	}
+	_, err := r.col.UpdateOne(
+		ctx,
+		bson.M{"id": id},
+		bson.M{
+			"$set": bson.M{
+				"chat_status.is_disabled": true,
+				"chat_status.reason":      reason,
+			},
+		},
+	)
+	return err
+}
+
+// EnableGroup re-enables a previously disabled group.
+func (r *GroupRepository) EnableGroup(ctx context.Context, id int64) error {
+	if r == nil || r.col == nil || id == 0 {
+		return errors.New("invalid repository or group id")
+	}
+	_, err := r.col.UpdateOne(
+		ctx,
+		bson.M{"id": id},
+		bson.M{
+			"$set": bson.M{
+				"chat_status.is_disabled": false,
+				"chat_status.reason":      "",
+			},
+		},
+	)
+	return err
+}
+
+// ActiveGroupsCount returns total active (non-disabled) group chats.
+func (r *GroupRepository) ActiveGroupsCount(ctx context.Context) (int64, error) {
+	if r == nil || r.col == nil {
+		return 0, nil
+	}
+	filter := bson.M{
+		"chat_status.is_disabled": bson.M{"$ne": true},
+	}
+	return r.col.CountDocuments(ctx, filter)
+}
+
+// GetActiveGroupsCursor returns a cursor streaming active (non-disabled) groups with ID projection.
+func (r *GroupRepository) GetActiveGroupsCursor(ctx context.Context, skip int64) (*mongo.Cursor, error) {
+	if r == nil || r.col == nil {
+		return nil, errors.New("repository uninitialized")
+	}
+	findOpts := options.Find().SetProjection(bson.M{"id": 1}).SetSort(bson.M{"_id": 1})
+	if skip > 0 {
+		findOpts.SetSkip(skip)
+	}
+	filter := bson.M{
+		"chat_status.is_disabled": bson.M{"$ne": true},
+	}
+	return r.col.Find(ctx, filter, findOpts)
 }
 
 // MediaShard represents an authoritative MongoDB collection shard with a descriptive label.

@@ -172,3 +172,21 @@ Essential configuration parameters for deployment on budget VPS instances (1GBâ€
 | `MAX_MEMORY_MB` | No | `512` | Alternative memory cap in megabytes applied when `GOMEMLIMIT` is omitted. | `512` |
 | `MAX_CPU_CORES` | No | *(all)* | Caps `runtime.GOMAXPROCS`. Setting `1` on a single-core VPS prevents 100% CPU starvation. | `1` |
 
+---
+
+## 11. Fast Broadcast System Configuration
+
+| Variable | Required | Default | Description | Example |
+| :--- | :---: | :---: | :--- | :--- |
+| `BROADCAST_CONCURRENCY` | No | `10` | Bounded worker pool concurrency limit for asynchronous broadcasting (range: `1`â€“`50`). Prevents Telegram FloodWait cascades while maximizing throughput. | `15` |
+
+---
+
+## 12. Bot Lifecycle & Group Welcome Configuration
+
+| Variable | Required | Default | Description | Example |
+| :--- | :---: | :---: | :--- | :--- |
+| `ENABLE_GROUP_WELCOME` | No | `true` | When `true`, automatically sends a text welcome banner when added to a new group. | `true` |
+| `WELCOME_DELETE_DELAY` | No | `0` *(disabled)* | Duration before the group welcome banner is automatically deleted (also supports `GROUP_WELCOME_AUTO_DELETE`). | `5m` |
+| `REPO_URL` | No | `https://github.com/itsafxal/AutoFilter-Go` | Official repository or source code link bound to welcome banner buttons (also supports `SOURCE_CODE_URL`). | `https://github.com/itsafxal/AutoFilter-Go` |
+

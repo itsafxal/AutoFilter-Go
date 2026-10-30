@@ -66,7 +66,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Name:        "vacuum",
 			Description: "Reclaim and compact SQLite database and WAL files",
 			Usage:       "/vacuum",
-			Category:    "Admin",
+			Category:    "Developer Tools",
 			AdminOnly:   true,
 			Handler:     p.HandleVacuum,
 		},

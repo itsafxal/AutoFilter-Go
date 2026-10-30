@@ -43,7 +43,8 @@ flowchart TD
         MongoDB3[("Tertiary MongoDB (DB3)<br/>Media Shard B")]
     end
 
-    TGUser <-->|MTProto Updates & Callbacks| GogramClient
+    TGUser -->|MTProto Updates & Callbacks| GogramClient
+    GogramClient -->|Responses & Media| TGUser
     TGChannel -->|Live Media Posts| GogramClient
     TGOld -->|User Funneling Deep-Links| OldBotService
 
@@ -53,24 +54,24 @@ flowchart TD
     PluginRegistry --> FSubService
     PluginRegistry --> AutoDeleteService
 
-    SearchService <-->|Fast Indexed Query| SQLiteCache
-    SearchService -.->|Fallback / Direct Mode| MongoDB2
-    SearchService -.->|Fallback / Direct Mode| MongoDB3
+    SearchService -->|Fast Indexed Query| SQLiteCache
+    SearchService -.->|Fallback or Direct Mode| MongoDB2
+    SearchService -.->|Fallback or Direct Mode| MongoDB3
 
     DeliveryService -->|1. Check Cache| SQLiteCache
     DeliveryService -->|2. Fallback Fetch| MongoDB2
     DeliveryService -->|2. Fallback Fetch| MongoDB3
     DeliveryService -->|SendMedia MTProto| GogramClient
 
-    FSubService <-->|Store & Validate Loadout| MongoPrimary
-    AutoDeleteService <-->|Track Messages & Schedule| SQLiteCache
+    FSubService -->|Store and Validate Loadout| MongoPrimary
+    AutoDeleteService -->|Track Messages and Schedule| SQLiteCache
 
     Syncer -->|Batch Migration| SQLiteCache
-    Syncer <-->|Fetch Records| MongoDB2
-    Syncer <-->|Fetch Records| MongoDB3
+    Syncer -->|Fetch Records| MongoDB2
+    Syncer -->|Fetch Records| MongoDB3
 
-    StreamServer <-->|Stream or Direct Download RFC 7233| TGUser
-    StreamServer <-->|Download Byte Chunks| GogramClient
+    StreamServer -->|Direct Streaming| TGUser
+    StreamServer -->|Download Byte Chunks| GogramClient
 ```
 
 ---

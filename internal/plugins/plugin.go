@@ -7,6 +7,8 @@ import (
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/batch"
+	"github.com/itsafxal/AutoFilter-Go/internal/broadcast"
 	"github.com/itsafxal/AutoFilter-Go/internal/caption"
 	"github.com/itsafxal/AutoFilter-Go/internal/config"
 	"github.com/itsafxal/AutoFilter-Go/internal/database"
@@ -15,6 +17,20 @@ import (
 	"github.com/itsafxal/AutoFilter-Go/internal/search"
 	"github.com/itsafxal/AutoFilter-Go/internal/stream"
 )
+
+// BatchService defines the Named Batch operations available across plugins.
+type BatchService interface {
+	Init(ctx context.Context) error
+	Sessions() *batch.SessionManager
+	SaveItemDual(ctx context.Context, item *batch.BatchItem) error
+	FinalizeBatch(ctx context.Context, meta *batch.BatchMetadata, items []*batch.BatchItem) error
+	GetBatch(ctx context.Context, batchID string) (*batch.BatchMetadata, error)
+	GetBatchItems(ctx context.Context, batchID string) ([]*batch.BatchItem, error)
+	SearchBatches(ctx context.Context, query string, limit, offset int) ([]*batch.BatchMetadata, int, error)
+	ListBatches(ctx context.Context, ownerID int64, limit, offset int) ([]*batch.BatchMetadata, int, error)
+	DeleteBatch(ctx context.Context, batchID string) error
+	Count(ctx context.Context) (int64, error)
+}
 
 // GFilterService defines the Global Filter operations available across plugins.
 type GFilterService interface {
@@ -52,6 +68,8 @@ type AppContext struct {
 	AutoDelete autodelete.AutoDeleteService
 	Stream     stream.StreamService
 	GFilter    GFilterService
+	Broadcast  broadcast.Service
+	Batch      BatchService
 }
 
 // HandlerFunc is the Gogram message/command handler function signature.
@@ -131,4 +149,13 @@ type JoinRequestHandlerFunc func(req *telegram.JoinRequestUpdate) error
 type JoinRequestPlugin interface {
 	Plugin
 	JoinRequestHandlers() []JoinRequestHandlerFunc
+}
+
+// ParticipantUpdateHandlerFunc is the handler function for Telegram participant updates.
+type ParticipantUpdateHandlerFunc func(upd *telegram.ParticipantUpdate) error
+
+// ParticipantPlugin is an optional interface plugins can implement to receive group/channel participant updates.
+type ParticipantPlugin interface {
+	Plugin
+	ParticipantHandlers() []ParticipantUpdateHandlerFunc
 }

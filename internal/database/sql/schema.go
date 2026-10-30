@@ -98,6 +98,49 @@ func (m *DBManager) initSchema(ctx context.Context) error {
 			updated_at TIMESTAMP NOT NULL
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS gfilter_keyword_norm_idx ON global_filters (keyword_norm);`,
+
+		// 8. Named Batch Metadata table for high-speed local indexing and search
+		`CREATE TABLE IF NOT EXISTS batch_metadata (
+			batch_id TEXT PRIMARY KEY,
+			batch_name TEXT NOT NULL,
+			normalized_name TEXT NOT NULL,
+			owner_id INTEGER NOT NULL,
+			total_items INTEGER NOT NULL DEFAULT 0,
+			total_files INTEGER NOT NULL DEFAULT 0,
+			total_texts INTEGER NOT NULL DEFAULT 0,
+			total_documents INTEGER NOT NULL DEFAULT 0,
+			total_videos INTEGER NOT NULL DEFAULT 0,
+			total_audio INTEGER NOT NULL DEFAULT 0,
+			total_photos INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			finalized_at TIMESTAMP
+		);`,
+		`CREATE INDEX IF NOT EXISTS batch_idx_norm_name ON batch_metadata (normalized_name);`,
+		`CREATE INDEX IF NOT EXISTS batch_idx_owner ON batch_metadata (owner_id);`,
+		`CREATE INDEX IF NOT EXISTS batch_idx_created ON batch_metadata (created_at DESC);`,
+
+		// 9. Named Batch Items table with strict sequential ordering and unique constraint
+		`CREATE TABLE IF NOT EXISTS batch_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			batch_id TEXT NOT NULL,
+			sequence INTEGER NOT NULL,
+			item_type TEXT NOT NULL,
+			telegram_file_id TEXT,
+			telegram_file_unique_id TEXT,
+			storage_reference TEXT,
+			file_name TEXT,
+			file_size INTEGER DEFAULT 0,
+			mime_type TEXT,
+			caption TEXT,
+			text_content TEXT,
+			message_entities TEXT,
+			created_at TIMESTAMP NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS batch_idx_items_batch_id ON batch_items (batch_id);`,
+		`CREATE INDEX IF NOT EXISTS batch_idx_items_seq ON batch_items (batch_id, sequence ASC);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_batch_item_seq ON batch_items (batch_id, sequence);`,
 	}
 
 	for _, query := range queries {

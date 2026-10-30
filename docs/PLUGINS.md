@@ -86,6 +86,7 @@ type AppContext struct {
     OldBotService     *oldbot.Service
     AutoDeleteService autodelete.AutoDeleteService
     FSubService       fsub.FSubService
+    Broadcast         broadcast.Service
 }
 ```
 
@@ -176,17 +177,19 @@ The new command `/echo` is now automatically recognized, security-checked, and a
 | `start` | `plugins/start` | Handles `/start`, deep-link payload routing (`file_`, `filep_`, `from_oldbot`), and welcome banners. |
 | `cmds` | `plugins/cmds` | Dynamically generates `/cmds` and administrative `/cmdc` categorized menus. |
 | `ping` | `plugins/ping` | Measures bot processing speed and MTProto round-trip latency. |
-| `id` | `plugins/id` | Displays numerical IDs for users, chats, and replied-to messages. |
-| `info` | `plugins/info` | Diagnostic overview of bot uptime, Gogram version, and user profiles. |
+| `info` | `plugins/info` | Comprehensive Telegram user, group, and chat information system (`/info`, `/about`). |
 | `delivery` | `plugins/delivery` | Handles `/getfile`, direct file delivery, and file callback data. |
 | `autofilter` | `plugins/autofilter` | Ambient text search, spelling suggestions, quality/language filters, and pagination. |
 | `fsub` | `plugins/fsub` | 3-tier Force-Subscribe channel management, routing thresholds, and membership validation. |
 | `caption` | `plugins/caption` | Administrative custom media caption template editor (`/set_caption`, `/view_caption`, `/del_caption`). |
 | `latest` | `plugins/latest` | Displays recently added media files (`/latest`) and accepts user requests (`/request`). |
+| `lifecycle` | `plugins/lifecycle` | Group welcome system, admin DM addition/removal alerts, and `/leave`, `/disable`, `/enable`, `/groups` controls. |
 | `autodelete` | `plugins/autodelete` | Scheduled message deletion and weekly copyright trash cleaner (`/autodel`, `/clean_trash`). |
 | `stream` | `plugins/stream` | Generates direct HTTP streaming and fast download links (`/fastdl`, `/stream`). |
 | `channel` | `plugins/channel` | Background watcher for monitored channels that executes live media indexing. |
 | `index` | `plugins/index` | Bulk channel media indexing (`/index`, `/indexlink`, `/setskip`). |
 | `botstats` | `plugins/botstats` | System and database diagnostics (`/stats`) and SQLite compaction (`/vacuum`). |
+| `broadcast` | `plugins/broadcast` | High-performance concurrent asynchronous broadcasting engine (`/broadcast`, `/broadcast_groups`, `/cancel_broadcast`, `/broadcast_stats`). |
 | `gfilter` | `plugins/gfilter` | Global group keyword auto-replies with inline button formatting (`/gfilter`, `/gfilters`). |
+| `batch` | `plugins/batch` | Named Batch management system with dual persistence, exact sequential ordering, and deep-link retrieval (`/batch`, `/batchsearch`, `/batchlist`). |
 

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/batch"
+	"github.com/itsafxal/AutoFilter-Go/internal/broadcast"
 	"github.com/itsafxal/AutoFilter-Go/internal/caption"
 	"github.com/itsafxal/AutoFilter-Go/internal/config"
 	"github.com/itsafxal/AutoFilter-Go/internal/database"
@@ -38,6 +40,8 @@ type App struct {
 	AutoDeleteService autodelete.AutoDeleteService
 	StreamService     stream.StreamService
 	GFilterService    *gfilter.Service
+	BroadcastService  broadcast.Service
+	BatchService      *batch.Service
 	StartTime         time.Time
 }
 
@@ -80,6 +84,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}
 	streamService := stream.NewServer(streamConfig, deliveryService, nil, logger)
 	gfilterService := gfilter.NewService(dbManager.MongoPrimaryDB, sqlProv, logger)
+	broadcastService := broadcast.New(nil, dbManager, logger, cfg.BroadcastConcurrency)
+	batchService := batch.NewService(dbManager.MongoPrimaryDB, sqlProv, logger)
 
 	appCtx := &plugins.AppContext{
 		Config:     cfg,
@@ -93,6 +99,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		AutoDelete: autoDeleteService,
 		Stream:     streamService,
 		GFilter:    gfilterService,
+		Broadcast:  broadcastService,
+		Batch:      batchService,
 	}
 
 	reg := plugins.NewRegistry(appCtx)
@@ -121,6 +129,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		AutoDeleteService: autoDeleteService,
 		StreamService:     streamService,
 		GFilterService:    gfilterService,
+		BroadcastService:  broadcastService,
+		BatchService:      batchService,
 		StartTime:         startTime,
 	}, nil
 }
@@ -159,6 +169,11 @@ func (a *App) InitDatabase(ctx context.Context) error {
 	if a.GFilterService != nil {
 		if err := a.GFilterService.Init(ctx); err != nil {
 			a.Logger.Warn("failed initializing global filter service from database", "error", err)
+		}
+	}
+	if a.BatchService != nil {
+		if err := a.BatchService.Init(ctx); err != nil {
+			a.Logger.Warn("failed initializing named batch service from database", "error", err)
 		}
 	}
 	a.Logger.Info("database layer initialized and ready")

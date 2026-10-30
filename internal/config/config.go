@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // LogLevel represents the supported logging levels.
@@ -123,6 +124,18 @@ type Config struct {
 
 	// EnableFastDownloadButton specifies whether the "⚡ Get Fast Download" button is added to delivered media (default: true).
 	EnableFastDownloadButton bool
+
+	// BroadcastConcurrency defines the maximum concurrent workers for broadcast message delivery (default: 10).
+	BroadcastConcurrency int
+
+	// EnableGroupWelcome specifies whether the bot sends a welcome banner when added to a new group (default: true).
+	EnableGroupWelcome bool
+
+	// WelcomeDeleteDelay specifies how long after sending the welcome message it should be automatically deleted (default: 0 / persistent).
+	WelcomeDeleteDelay time.Duration
+
+	// RepoURL is the official GitHub repository or source code link displayed on welcome buttons (default: "https://github.com/itsafxal/AutoFilter-Go").
+	RepoURL string
 
 	// MaintenanceMode specifies whether maintenance mode is active.
 	// When true, only admins can search/receive results in groups and PM; non-admins can only use /start (default: false).
@@ -364,6 +377,38 @@ func LoadFromEnv() (*Config, error) {
 	enableFastDownloadBtn := true
 	if rawBtn := strings.TrimSpace(os.Getenv("ENABLE_FAST_DOWNLOAD_BUTTON")); rawBtn != "" {
 		enableFastDownloadBtn = strings.EqualFold(rawBtn, "true") || rawBtn == "1"
+	}
+
+	broadcastConcurrency := 10
+	if rawBC := strings.TrimSpace(os.Getenv("BROADCAST_CONCURRENCY")); rawBC != "" {
+		if val, err := strconv.Atoi(rawBC); err == nil && val > 0 && val <= 50 {
+			broadcastConcurrency = val
+		}
+	}
+
+	enableGroupWelcome := true
+	if egwStr := strings.TrimSpace(os.Getenv("ENABLE_GROUP_WELCOME")); egwStr != "" {
+		if val, err := strconv.ParseBool(egwStr); err == nil {
+			enableGroupWelcome = val
+		}
+	}
+
+	var welcomeDeleteDelay time.Duration
+	if wddStr := strings.TrimSpace(os.Getenv("WELCOME_DELETE_DELAY")); wddStr != "" {
+		if d, err := time.ParseDuration(wddStr); err == nil && d > 0 {
+			welcomeDeleteDelay = d
+		}
+	} else if wddStr := strings.TrimSpace(os.Getenv("GROUP_WELCOME_AUTO_DELETE")); wddStr != "" {
+		if d, err := time.ParseDuration(wddStr); err == nil && d > 0 {
+			welcomeDeleteDelay = d
+		}
+	}
+
+	repoURL := "https://github.com/itsafxal/AutoFilter-Go"
+	if ru := strings.TrimSpace(os.Getenv("REPO_URL")); ru != "" {
+		repoURL = ru
+	} else if ru := strings.TrimSpace(os.Getenv("SOURCE_CODE_URL")); ru != "" {
+		repoURL = ru
 	}
 
 	backgroundSync := true
@@ -621,6 +666,10 @@ func LoadFromEnv() (*Config, error) {
 		StreamPort:                 streamPort,
 		StreamBindAddr:             streamBindAddr,
 		EnableFastDownloadButton:   enableFastDownloadBtn,
+		BroadcastConcurrency:       broadcastConcurrency,
+		EnableGroupWelcome:         enableGroupWelcome,
+		WelcomeDeleteDelay:         welcomeDeleteDelay,
+		RepoURL:                    repoURL,
 		MaintenanceMode:            maintenanceMode,
 		EnablePremiumEmoji:         enablePremiumEmoji,
 		PrevButtonEmojiID:          prevEmojiID,

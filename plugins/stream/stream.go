@@ -35,7 +35,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Aliases:     []string{"link", "dl", "fastdownload", "stream"},
 			Description: "Generate high-speed direct download link for a file",
 			Usage:       "/fastdl <file_id> (or reply to a file with /fastdl)",
-			Category:    "Media",
+			Category:    "File & Media",
 			Handler:     p.HandleFastDownloadCommand,
 		},
 	}

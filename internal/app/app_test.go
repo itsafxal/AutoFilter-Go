@@ -7,7 +7,6 @@ import (
 	"github.com/itsafxal/AutoFilter-Go/internal/config"
 	"github.com/itsafxal/AutoFilter-Go/internal/logging"
 	"github.com/itsafxal/AutoFilter-Go/plugins/cmds"
-	"github.com/itsafxal/AutoFilter-Go/plugins/id"
 	"github.com/itsafxal/AutoFilter-Go/plugins/info"
 	"github.com/itsafxal/AutoFilter-Go/plugins/ping"
 	"github.com/itsafxal/AutoFilter-Go/plugins/start"
@@ -30,12 +29,11 @@ func TestApp_Lifecycle(t *testing.T) {
 		t.Fatalf("failed to create App: %v", err)
 	}
 
-	// Register all 5 core plugins
+	// Register core plugins
 	err = application.RegisterPlugins(
 		start.New(application.AppContext),
 		cmds.New(application.AppContext),
 		ping.New(application.AppContext),
-		id.New(application.AppContext),
 		info.New(application.AppContext),
 	)
 	if err != nil {
@@ -47,16 +45,16 @@ func TestApp_Lifecycle(t *testing.T) {
 		t.Fatalf("validation failed: %v", err)
 	}
 
-	if application.Registry.PluginCount() != 5 {
-		t.Errorf("expected 5 plugins, got %d", application.Registry.PluginCount())
+	if application.Registry.PluginCount() != 4 {
+		t.Errorf("expected 4 plugins, got %d", application.Registry.PluginCount())
 	}
-	if application.Registry.CommandCount() != 6 {
-		t.Errorf("expected 6 primary commands, got %d", application.Registry.CommandCount())
+	if application.Registry.CommandCount() != 5 {
+		t.Errorf("expected 5 primary commands, got %d", application.Registry.CommandCount())
 	}
 
 	// Verify help generation includes all commands
 	help := application.Registry.GenerateHelpText()
-	expectedCommands := []string{"/start", "/cmds", "/cmdc", "/ping", "/id", "/info"}
+	expectedCommands := []string{"/start", "/cmds", "/cmdc", "/ping", "/info"}
 	for _, expected := range expectedCommands {
 		if !bytes.Contains([]byte(help), []byte(expected)) {
 			t.Errorf("expected help text to contain %s, got:\n%s", expected, help)

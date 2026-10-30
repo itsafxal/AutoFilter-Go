@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/itsafxal/AutoFilter-Go/internal/commands"
@@ -87,8 +88,7 @@ func (p *Plugin) buildHelpContent() (string, *telegram.ReplyInlineMarkup) {
 		"<blockquote><u>Sᴏᴍᴇ Oғ Mʏ  Cᴏᴍᴍᴀɴᴅs</u>\n" +
 		"‣/latest - Gᴇᴛ ʟɪsᴛ ᴏғ ʟᴀᴛᴇsᴛ ᴍᴏᴠɪᴇs ʙʏ ʟᴀɴɢᴜᴀɢᴇ\n" +
 		"‣/request &lt;movie name&gt; - Rᴇᴏ̨ᴜᴇsᴛ ᴀ ᴍᴏᴠɪᴇ ғʀᴏᴍ ᴀᴅᴍɪɴs\n" +
-		"‣/id - Gᴇᴛ ʏᴏᴜʀ Tᴇʟᴇɢʀᴀᴍ ID ᴏʀ ᴍᴇssᴀɢᴇ/ғɪʟᴇ ID\n" +
-		"‣/info - Fᴇᴛᴄʜ ᴅᴇᴛᴀɪʟᴇᴅ ɪɴғᴏ ᴏғ ᴀ ᴜsᴇʀ (ʀᴇᴘʟʏ ᴏʀ @ᴜsᴇʀɴᴀᴍᴇ)\n" +
+		"‣/info - Fᴇᴛᴄʜ ᴅᴇᴛᴀɪʟᴇᴅ ɪɴғᴏ & IDs (ʀᴇᴘʟʏ, @ᴜsᴇʀɴᴀᴍᴇ, ᴏʀ ID)\n" +
 		"‣/ping - Cʜᴇᴄᴋ Sᴇʀᴠᴇʀ ᴘɪɴɢ\n" +
 		"‣/broadcast - Rᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴛᴏ sᴇɴᴅ ᴛʜᴀᴛ ᴛᴏ ᴀʟʟ ʙᴏᴛ ᴜsᴇʀs (ᴀᴅᴍɪɴ ᴏɴʟʏ)</blockquote></b>"
 
@@ -276,14 +276,22 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 	}
 
 	if privateUserID != 0 && p.appCtx != nil && p.appCtx.DB != nil && p.appCtx.DB.UserRepo() != nil {
-		userName := ""
-		if user != nil && user.FirstName != "" {
-			userName = user.FirstName
-			if user.LastName != "" {
-				userName += " " + user.LastName
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		exists, err := p.appCtx.DB.UserRepo().IsUserExist(ctx, privateUserID)
+		if err == nil && !exists {
+			userName := ""
+			if user != nil {
+				userName = user.FirstName
+				if user.LastName != "" {
+					userName = strings.TrimSpace(userName + " " + user.LastName)
+				}
 			}
+			if userName == "" {
+				userName = "User"
+			}
+			_ = p.appCtx.DB.UserRepo().AddUser(ctx, privateUserID, userName)
 		}
-		_ = p.appCtx.DB.UserRepo().AddUser(context.Background(), privateUserID, userName)
+		cancel()
 	}
 
 	args := strings.Fields(m.Text())
@@ -398,7 +406,13 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 			}
 		}
 
-		// 5. Media delivery deep link: file_<id>, filep_<id>, or direct file ID
+		// 5. Named Batch deep link: batch_<id>
+		if strings.HasPrefix(payload, "batch_") {
+			batchID := strings.TrimPrefix(payload, "batch_")
+			return p.deliverBatch(m, user, batchID)
+		}
+
+		// 6. Media delivery deep link: file_<id>, filep_<id>, or direct file ID
 		if p.appCtx != nil && p.appCtx.Delivery != nil {
 			var fileID string
 			protectContent := false
@@ -566,4 +580,158 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 		_ = p.appCtx.AutoDelete.TrackSentMessage(sentMsg.ChatID(), sentMsg.ID, "start")
 	}
 	return err
+}
+
+func (p *Plugin) deliverBatch(m *telegram.NewMessage, user *telegram.UserObj, batchID string) error {
+	if p.appCtx == nil || p.appCtx.Batch == nil {
+		_, err := m.Reply("⚠️ <b>Batch service is unavailable.</b>", &telegram.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	var userID int64
+	if user != nil && user.ID != 0 {
+		userID = user.ID
+	} else {
+		userID = m.SenderID()
+		if userID == 0 {
+			userID = m.ChatID()
+		}
+	}
+
+	if p.isMaintenanceMode() {
+		isAdmin := p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(userID)
+		if !isAdmin {
+			_, err := m.Reply("⚠️ <b>Bot is currently under maintenance. Batch delivery is temporarily paused.</b>", &telegram.SendOptions{ParseMode: "html"})
+			return err
+		}
+	}
+
+	// Force Subscribe Verification Flow
+	payload := "batch_" + batchID
+	if p.appCtx.FSub != nil {
+		isAdmin := false
+		if p.appCtx.Config != nil {
+			isAdmin = p.appCtx.Config.IsAdmin(userID) || p.appCtx.Config.IsOwner(userID)
+		}
+
+		if !isAdmin {
+			markup, unjoined := p.appCtx.FSub.BuildDynamicFSubKeyboard(context.Background(), p.appCtx.Client, userID, payload)
+			if len(unjoined) > 0 && markup != nil {
+				promptMsg, err := m.Reply("<b>Pʟᴇᴀꜱᴇ Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟs Tᴏ Aᴄᴄᴇss Tʜɪs Bᴀᴛᴄʜ Cᴏʟʟᴇᴄᴛɪᴏɴ 🚀</b>", &telegram.SendOptions{
+					ParseMode:   "html",
+					ReplyMarkup: markup,
+				})
+				if err != nil {
+					return err
+				}
+
+				var promptMsgID int32
+				if promptMsg != nil {
+					promptMsgID = promptMsg.ID
+				}
+
+				checkSuccess := p.appCtx.FSub.CheckLoopSubDynamic(context.Background(), p.appCtx.Client, userID, m.ChatID(), promptMsgID, payload, unjoined...)
+				if checkSuccess {
+					if p.appCtx.Client != nil && promptMsgID != 0 {
+						_, _ = p.appCtx.Client.DeleteMessages(m.ChatID(), []int32{promptMsgID})
+					}
+				} else {
+					return nil
+				}
+			}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	meta, err := p.appCtx.Batch.GetBatch(ctx, batchID)
+	if err != nil || meta == nil || meta.Status != "finalized" {
+		_, err := m.Reply("⚠️ <b>Batch not found or has been removed.</b>", &telegram.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	items, err := p.appCtx.Batch.GetBatchItems(ctx, batchID)
+	if err != nil || len(items) == 0 {
+		_, err := m.Reply("⚠️ <b>This batch contains no items.</b>", &telegram.SendOptions{ParseMode: "html"})
+		return err
+	}
+
+	headerMsg, _ := m.Reply(fmt.Sprintf(
+		"📦 <b>Delivering Batch:</b> <b>%s</b>\n"+
+			"<i>Total items: %d. Delivering in exact sequential order, please wait...</i>",
+		commands.EscapeHTML(meta.BatchName),
+		len(items),
+	), &telegram.SendOptions{ParseMode: "html"})
+
+	chatID := m.ChatID()
+	deliveredCount := 0
+
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+
+		if item.ItemType == "text" {
+			textToSend := item.TextContent
+			if textToSend == "" {
+				textToSend = item.Caption
+			}
+			_, sendErr := m.Respond(textToSend, &telegram.SendOptions{ParseMode: "html"})
+			if sendErr != nil {
+				_, _ = m.Respond(textToSend, &telegram.SendOptions{})
+			}
+			deliveredCount++
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+
+		var mediaToSend any = item.TelegramFileID
+		if resolvedMedia, err := delivery.ResolveInputMedia(item.TelegramFileID, item.StorageReference); err == nil && resolvedMedia != nil {
+			mediaToSend = resolvedMedia
+		} else if resolved, err := telegram.ResolveBotFileID(item.TelegramFileID); err == nil && resolved != nil {
+			mediaToSend = resolved
+		}
+
+		mediaOpts := &telegram.MediaOptions{
+			Caption:       item.Caption,
+			ParseMode:     "html",
+			ForceDocument: item.ItemType == "document",
+		}
+
+		var sendErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if p.appCtx.Client != nil {
+				_, sendErr = p.appCtx.Client.SendMedia(chatID, mediaToSend, mediaOpts)
+			} else {
+				_, sendErr = m.RespondMedia(mediaToSend, mediaOpts)
+			}
+			if sendErr == nil {
+				break
+			}
+			if strings.Contains(sendErr.Error(), "FLOOD_WAIT_") {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			break
+		}
+
+		if sendErr == nil {
+			deliveredCount++
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+
+	if headerMsg != nil {
+		_, _ = headerMsg.Edit(fmt.Sprintf(
+			"✨ <b>Batch Delivery Complete!</b>\n\n"+
+				"📦 <b>Batch:</b> %s\n"+
+				"✅ <b>Delivered:</b> <code>%d / %d items</code>",
+			commands.EscapeHTML(meta.BatchName),
+			deliveredCount,
+			len(items),
+		), &telegram.SendOptions{ParseMode: "html"})
+	}
+
+	return nil
 }

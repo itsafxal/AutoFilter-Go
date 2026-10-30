@@ -192,6 +192,17 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 		return nil
 	}
 
+	// In group chats, verify the group is not disabled
+	if !m.IsPrivate() && p.appCtx != nil && p.appCtx.DB != nil && p.appCtx.DB.GroupRepo() != nil {
+		group, err := p.appCtx.DB.GroupRepo().GetGroup(context.Background(), m.ChatID())
+		if err == nil && group != nil && group.ChatStatus.IsDisabled {
+			if p.appCtx.Logger != nil {
+				p.appCtx.Logger.Debug("autofilter skipped: group is disabled", "chat_id", m.ChatID(), "reason", group.ChatStatus.Reason)
+			}
+			return nil
+		}
+	}
+
 	// In maintenance mode, only admins receive search results (both in group and PM).
 	// Groups and non-admin users receive no search responses.
 	if p.isMaintenanceMode() {

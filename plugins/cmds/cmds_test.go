@@ -21,9 +21,20 @@ func TestCmdsPlugin_Metadata(t *testing.T) {
 	if cmds[0].Name != "cmds" {
 		t.Errorf("expected command name 'cmds', got %q", cmds[0].Name)
 	}
-	if len(cmds[0].Aliases) == 0 || cmds[0].Aliases[0] != "help" {
-		t.Errorf("expected alias 'help', got %v", cmds[0].Aliases)
+	hasHelp := false
+	hasCmd := false
+	for _, a := range cmds[0].Aliases {
+		if a == "help" {
+			hasHelp = true
+		}
+		if a == "cmd" {
+			hasCmd = true
+		}
 	}
+	if !hasHelp || !hasCmd {
+		t.Errorf("expected aliases ['help', 'cmd'], got %v", cmds[0].Aliases)
+	}
+
 	if cmds[1].Name != "cmdc" {
 		t.Errorf("expected command name 'cmdc', got %q", cmds[1].Name)
 	}
@@ -33,16 +44,15 @@ func TestCmdsPlugin_Metadata(t *testing.T) {
 
 	// Verify callback handlers
 	cbs := p.CallbackHandlers()
-	if len(cbs) < 3 {
-		t.Fatalf("expected at least 3 callback handlers, got %d", len(cbs))
-	}
-
 	cbMap := make(map[string]bool)
 	for _, cb := range cbs {
 		cbMap[cb.Prefix] = true
 	}
-	if !cbMap["cmdc_cat#"] || !cbMap["cmdc_home"] || !cbMap["close_data"] {
-		t.Errorf("missing expected callback prefix in %v", cbMap)
+	expectedPrefixes := []string{"cmd_cat#", "cmdc_cat#", "cmd_home", "cmdc_home", "close_data", "noop"}
+	for _, prefix := range expectedPrefixes {
+		if !cbMap[prefix] {
+			t.Errorf("missing expected callback prefix %q in %v", prefix, cbMap)
+		}
 	}
 }
 
@@ -68,47 +78,139 @@ func TestCmdsPlugin_DynamicHelpContent(t *testing.T) {
 	}
 }
 
+type dummyPlugin struct {
+	name string
+	cmds []plugins.CommandDefinition
+}
+
+func (d *dummyPlugin) Name() string                          { return d.name }
+func (d *dummyPlugin) Commands() []plugins.CommandDefinition { return d.cmds }
+
 func TestCmdsPlugin_InteractiveMenus(t *testing.T) {
-	p := New(&plugins.AppContext{})
+	appCtx := &plugins.AppContext{}
+	reg := plugins.NewRegistry(appCtx)
 
-	// 1. Main Admin Menu
-	menuText, menuMarkup := p.buildCmdcMainMenu()
-	if !strings.Contains(menuText, "BOT COMMANDS MASTER PANEL (ADMIN)") {
-		t.Errorf("unexpected menu text: %s", menuText)
+	// Register dummy commands across different categories
+	dummy := &dummyPlugin{
+		name: "test_cmds",
+		cmds: []plugins.CommandDefinition{
+			{Name: "start", Description: "Start bot", Category: "General", Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "info", Description: "User info", Category: "User Commands", Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "getfile", Description: "Get file", Category: "File & Media", Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "batch", Description: "Batch tool", Category: "Batch Management", Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "sub1", Description: "Set sub 1", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "sub2", Description: "Set sub 2", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "sub3", Description: "Set sub 3", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "delsub1", Description: "Del sub 1", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "delsub2", Description: "Del sub 2", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "delsub3", Description: "Del sub 3", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "2sub1", Description: "Set 2sub 1", Category: "FCB Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "gfilter", Description: "Global filter", Category: "Global Filters", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "index", Description: "Index channel", Category: "Indexing", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "leave", Description: "Leave group", Category: "Group Management", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "broadcast", Description: "Broadcast msg", Category: "Admin Commands", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+			{Name: "vacuum", Description: "Vacuum DB", Category: "Developer Tools", AdminOnly: true, Handler: func(*telegram.NewMessage) error { return nil }},
+		},
 	}
-	if menuMarkup == nil || len(menuMarkup.Rows) < 4 {
-		t.Fatalf("expected at least 4 rows in menuMarkup, got %v", menuMarkup)
+	if err := reg.Register(dummy); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+	if err := reg.Validate(); err != nil {
+		t.Fatalf("validate failed: %v", err)
 	}
 
-	// Check Close button is Danger (Red) in main menu
-	lastRow := menuMarkup.Rows[len(menuMarkup.Rows)-1].Buttons
-	if len(lastRow) != 1 {
-		t.Fatalf("expected 1 button in last row, got %d", len(lastRow))
+	p := New(appCtx)
+
+	// 1. Admin Main Menu
+	adminText, adminMarkup := p.buildMainMenu(true)
+	if !strings.Contains(adminText, "AutoFilter-Go COMMAND CENTER") {
+		t.Errorf("unexpected menu text: %s", adminText)
 	}
-	closeBtn, ok := lastRow[0].(*telegram.KeyboardButtonCallback)
+	if !strings.Contains(adminText, "Total Commands:") {
+		t.Errorf("expected 'Total Commands:' in admin menu")
+	}
+	// Admin has 10 categories -> 5 rows of 2 buttons + 1 row for Close = 6 rows
+	if adminMarkup == nil || len(adminMarkup.Rows) != 6 {
+		t.Fatalf("expected 6 rows in admin markup, got %d", len(adminMarkup.Rows))
+	}
+
+	// Verify Close button is Danger (Red)
+	closeRow := adminMarkup.Rows[len(adminMarkup.Rows)-1].Buttons
+	if len(closeRow) != 1 {
+		t.Fatalf("expected 1 close button, got %d", len(closeRow))
+	}
+	closeBtn, ok := closeRow[0].(*telegram.KeyboardButtonCallback)
 	if !ok || closeBtn.Style == nil || !closeBtn.Style.BgDanger {
 		t.Errorf("expected Close button to have BgDanger=true (Red)")
 	}
 
-	// 2. Category Views
-	categories := []string{"fsub", "autodel", "caption", "media", "general"}
-	for _, cat := range categories {
-		catText, catMarkup := p.buildCmdcCategoryView(cat)
-		if len(catText) == 0 {
-			t.Errorf("expected non-empty text for category %s", cat)
-		}
-		if catMarkup == nil || len(catMarkup.Rows) != 1 {
-			t.Fatalf("expected 1 row in category markup for %s", cat)
-		}
+	// 2. Non-Admin Main Menu
+	userText, userMarkup := p.buildMainMenu(false)
+	if !strings.Contains(userText, "Available Commands:") {
+		t.Errorf("expected 'Available Commands:' in user menu")
+	}
+	// Non-admin has 4 public categories -> 2 rows of 2 buttons + 1 row for Close = 3 rows
+	if userMarkup == nil || len(userMarkup.Rows) != 3 {
+		t.Fatalf("expected 3 rows in user markup, got %d", len(userMarkup.Rows))
+	}
 
-		// Ensure Back button and Close button (Red)
-		row := catMarkup.Rows[0].Buttons
-		if len(row) != 2 {
-			t.Fatalf("expected 2 buttons (Back, Close) for %s, got %d", cat, len(row))
+	// 3. Category Detail View with Pagination (> 6 items)
+	fcbMeta := findCategoryMeta("fcb")
+	if fcbMeta == nil {
+		t.Fatalf("fcb category metadata not found")
+	}
+
+	// Page 1 of FCB (7 items total -> 2 pages)
+	// Alphabetical order: 2sub1, delsub1, delsub2, delsub3, sub1, sub2 on page 1; sub3 on page 2
+	p1Text, p1Markup := p.buildCategoryView(fcbMeta, 1, true)
+	if !strings.Contains(p1Text, "Page 1/2") {
+		t.Errorf("expected 'Page 1/2' in FCB page 1 header, got:\n%s", p1Text)
+	}
+	if !strings.Contains(p1Text, "/2sub1") {
+		t.Errorf("expected /2sub1 on page 1")
+	}
+	// FCB markup should have 2 rows: 1 pagination row + 1 back/close row
+	if len(p1Markup.Rows) != 2 {
+		t.Fatalf("expected 2 rows in paginated category markup, got %d", len(p1Markup.Rows))
+	}
+
+	// Page 2 of FCB
+	p2Text, p2Markup := p.buildCategoryView(fcbMeta, 2, true)
+	if !strings.Contains(p2Text, "Page 2/2") {
+		t.Errorf("expected 'Page 2/2' in FCB page 2 header, got:\n%s", p2Text)
+	}
+	if !strings.Contains(p2Text, "/sub3") {
+		t.Errorf("expected /sub3 on page 2")
+	}
+	if p2Markup == nil || len(p2Markup.Rows) != 2 {
+		t.Fatalf("expected 2 rows in page 2 markup, got %d", len(p2Markup.Rows))
+	}
+
+	// 4. Single-Page Category View
+	genMeta := findCategoryMeta("gen")
+	genText, genMarkup := p.buildCategoryView(genMeta, 1, true)
+	if strings.Contains(genText, "Page 1/") {
+		t.Errorf("single page category should not display pagination header")
+	}
+	// Single page category has only 1 row (Back to Menu & Close)
+	if genMarkup == nil || len(genMarkup.Rows) != 1 {
+		t.Fatalf("expected 1 row in single-page category markup, got %d", len(genMarkup.Rows))
+	}
+}
+
+func TestCmdsPlugin_FindCategoryMeta(t *testing.T) {
+	for _, cat := range CanonicalCategories {
+		byID := findCategoryMeta(cat.ID)
+		if byID == nil || byID.ID != cat.ID {
+			t.Errorf("failed to find category by ID %s", cat.ID)
 		}
-		catCloseBtn, okC := row[1].(*telegram.KeyboardButtonCallback)
-		if !okC || catCloseBtn.Style == nil || !catCloseBtn.Style.BgDanger {
-			t.Errorf("expected Close button in category %s to have BgDanger=true", cat)
+		byName := findCategoryMeta(cat.Name)
+		if byName == nil || byName.Name != cat.Name {
+			t.Errorf("failed to find category by Name %s", cat.Name)
 		}
+	}
+
+	if findCategoryMeta("unknown_category") != nil {
+		t.Errorf("expected nil for nonexistent category")
 	}
 }

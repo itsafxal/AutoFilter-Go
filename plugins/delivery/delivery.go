@@ -34,7 +34,7 @@ func (p *Plugin) Commands() []plugins.CommandDefinition {
 			Aliases:     []string{"file"},
 			Description: "Retrieve and deliver a media file by its unique identifier",
 			Usage:       "/getfile <file_id>",
-			Category:    "Media",
+			Category:    "File & Media",
 			Handler:     p.HandleGetFile,
 		},
 	}
