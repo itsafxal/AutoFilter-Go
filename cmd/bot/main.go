@@ -11,27 +11,26 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/app"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/logging"
-	"github.com/itsafxal/MYTGBOTZ/plugins/autodelete"
-	"github.com/itsafxal/MYTGBOTZ/plugins/autofilter"
-	"github.com/itsafxal/MYTGBOTZ/plugins/caption"
-	"github.com/itsafxal/MYTGBOTZ/plugins/cmds"
-	"github.com/itsafxal/MYTGBOTZ/plugins/delivery"
-	"github.com/itsafxal/MYTGBOTZ/plugins/fsub"
-	"github.com/itsafxal/MYTGBOTZ/plugins/id"
-	"github.com/itsafxal/MYTGBOTZ/plugins/info"
-	"github.com/itsafxal/MYTGBOTZ/plugins/latest"
-	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
-	"github.com/itsafxal/MYTGBOTZ/plugins/start"
-	"github.com/itsafxal/MYTGBOTZ/plugins/channel"
-	"github.com/itsafxal/MYTGBOTZ/plugins/gfilter"
-	"github.com/itsafxal/MYTGBOTZ/plugins/index"
-	"github.com/itsafxal/MYTGBOTZ/plugins/botstats"
-	streamPlugin "github.com/itsafxal/MYTGBOTZ/plugins/stream"
+	"github.com/itsafxal/AutoFilter-Go/internal/app"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/logging"
+	"github.com/itsafxal/AutoFilter-Go/plugins/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/plugins/autofilter"
+	"github.com/itsafxal/AutoFilter-Go/plugins/botstats"
+	"github.com/itsafxal/AutoFilter-Go/plugins/caption"
+	"github.com/itsafxal/AutoFilter-Go/plugins/channel"
+	"github.com/itsafxal/AutoFilter-Go/plugins/cmds"
+	"github.com/itsafxal/AutoFilter-Go/plugins/delivery"
+	"github.com/itsafxal/AutoFilter-Go/plugins/fsub"
+	"github.com/itsafxal/AutoFilter-Go/plugins/gfilter"
+	"github.com/itsafxal/AutoFilter-Go/plugins/id"
+	"github.com/itsafxal/AutoFilter-Go/plugins/index"
+	"github.com/itsafxal/AutoFilter-Go/plugins/info"
+	"github.com/itsafxal/AutoFilter-Go/plugins/latest"
+	"github.com/itsafxal/AutoFilter-Go/plugins/ping"
+	"github.com/itsafxal/AutoFilter-Go/plugins/start"
+	streamPlugin "github.com/itsafxal/AutoFilter-Go/plugins/stream"
 )
-
 
 func main() {
 	if err := run(); err != nil {
@@ -126,7 +125,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("plugin registration failure: %w", err)
 	}
-
 
 	// 6. Setup signal notification context for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)

@@ -10,11 +10,11 @@ import (
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
-	"github.com/itsafxal/MYTGBOTZ/internal/gfilter"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
-	"github.com/itsafxal/MYTGBOTZ/internal/search"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
+	"github.com/itsafxal/AutoFilter-Go/internal/gfilter"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/search"
 )
 
 func TestAutofilterPlugin_Structure(t *testing.T) {
@@ -946,10 +946,16 @@ func (m *mockGFilterService) MatchAndExecute(msg *telegram.NewMessage) (bool, er
 }
 
 func (m *mockGFilterService) SaveFilter(ctx context.Context, f *gfilter.GFilter) error { return nil }
-func (m *mockGFilterService) DeleteFilter(ctx context.Context, keyword string) (bool, error) { return true, nil }
+func (m *mockGFilterService) DeleteFilter(ctx context.Context, keyword string) (bool, error) {
+	return true, nil
+}
 func (m *mockGFilterService) DeleteAllFilters(ctx context.Context) (int64, error) { return 0, nil }
-func (m *mockGFilterService) GetFilter(ctx context.Context, keyword string) (*gfilter.GFilter, error) { return nil, nil }
-func (m *mockGFilterService) ListFilters(ctx context.Context, limit, offset int) ([]*gfilter.GFilter, int64, error) { return nil, 0, nil }
+func (m *mockGFilterService) GetFilter(ctx context.Context, keyword string) (*gfilter.GFilter, error) {
+	return nil, nil
+}
+func (m *mockGFilterService) ListFilters(ctx context.Context, limit, offset int) ([]*gfilter.GFilter, int64, error) {
+	return nil, 0, nil
+}
 func (m *mockGFilterService) Count(ctx context.Context) (int64, error) { return 0, nil }
 
 // TestAutofilter_GlobalFilterPriority tests that Global Filter takes absolute priority over Auto Filter.

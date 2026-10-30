@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
-	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/sql"
 )
 
 var validIdentifierRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
@@ -117,7 +117,6 @@ func (s *Service) SetAdminConfig(ownerID int64, admins []int64) {
 	s.ownerID = ownerID
 	s.admins = admins
 }
-
 
 // getSender safely retrieves the current Telegram sender client.
 func (s *Service) getSender() TelegramSender {
@@ -323,7 +322,6 @@ func (s *Service) Deliver(ctx context.Context, chatID int64, identifier string, 
 			caption = rec.FileName
 		}
 	}
-
 
 	var replyID int32
 	if opts.ReplyToMessageID > 0 {

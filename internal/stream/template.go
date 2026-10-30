@@ -7,12 +7,12 @@ import (
 
 // PageData holds metadata passed to the stream/watch web template.
 type PageData struct {
-	Title         string
-	FileName      string
-	FileSizeStr   string
-	FileSizeRaw   int64
-	MimeType      string
-	FileType      string
+	Title             string
+	FileName          string
+	FileSizeStr       string
+	FileSizeRaw       int64
+	MimeType          string
+	FileType          string
 	IsVideo           bool
 	IsAudio           bool
 	IsMKV             bool

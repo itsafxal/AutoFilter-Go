@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	deliveryCore "github.com/itsafxal/MYTGBOTZ/internal/delivery"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	deliveryCore "github.com/itsafxal/AutoFilter-Go/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // mockDeliveryService implements deliveryCore.MediaDeliveryService for plugin unit testing.
@@ -69,7 +69,6 @@ func (m *mockDeliveryService) RefreshFileRef(ctx context.Context, fileID string)
 func (m *mockDeliveryService) SaveMedia(ctx context.Context, media *deliveryCore.MediaDetails) error {
 	return nil
 }
-
 
 func TestDeliveryPlugin_Metadata(t *testing.T) {
 	appCtx := &plugins.AppContext{}

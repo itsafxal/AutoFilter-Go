@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/autodelete"
-	"github.com/itsafxal/MYTGBOTZ/internal/caption"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
-	"github.com/itsafxal/MYTGBOTZ/internal/gfilter"
-	"github.com/itsafxal/MYTGBOTZ/internal/search"
-	"github.com/itsafxal/MYTGBOTZ/internal/stream"
+	"github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/caption"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/gfilter"
+	"github.com/itsafxal/AutoFilter-Go/internal/search"
+	"github.com/itsafxal/AutoFilter-Go/internal/stream"
 )
 
 // GFilterService defines the Global Filter operations available across plugins.
@@ -53,7 +53,6 @@ type AppContext struct {
 	Stream     stream.StreamService
 	GFilter    GFilterService
 }
-
 
 // HandlerFunc is the Gogram message/command handler function signature.
 type HandlerFunc = telegram.MessageHandler
@@ -133,4 +132,3 @@ type JoinRequestPlugin interface {
 	Plugin
 	JoinRequestHandlers() []JoinRequestHandlerFunc
 }
-

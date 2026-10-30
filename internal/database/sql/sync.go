@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/mongodb"
 )
 
 // Syncer handles runtime synchronization from authoritative MongoDB collections into local SQLite.

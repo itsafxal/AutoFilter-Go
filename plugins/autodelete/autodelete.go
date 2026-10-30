@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	coreAutoDel "github.com/itsafxal/MYTGBOTZ/internal/autodelete"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	coreAutoDel "github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // Plugin implements administrative commands for Auto-Delete (Filter & File) and Weekly Trash.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 )
 
 func TestNewLogger_Levels(t *testing.T) {

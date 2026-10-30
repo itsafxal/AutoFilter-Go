@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
-	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/mongodb"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/sql"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 

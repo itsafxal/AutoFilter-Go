@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/mongodb"
 )
 
 func newTestLogger() *slog.Logger {

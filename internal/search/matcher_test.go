@@ -7,14 +7,14 @@ import (
 
 func TestParseRelease(t *testing.T) {
 	tests := []struct {
-		name         string
-		filename     string
-		query        string
-		wantTitle    string
-		wantYear     int
-		wantSeason   int
-		wantEpisode  int
-		wantChannel  string
+		name        string
+		filename    string
+		query       string
+		wantTitle   string
+		wantYear    int
+		wantSeason  int
+		wantEpisode int
+		wantChannel string
 	}{
 		{
 			name:        "bracket channel with year and quality",
@@ -64,32 +64,32 @@ func TestParseRelease(t *testing.T) {
 			wantEpisode: 6,
 		},
 		{
-			name:        "vikramadithyan movie file",
-			filename:    "Vikramadithyan (2014) Malayalam 720p HDRip.mkv",
-			query:       "Vikram",
-			wantTitle:   "Vikramadithyan",
-			wantYear:    2014,
+			name:      "vikramadithyan movie file",
+			filename:  "Vikramadithyan (2014) Malayalam 720p HDRip.mkv",
+			query:     "Vikram",
+			wantTitle: "Vikramadithyan",
+			wantYear:  2014,
 		},
 		{
-			name:        "vikram vedha movie file",
-			filename:    "Vikram Vedha (2017) Tamil 1080p.mkv",
-			query:       "Vikram",
-			wantTitle:   "Vikram Vedha",
-			wantYear:    2017,
+			name:      "vikram vedha movie file",
+			filename:  "Vikram Vedha (2017) Tamil 1080p.mkv",
+			query:     "Vikram",
+			wantTitle: "Vikram Vedha",
+			wantYear:  2017,
 		},
 		{
-			name:        "plain vikram file with dot separators",
-			filename:    "Vikram.2022.Tamil.1080p.WEBRip.x264.mkv",
-			query:       "Vikram",
-			wantTitle:   "Vikram",
-			wantYear:    2022,
+			name:      "plain vikram file with dot separators",
+			filename:  "Vikram.2022.Tamil.1080p.WEBRip.x264.mkv",
+			query:     "Vikram",
+			wantTitle: "Vikram",
+			wantYear:  2022,
 		},
 		{
-			name:        "kgf chapter 2",
-			filename:    "KGF.Chapter.2.2022.1080p.mkv",
-			query:       "kgf 2",
-			wantTitle:   "KGF Chapter 2",
-			wantYear:    2022,
+			name:      "kgf chapter 2",
+			filename:  "KGF.Chapter.2.2022.1080p.mkv",
+			query:     "kgf 2",
+			wantTitle: "KGF Chapter 2",
+			wantYear:  2022,
 		},
 	}
 

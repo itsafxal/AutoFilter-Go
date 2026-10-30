@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestCmdsPlugin_Metadata(t *testing.T) {

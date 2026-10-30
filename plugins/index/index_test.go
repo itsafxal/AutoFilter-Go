@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestIndexPlugin_Metadata(t *testing.T) {
@@ -104,17 +104,17 @@ func TestIndexPlugin_ForwardedMessageFilter(t *testing.T) {
 
 func TestExtractChannelInfo_Links(t *testing.T) {
 	cases := []struct {
-		text        string
+		text         string
 		expectedChat string
 		expectedID   int
 	}{
 		{
-			text:        "Check out https://t.me/c/1234567890/100 for files",
+			text:         "Check out https://t.me/c/1234567890/100 for files",
 			expectedChat: "-1001234567890",
 			expectedID:   100,
 		},
 		{
-			text:        "https://t.me/my_channel_username/250",
+			text:         "https://t.me/my_channel_username/250",
 			expectedChat: "my_channel_username",
 			expectedID:   250,
 		},

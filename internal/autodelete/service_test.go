@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 	_ "modernc.org/sqlite"
 )
 

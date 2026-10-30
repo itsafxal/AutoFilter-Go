@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	coreGFilter "github.com/itsafxal/MYTGBOTZ/internal/gfilter"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	coreGFilter "github.com/itsafxal/AutoFilter-Go/internal/gfilter"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 const (

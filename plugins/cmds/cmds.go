@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // Plugin implements the /cmds and /cmdc command plugin with interactive admin category navigation.

@@ -110,4 +110,3 @@ func TestExtractQueryTitle(t *testing.T) {
 		t.Errorf("expected normalized text to contain 'monster' and 'lizzie', got %q", norm)
 	}
 }
-

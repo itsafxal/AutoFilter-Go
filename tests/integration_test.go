@@ -9,17 +9,17 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/app"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	deliveryCore "github.com/itsafxal/MYTGBOTZ/internal/delivery"
-	"github.com/itsafxal/MYTGBOTZ/internal/logging"
-	"github.com/itsafxal/MYTGBOTZ/plugins/cmds"
-	"github.com/itsafxal/MYTGBOTZ/plugins/delivery"
-	"github.com/itsafxal/MYTGBOTZ/plugins/id"
-	"github.com/itsafxal/MYTGBOTZ/plugins/info"
-	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
-	"github.com/itsafxal/MYTGBOTZ/plugins/start"
+	"github.com/itsafxal/AutoFilter-Go/internal/app"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	deliveryCore "github.com/itsafxal/AutoFilter-Go/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/logging"
+	"github.com/itsafxal/AutoFilter-Go/plugins/cmds"
+	"github.com/itsafxal/AutoFilter-Go/plugins/delivery"
+	"github.com/itsafxal/AutoFilter-Go/plugins/id"
+	"github.com/itsafxal/AutoFilter-Go/plugins/info"
+	"github.com/itsafxal/AutoFilter-Go/plugins/ping"
+	"github.com/itsafxal/AutoFilter-Go/plugins/start"
 )
 
 func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {

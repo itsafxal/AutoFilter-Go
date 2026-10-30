@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
 )
 
 type mockMediaProvider struct {
@@ -145,28 +145,28 @@ func setupTestServer() (*Server, []byte) {
 	provider := &mockMediaProvider{
 		records: map[string]*delivery.MediaDetails{
 			"valid_video": {
-				FileID:    "valid_video",
-				FileName:  "Avengers.mp4",
-				FileSize:  int64(len(testBytes)),
-				FileType:  "video",
-				MimeType:  "video/mp4",
-				Size:      "2.0 KB",
+				FileID:   "valid_video",
+				FileName: "Avengers.mp4",
+				FileSize: int64(len(testBytes)),
+				FileType: "video",
+				MimeType: "video/mp4",
+				Size:     "2.0 KB",
 			},
 			"valid_mkv": {
-				FileID:    "valid_mkv",
-				FileName:  "Kurup 2021 Malayalam 1080p 10bit NF WEBDL AAC 5 1 @MNTGX.mkv",
-				FileSize:  int64(len(testBytes)),
-				FileType:  "document",
-				MimeType:  "video/x-matroska",
-				Size:      "1.77 GB",
+				FileID:   "valid_mkv",
+				FileName: "Kurup 2021 Malayalam 1080p 10bit NF WEBDL AAC 5 1 @MNTGX.mkv",
+				FileSize: int64(len(testBytes)),
+				FileType: "document",
+				MimeType: "video/x-matroska",
+				Size:     "1.77 GB",
 			},
 			"valid_doc": {
-				FileID:    "valid_doc",
-				FileName:  "document.pdf",
-				FileSize:  int64(len(testBytes)),
-				FileType:  "document",
-				MimeType:  "application/pdf",
-				Size:      "2.0 KB",
+				FileID:   "valid_doc",
+				FileName: "document.pdf",
+				FileSize: int64(len(testBytes)),
+				FileType: "document",
+				MimeType: "application/pdf",
+				Size:     "2.0 KB",
 			},
 		},
 	}
@@ -504,4 +504,3 @@ func TestExpiringDownload_InvalidSignature(t *testing.T) {
 		t.Fatalf("expected 403 Forbidden for tampered signature, got %d", rec.Code)
 	}
 }
-

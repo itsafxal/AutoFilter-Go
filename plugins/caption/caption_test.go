@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/caption"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/caption"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 type mockCaptionService struct {

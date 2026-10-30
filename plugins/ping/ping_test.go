@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestPingPlugin_Metadata(t *testing.T) {

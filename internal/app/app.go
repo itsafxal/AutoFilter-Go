@@ -8,18 +8,18 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/autodelete"
-	"github.com/itsafxal/MYTGBOTZ/internal/caption"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
-	"github.com/itsafxal/MYTGBOTZ/internal/fsub"
-	"github.com/itsafxal/MYTGBOTZ/internal/gfilter"
-	"github.com/itsafxal/MYTGBOTZ/internal/oldbot"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
-	"github.com/itsafxal/MYTGBOTZ/internal/search"
-	"github.com/itsafxal/MYTGBOTZ/internal/stream"
-	"github.com/itsafxal/MYTGBOTZ/internal/telegram"
+	"github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/caption"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/fsub"
+	"github.com/itsafxal/AutoFilter-Go/internal/gfilter"
+	"github.com/itsafxal/AutoFilter-Go/internal/oldbot"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/search"
+	"github.com/itsafxal/AutoFilter-Go/internal/stream"
+	"github.com/itsafxal/AutoFilter-Go/internal/telegram"
 )
 
 // App coordinates the lifecycle of configuration, plugins, logging, database, and Telegram services.
@@ -125,7 +125,6 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	}, nil
 }
 
-
 // RegisterPlugins registers one or more plugins into the application registry.
 func (a *App) RegisterPlugins(plugs ...plugins.Plugin) error {
 	return a.Registry.Register(plugs...)
@@ -165,7 +164,6 @@ func (a *App) InitDatabase(ctx context.Context) error {
 	a.Logger.Info("database layer initialized and ready")
 	return nil
 }
-
 
 // InitBot initializes the Telegram MTProto client and dispatcher.
 func (a *App) InitBot() error {

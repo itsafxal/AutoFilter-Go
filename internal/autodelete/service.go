@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -73,13 +73,13 @@ type Service struct {
 	logger        *slog.Logger
 	client        *telegram.Client
 
-	settings   Settings
-	lastTrash  time.Time
-	lastCount  int64
-	wakeCh     chan struct{}
-	stopCh     chan struct{}
-	stopped    bool
-	mu         sync.RWMutex
+	settings  Settings
+	lastTrash time.Time
+	lastCount int64
+	wakeCh    chan struct{}
+	stopCh    chan struct{}
+	stopped   bool
+	mu        sync.RWMutex
 }
 
 // NewService constructs a new AutoDeleteService.

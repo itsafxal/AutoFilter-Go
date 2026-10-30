@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/autodelete"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
-	"github.com/itsafxal/MYTGBOTZ/internal/search"
+	"github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/search"
 )
 
 const (
@@ -1036,7 +1036,7 @@ var (
 	reCleanChars   = regexp.MustCompile(`[._]+`)
 	reYearFind     = regexp.MustCompile(`\b(19\d\d|20\d\d)\b`)
 	// urlRegex detects http/https URLs and www-prefixed domain patterns in message text.
-	urlRegex       = regexp.MustCompile(`(?i)https?://[^\s]+|(?:^|\s)www\.[^\s]+`)
+	urlRegex = regexp.MustCompile(`(?i)https?://[^\s]+|(?:^|\s)www\.[^\s]+`)
 )
 
 func canonicalLanguage(raw string) string {

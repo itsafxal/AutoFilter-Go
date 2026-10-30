@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
 )
 
 func setupTestDB(t *testing.T) (*database.DatabaseManager, *Service) {

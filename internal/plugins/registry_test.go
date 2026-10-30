@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 )
 
 type mockPlugin struct {
@@ -451,4 +451,3 @@ func TestRegistry_WrapHandler_MaintenanceMode(t *testing.T) {
 		t.Error("expected /ping to be executed for admin in maintenance mode")
 	}
 }
-

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 )
 
 func newTestService() *Service {
@@ -232,4 +232,3 @@ func TestFSub3_SequentialDeliveryFlow(t *testing.T) {
 		t.Fatalf("expected all channels joined for Movie 3, got %v", unjoined3)
 	}
 }
-

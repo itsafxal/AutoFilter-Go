@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestStartPlugin_Metadata(t *testing.T) {
@@ -118,4 +118,3 @@ func TestStartPlugin_CallbacksAndContent(t *testing.T) {
 		t.Errorf("expected 1 row with 2 buttons in about markup, got %v", aMarkup)
 	}
 }
-

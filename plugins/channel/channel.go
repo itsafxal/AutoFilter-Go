@@ -9,9 +9,9 @@ import (
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/dustin/go-humanize"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/mongodb"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // Plugin handles live channel media indexing from configured channels.

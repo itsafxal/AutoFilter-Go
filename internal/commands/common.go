@@ -142,4 +142,3 @@ func IsValidTelegramButtonURL(rawURL string) bool {
 	}
 	return true
 }
-

@@ -65,6 +65,7 @@ var knownChannelKeywords = map[string]struct{}{
 	"tamildbox": {}, "isaimini": {}, "kuttymovies": {}, "tamilyogi": {},
 	"bollyflix": {}, "mallumv": {}, "malayalamrockers": {}, "dvdplay": {},
 	"sargamify": {}, "tgxcyberbot": {}, "cyberbot": {}, "mytgbotz": {},
+	"autofilter": {}, "autofiltergo": {}, "autofilter-go": {},
 	"mntg": {}, "mnt": {}, "tg": {}, "tgx": {}, "channel": {}, "media": {}, "studios": {},
 	"official": {}, "group": {}, "team": {}, "bot": {},
 }

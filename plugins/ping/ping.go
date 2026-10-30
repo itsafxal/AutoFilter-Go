@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // Plugin implements the /ping command plugin.

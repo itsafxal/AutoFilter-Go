@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestInfoPlugin_Metadata(t *testing.T) {

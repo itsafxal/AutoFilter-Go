@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
-	"github.com/itsafxal/MYTGBOTZ/internal/oldbot"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/oldbot"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // Plugin implements the /start command plugin and interactive menu navigation.
@@ -322,13 +322,13 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 		// 3. Welcome redirect from old bots
 		if payload == "from_oldbot" || strings.HasPrefix(payload, "from_") {
 			welcomeText := fmt.Sprintf(
-				"👋 <b>Welcome to our Main Bot!</b>\n\n"+
-					"🎉 You have successfully switched from our old bot!\n\n"+
-					"✨ <b>Here you can enjoy:</b>\n"+
-					"• 🌐 Multi-language filters (Malayalam, Tamil, English, Hindi, Telugu, Kannada, Multi)\n"+
-					"• 🎞 Quality filters (480p, 720p, 1080p, 4K)\n"+
-					"• ⚡ Ultra-fast direct download links\n"+
-					"• 📦 Auto-deleting links for storage safety\n\n"+
+				"👋 <b>Welcome to our Main Bot!</b>\n\n" +
+					"🎉 You have successfully switched from our old bot!\n\n" +
+					"✨ <b>Here you can enjoy:</b>\n" +
+					"• 🌐 Multi-language filters (Malayalam, Tamil, English, Hindi, Telugu, Kannada, Multi)\n" +
+					"• 🎞 Quality filters (480p, 720p, 1080p, 4K)\n" +
+					"• ⚡ Ultra-fast direct download links\n" +
+					"• 📦 Auto-deleting links for storage safety\n\n" +
 					"💡 <i>Send any movie or series title now to start searching!</i>",
 			)
 			_, replyMarkup := p.buildWelcomeContent(user, botUsername)
@@ -567,4 +567,3 @@ func (p *Plugin) HandleStart(m *telegram.NewMessage) error {
 	}
 	return err
 }
-

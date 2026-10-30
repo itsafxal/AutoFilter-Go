@@ -187,5 +187,3 @@ func TestMediaRepository_ShardBlocking(t *testing.T) {
 		t.Error("expected DB2 to be unblocked after ClearShardBlocked")
 	}
 }
-
-

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
-	"github.com/itsafxal/MYTGBOTZ/internal/search"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/search"
 )
 
 // Config holds configuration for the old bots user migration service.
@@ -188,14 +188,14 @@ func (s *Service) handleStart(m *telegram.NewMessage) {
 	}
 
 	text := fmt.Sprintf(
-		"👋 <b>Hey there!</b>\n\n"+
-			"⚠️ <b>We Have Moved!</b>\n"+
-			"This bot has been upgraded and migrated to our new official <b>Main Bot</b>!\n\n"+
-			"✨ <b>What's New in Main Bot:</b>\n"+
-			"• 🌐 Multi-Language selection (Malayalam, Tamil, English, Hindi, Telugu, Kannada, Multi)\n"+
-			"• 🎞 Quality filters (480p, 720p, 1080p, 4K)\n"+
-			"• ⚡ Ultra-fast direct download links\n"+
-			"• 📦 Auto-deleting links for storage safety\n\n"+
+		"👋 <b>Hey there!</b>\n\n" +
+			"⚠️ <b>We Have Moved!</b>\n" +
+			"This bot has been upgraded and migrated to our new official <b>Main Bot</b>!\n\n" +
+			"✨ <b>What's New in Main Bot:</b>\n" +
+			"• 🌐 Multi-Language selection (Malayalam, Tamil, English, Hindi, Telugu, Kannada, Multi)\n" +
+			"• 🎞 Quality filters (480p, 720p, 1080p, 4K)\n" +
+			"• ⚡ Ultra-fast direct download links\n" +
+			"• 📦 Auto-deleting links for storage safety\n\n" +
 			"👉 <i>Click below to switch to our Main Bot now:</i>",
 	)
 
@@ -235,8 +235,8 @@ func (s *Service) handleMessage(m *telegram.NewMessage) {
 			mainBotLink = "https://t.me"
 		}
 		text := fmt.Sprintf(
-			"⚠️ <b>This bot has moved!</b>\n\n"+
-				"All commands, file searches, and downloads are now handled exclusively on our Main Bot.\n\n"+
+			"⚠️ <b>This bot has moved!</b>\n\n" +
+				"All commands, file searches, and downloads are now handled exclusively on our Main Bot.\n\n" +
 				"👉 <i>Click below to open our Main Bot:</i>",
 		)
 		replyMarkup := telegram.NewKeyboard().

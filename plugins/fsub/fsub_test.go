@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	fsubCore "github.com/itsafxal/MYTGBOTZ/internal/fsub"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	fsubCore "github.com/itsafxal/AutoFilter-Go/internal/fsub"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestFSubPluginRegistration(t *testing.T) {
@@ -36,22 +36,22 @@ func TestFSubPluginRegistration(t *testing.T) {
 	}
 
 	expectedTriggers := map[string]bool{
-		"sub1":        true,
-		"sub2":        true,
-		"sub3":        true,
-		"2sub1":       true,
-		"2sub2":       true,
-		"2sub3":       true,
-		"setcount1":   true,
-		"setcount2":   true,
-		"setcount3":   true,
-		"view_sub":    true,
-		"delsub1":     true,
-		"delsub2":     true,
-		"delsub3":     true,
-		"2delsub1":    true,
-		"2delsub2":    true,
-		"2delsub3":    true,
+		"sub1":      true,
+		"sub2":      true,
+		"sub3":      true,
+		"2sub1":     true,
+		"2sub2":     true,
+		"2sub3":     true,
+		"setcount1": true,
+		"setcount2": true,
+		"setcount3": true,
+		"view_sub":  true,
+		"delsub1":   true,
+		"delsub2":   true,
+		"delsub3":   true,
+		"2delsub1":  true,
+		"2delsub2":  true,
+		"2delsub3":  true,
 	}
 
 	for _, cmd := range cmds {

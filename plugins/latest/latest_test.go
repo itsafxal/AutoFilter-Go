@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
-	"github.com/itsafxal/MYTGBOTZ/internal/search"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/search"
 )
 
 type mockSearchService struct {
-	latestFiles []search.MediaFile
+	latestFiles   []search.MediaFile
 	searchResults *search.SearchResult
 }
 

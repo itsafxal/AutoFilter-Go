@@ -207,14 +207,14 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 
 	// 1. Save new filter
 	f1 := &GFilter{
-		ID:          "filter_1",
-		Keyword:     "Vikram",
-		ReplyText:   "Vikram 1080p",
-		MediaType:   MediaTypeVideo,
-		FileID:      "BAACAgUAAxkBAAICaW...",
-		Buttons:     []ButtonRow{{{Text: "Watch", URL: "https://example.com"}}},
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
+		ID:        "filter_1",
+		Keyword:   "Vikram",
+		ReplyText: "Vikram 1080p",
+		MediaType: MediaTypeVideo,
+		FileID:    "BAACAgUAAxkBAAICaW...",
+		Buttons:   []ButtonRow{{{Text: "Watch", URL: "https://example.com"}}},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	}
 
 	if err := repo.Save(ctx, f1); err != nil {
@@ -241,13 +241,13 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 
 	// 4. Update (Idempotent upsert by keyword_norm)
 	f1Updated := &GFilter{
-		ID:          "filter_1",
-		Keyword:     "VIKRAM",
-		ReplyText:   "Vikram 4K Remastered",
-		MediaType:   MediaTypeVideo,
-		FileID:      "BAACAgUAAxkBAAICaW...",
-		CreatedAt:   f1.CreatedAt,
-		UpdatedAt:   time.Now().UTC(),
+		ID:        "filter_1",
+		Keyword:   "VIKRAM",
+		ReplyText: "Vikram 4K Remastered",
+		MediaType: MediaTypeVideo,
+		FileID:    "BAACAgUAAxkBAAICaW...",
+		CreatedAt: f1.CreatedAt,
+		UpdatedAt: time.Now().UTC(),
 	}
 	if err := repo.Save(ctx, f1Updated); err != nil {
 		t.Fatalf("Failed to update filter: %v", err)

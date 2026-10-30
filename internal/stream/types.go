@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
 )
 
 // MediaProvider defines the interface to resolve media records by unique identifier.

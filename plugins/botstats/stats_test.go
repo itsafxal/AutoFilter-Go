@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 func TestStatsPlugin_Metadata(t *testing.T) {

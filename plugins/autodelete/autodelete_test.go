@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	coreAutoDel "github.com/itsafxal/MYTGBOTZ/internal/autodelete"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	coreAutoDel "github.com/itsafxal/AutoFilter-Go/internal/autodelete"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 type mockAutoDeleteService struct {

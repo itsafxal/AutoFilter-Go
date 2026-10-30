@@ -38,11 +38,13 @@ RUN addgroup -g 10001 -S botgroup && \
 
 WORKDIR /app
 
-# Copy exclusively the compiled standalone binary from builder
+# Copy exclusively the compiled standalone binary from builder and runtime assets
 COPY --from=builder --chown=botuser:botgroup /build/bot /app/bot
+COPY --chown=botuser:botgroup assets/ /app/assets/
 
 # Ensure executable permissions and directory ownership
 RUN chmod 0755 /app/bot && \
+    mkdir -p /app/data && \
     chown -R botuser:botgroup /app
 
 # Switch to non-root user (UID 10001)

@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/commands"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/commands"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
 )
 
 var (
@@ -583,4 +583,3 @@ func prepareUnboundedMedia(media any) any {
 		return media
 	}
 }
-

@@ -11,9 +11,9 @@ import (
 
 	"github.com/amarnathcjd/gogram/telegram"
 	"github.com/dustin/go-humanize"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	dbsql "github.com/itsafxal/MYTGBOTZ/internal/database/sql"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	dbsql "github.com/itsafxal/AutoFilter-Go/internal/database/sql"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // OldBotService defines the contract for managing old bots running concurrently for user migration.

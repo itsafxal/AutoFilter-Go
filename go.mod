@@ -1,4 +1,4 @@
-module github.com/itsafxal/MYTGBOTZ
+module github.com/itsafxal/AutoFilter-Go
 
 go 1.25.0
 

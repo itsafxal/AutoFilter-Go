@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/database/mongodb"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/mongodb"
 )
 
 func newTestLogger() *slog.Logger {

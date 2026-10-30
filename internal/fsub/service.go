@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 )
 
 // Service coordinates Force Subscribe configuration, caching, join request events,
@@ -24,14 +24,14 @@ type Service struct {
 
 	botID int64
 
-	mu       sync.RWMutex
-	loadout  Loadout
-	link1    string
-	link2    string
-	link3    string
-	link1_2  string
-	link2_2  string
-	link3_2  string
+	mu      sync.RWMutex
+	loadout Loadout
+	link1   string
+	link2   string
+	link3   string
+	link1_2 string
+	link2_2 string
+	link3_2 string
 }
 
 // NewService creates a new FSub Service instance.
@@ -949,4 +949,3 @@ func (s *Service) UpdateChannelDescription(client *telegram.Client, chatID int64
 	s.logger.Info("successfully updated channel description", "chat_id", chatID, "description", description)
 	return nil
 }
-

@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	deliveryCore "github.com/itsafxal/MYTGBOTZ/internal/delivery"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	deliveryCore "github.com/itsafxal/AutoFilter-Go/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 // Plugin implements the media delivery commands and callback query handlers.

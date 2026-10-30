@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/AutoFilter-Go/internal/delivery"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 

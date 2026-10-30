@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
 )
 
 // NewLogger creates a new structured logger writing to the specified writer.

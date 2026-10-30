@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	coreGFilter "github.com/itsafxal/MYTGBOTZ/internal/gfilter"
-	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	coreGFilter "github.com/itsafxal/AutoFilter-Go/internal/gfilter"
+	"github.com/itsafxal/AutoFilter-Go/internal/plugins"
 )
 
 type mockGFilterService struct {

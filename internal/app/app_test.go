@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/logging"
-	"github.com/itsafxal/MYTGBOTZ/plugins/cmds"
-	"github.com/itsafxal/MYTGBOTZ/plugins/id"
-	"github.com/itsafxal/MYTGBOTZ/plugins/info"
-	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
-	"github.com/itsafxal/MYTGBOTZ/plugins/start"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/logging"
+	"github.com/itsafxal/AutoFilter-Go/plugins/cmds"
+	"github.com/itsafxal/AutoFilter-Go/plugins/id"
+	"github.com/itsafxal/AutoFilter-Go/plugins/info"
+	"github.com/itsafxal/AutoFilter-Go/plugins/ping"
+	"github.com/itsafxal/AutoFilter-Go/plugins/start"
 )
 
 func TestApp_Lifecycle(t *testing.T) {
@@ -62,7 +62,6 @@ func TestApp_Lifecycle(t *testing.T) {
 			t.Errorf("expected help text to contain %s, got:\n%s", expected, help)
 		}
 	}
-
 
 	if application.AppContext.AutoDelete == nil {
 		t.Error("expected AutoDeleteService in AppContext to be non-nil")

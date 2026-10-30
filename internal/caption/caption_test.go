@@ -9,7 +9,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-
 func TestFormat_Placeholders(t *testing.T) {
 	tmpl := "{filename}\n\nFile Size : {file size}"
 	got := Format(tmpl, "Avatar.2009.mkv", "2.10 GB", "Original Caption")

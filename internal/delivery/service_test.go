@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/amarnathcjd/gogram/telegram"
-	"github.com/itsafxal/MYTGBOTZ/internal/config"
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
-	"github.com/itsafxal/MYTGBOTZ/internal/database/sql"
+	"github.com/itsafxal/AutoFilter-Go/internal/config"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
+	"github.com/itsafxal/AutoFilter-Go/internal/database/sql"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -711,6 +711,3 @@ func TestDelivery_FastDownloadButton(t *testing.T) {
 		t.Errorf("expected no custom emoji icon when disabled, got %v", dlBtnDisabled.Style.Icon)
 	}
 }
-
-
-

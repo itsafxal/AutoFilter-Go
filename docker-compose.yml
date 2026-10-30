@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: mytgbotz:latest
-    container_name: mytgbotz_app
+    image: autofilter-go:latest
+    container_name: autofilter_go_app
     restart: unless-stopped
     env_file:
       - .env
@@ -30,8 +30,14 @@ services:
     cpus: 1.5
     ports:
       - "8080:8080"
+    volumes:
+      - autofilter_data:/app/data
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  autofilter_data:
+    driver: local

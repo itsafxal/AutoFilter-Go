@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/itsafxal/MYTGBOTZ/internal/database"
-	appsql "github.com/itsafxal/MYTGBOTZ/internal/database/sql"
+	"github.com/itsafxal/AutoFilter-Go/internal/database"
+	appsql "github.com/itsafxal/AutoFilter-Go/internal/database/sql"
 )
 
 // SearchService defines the contract for movie search and suggestion queries.
@@ -21,7 +21,6 @@ type SearchService interface {
 	GetSuggestions(ctx context.Context, query string, limit int) ([]string, error)
 	GetLatest(ctx context.Context, limit int) ([]MediaFile, error)
 }
-
 
 // Service implements the SearchService against the high-speed SQLite runtime cache.
 type Service struct {
@@ -741,5 +740,3 @@ func buildQualityCondition(colPrefix, qual string) (string, []any) {
 
 	return "(" + strings.Join(clauses, " OR ") + ")", args
 }
-
-

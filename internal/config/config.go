@@ -192,7 +192,6 @@ type Config struct {
 	StartPic string
 }
 
-
 // LoadFromEnv loads and validates configuration from the current environment variables.
 func LoadFromEnv() (*Config, error) {
 	token := strings.TrimSpace(os.Getenv("BOT_TOKEN"))
@@ -590,66 +589,65 @@ func LoadFromEnv() (*Config, error) {
 	}
 
 	cfg := &Config{
-		BotToken:                 token,
-		OldBotTokens:             oldBotTokens,
-		AppID:                    apiID,
-		AppHash:                  apiHash,
-		SessionPath:              sessionPath,
-		MemorySession:            memorySession,
-		OwnerID:                  ownerID,
-		Admins:                   admins,
-		LogLevel:                 logLevel,
-		DatabaseURI:              dbURI,
-		DatabaseName:             dbName,
-		CollectionName:           colName,
-		DatabaseURI2:             dbURI2,
-		DatabaseURI3:             dbURI3,
-		SQLiteDBPath:             sqlitePath,
-		SyncBatchSize:            batchSize,
-		BackgroundSync:           backgroundSync,
-		EnableSync:               enableSync,
-		CustomCaption:            customCaption,
-		FSubChannelDescription:   fsubDesc,
+		BotToken:                   token,
+		OldBotTokens:               oldBotTokens,
+		AppID:                      apiID,
+		AppHash:                    apiHash,
+		SessionPath:                sessionPath,
+		MemorySession:              memorySession,
+		OwnerID:                    ownerID,
+		Admins:                     admins,
+		LogLevel:                   logLevel,
+		DatabaseURI:                dbURI,
+		DatabaseName:               dbName,
+		CollectionName:             colName,
+		DatabaseURI2:               dbURI2,
+		DatabaseURI3:               dbURI3,
+		SQLiteDBPath:               sqlitePath,
+		SyncBatchSize:              batchSize,
+		BackgroundSync:             backgroundSync,
+		EnableSync:                 enableSync,
+		CustomCaption:              customCaption,
+		FSubChannelDescription:     fsubDesc,
 		AutoDeleteFilterTime:       filterDelTime,
 		AutoDeleteFileTime:         fileDelTime,
 		AutoDeleteFastDownloadTime: fastDLTime,
 		FastDownloadLinkExpiry:     fastDLExpiry,
 		FastDownloadButtonStyle:    fastDLBtnStyle,
-		AutoDeleteWeeklyTrash:    weeklyTrash,
-		TrashRetentionDays:       trashRetentionDays,
-		StreamServerEnabled:      streamServerEnabled,
-		StreamURL:                streamURL,
-		StreamPort:               streamPort,
-		StreamBindAddr:           streamBindAddr,
-		EnableFastDownloadButton: enableFastDownloadBtn,
-		MaintenanceMode:          maintenanceMode,
-		EnablePremiumEmoji:       enablePremiumEmoji,
-		PrevButtonEmojiID:        prevEmojiID,
-		NextButtonEmojiID:        nextEmojiID,
-		PageButtonEmojiID:        pageButtonEmojiID,
-		QualityButtonEmojiID:     qualityButtonEmojiID,
-		LanguageButtonEmojiID:    languageButtonEmojiID,
-		MultiLangButtonEmojiID:   multiLangButtonEmojiID,
-		SelectLanguageEmojiID:    selectLanguageEmojiID,
-		SelectQualityEmojiID:     selectQualityEmojiID,
-		FastDownloadButtonEmojiID: fastDownloadButtonEmojiID,
-		GreetingPrefixEmojiID:    greetingPrefixEmojiID,
-		GreetingEmojiID:          greetingEmojiID,
-		QueryEmojiID:             queryEmojiID,
-		PageTextEmojiID:          pageTextEmojiID,
-		NotePrefixEmojiID:        notePrefixEmojiID,
-		NoteSuffixEmojiID:        noteSuffixEmojiID,
-		NoteExpireEmojiID:        noteExpireEmojiID,
-		BotNameEmojiID:           botNameEmojiID,
-		FileSizePrefixEmojiID:    fileSizePrefixEmojiID,
-		FileSizeSuffixEmojiID:    fileSizeSuffixEmojiID,
-		StartPic:                 startPic,
-		Channels:                 parseChannelIDs(os.Getenv("CHANNELS")),
+		AutoDeleteWeeklyTrash:      weeklyTrash,
+		TrashRetentionDays:         trashRetentionDays,
+		StreamServerEnabled:        streamServerEnabled,
+		StreamURL:                  streamURL,
+		StreamPort:                 streamPort,
+		StreamBindAddr:             streamBindAddr,
+		EnableFastDownloadButton:   enableFastDownloadBtn,
+		MaintenanceMode:            maintenanceMode,
+		EnablePremiumEmoji:         enablePremiumEmoji,
+		PrevButtonEmojiID:          prevEmojiID,
+		NextButtonEmojiID:          nextEmojiID,
+		PageButtonEmojiID:          pageButtonEmojiID,
+		QualityButtonEmojiID:       qualityButtonEmojiID,
+		LanguageButtonEmojiID:      languageButtonEmojiID,
+		MultiLangButtonEmojiID:     multiLangButtonEmojiID,
+		SelectLanguageEmojiID:      selectLanguageEmojiID,
+		SelectQualityEmojiID:       selectQualityEmojiID,
+		FastDownloadButtonEmojiID:  fastDownloadButtonEmojiID,
+		GreetingPrefixEmojiID:      greetingPrefixEmojiID,
+		GreetingEmojiID:            greetingEmojiID,
+		QueryEmojiID:               queryEmojiID,
+		PageTextEmojiID:            pageTextEmojiID,
+		NotePrefixEmojiID:          notePrefixEmojiID,
+		NoteSuffixEmojiID:          noteSuffixEmojiID,
+		NoteExpireEmojiID:          noteExpireEmojiID,
+		BotNameEmojiID:             botNameEmojiID,
+		FileSizePrefixEmojiID:      fileSizePrefixEmojiID,
+		FileSizeSuffixEmojiID:      fileSizeSuffixEmojiID,
+		StartPic:                   startPic,
+		Channels:                   parseChannelIDs(os.Getenv("CHANNELS")),
 	}
 
 	return cfg, nil
 }
-
 
 // parseAdminIDs parses space- or comma-separated user IDs, ensuring ownerID is included and deduplicated.
 func parseAdminIDs(raw string, ownerID int64) ([]int64, error) {
@@ -717,12 +715,12 @@ func NormalizeChannelID(rawID int64) int64 {
 		return rawID
 	}
 	if strings.HasPrefix(s, "100") {
-		if id, err := strconv.ParseInt("-" + s, 10, 64); err == nil {
+		if id, err := strconv.ParseInt("-"+s, 10, 64); err == nil {
 			return id
 		}
 	}
 	s = strings.TrimPrefix(s, "-")
-	if id, err := strconv.ParseInt("-100" + s, 10, 64); err == nil {
+	if id, err := strconv.ParseInt("-100"+s, 10, 64); err == nil {
 		return id
 	}
 	return rawID
@@ -834,4 +832,3 @@ func (c *Config) String() string {
 	return fmt.Sprintf("Config{BotToken:%s, AppID:%d, AppHash:%s, SessionPath:%s, MemorySession:%t, OwnerID:%d, Admins:%v, LogLevel:%s, DB:%s, Col:%s, URI:%s, SQLite:%s, BgSync:%t, Caption:%s, FSubDesc:%s, FilterDel:%s, FileDel:%s, WeeklyTrash:%t, TrashRetention:%dd, StreamServer:%t, StreamURL:%s, StreamPort:%d, FastDownloadBtn:%t}",
 		c.MaskedToken(), c.AppID, c.MaskedAppHash(), c.SessionPath, c.MemorySession, c.OwnerID, c.Admins, c.LogLevel, c.DatabaseName, c.CollectionName, MaskURI(c.DatabaseURI), c.SQLiteDBPath, c.BackgroundSync, c.CustomCaption, c.FSubChannelDescription, c.AutoDeleteFilterTime, c.AutoDeleteFileTime, c.AutoDeleteWeeklyTrash, c.TrashRetentionDays, c.StreamServerEnabled, c.StreamURL, c.StreamPort, c.EnableFastDownloadButton)
 }
-
