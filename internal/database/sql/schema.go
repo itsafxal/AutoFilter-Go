@@ -83,6 +83,21 @@ func (m *DBManager) initSchema(ctx context.Context) error {
 			value TEXT NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		);`,
+
+		// 7. Global Filters table for instant case-insensitive exact matching
+		`CREATE TABLE IF NOT EXISTS global_filters (
+			id TEXT PRIMARY KEY,
+			keyword TEXT NOT NULL,
+			keyword_norm TEXT NOT NULL UNIQUE,
+			reply_text TEXT,
+			media_type TEXT NOT NULL,
+			file_id TEXT,
+			file_ref TEXT,
+			buttons_json TEXT,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS gfilter_keyword_norm_idx ON global_filters (keyword_norm);`,
 	}
 
 	for _, query := range queries {

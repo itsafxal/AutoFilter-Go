@@ -11,9 +11,21 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/config"
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
+	"github.com/itsafxal/MYTGBOTZ/internal/gfilter"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
 	"github.com/itsafxal/MYTGBOTZ/internal/stream"
 )
+
+// GFilterService defines the Global Filter operations available across plugins.
+type GFilterService interface {
+	MatchAndExecute(m *telegram.NewMessage) (bool, error)
+	SaveFilter(ctx context.Context, f *gfilter.GFilter) error
+	DeleteFilter(ctx context.Context, keyword string) (bool, error)
+	DeleteAllFilters(ctx context.Context) (int64, error)
+	GetFilter(ctx context.Context, keyword string) (*gfilter.GFilter, error)
+	ListFilters(ctx context.Context, limit, offset int) ([]*gfilter.GFilter, int64, error)
+	Count(ctx context.Context) (int64, error)
+}
 
 // FSubService defines the force subscribe operations required across plugins.
 type FSubService interface {
@@ -39,6 +51,7 @@ type AppContext struct {
 	Caption    caption.CaptionService
 	AutoDelete autodelete.AutoDeleteService
 	Stream     stream.StreamService
+	GFilter    GFilterService
 }
 
 

@@ -14,6 +14,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/internal/database"
 	"github.com/itsafxal/MYTGBOTZ/internal/delivery"
 	"github.com/itsafxal/MYTGBOTZ/internal/fsub"
+	"github.com/itsafxal/MYTGBOTZ/internal/gfilter"
 	"github.com/itsafxal/MYTGBOTZ/internal/oldbot"
 	"github.com/itsafxal/MYTGBOTZ/internal/plugins"
 	"github.com/itsafxal/MYTGBOTZ/internal/search"
@@ -36,6 +37,7 @@ type App struct {
 	CaptionService    caption.CaptionService
 	AutoDeleteService autodelete.AutoDeleteService
 	StreamService     stream.StreamService
+	GFilterService    *gfilter.Service
 	StartTime         time.Time
 }
 
@@ -77,6 +79,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Enabled:     cfg.StreamServerEnabled,
 	}
 	streamService := stream.NewServer(streamConfig, deliveryService, nil, logger)
+	gfilterService := gfilter.NewService(dbManager.MongoPrimaryDB, sqlProv, logger)
 
 	appCtx := &plugins.AppContext{
 		Config:     cfg,
@@ -89,6 +92,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		Caption:    captionService,
 		AutoDelete: autoDeleteService,
 		Stream:     streamService,
+		GFilter:    gfilterService,
 	}
 
 	reg := plugins.NewRegistry(appCtx)
@@ -116,6 +120,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*App, error) {
 		CaptionService:    captionService,
 		AutoDeleteService: autoDeleteService,
 		StreamService:     streamService,
+		GFilterService:    gfilterService,
 		StartTime:         startTime,
 	}, nil
 }
@@ -150,6 +155,11 @@ func (a *App) InitDatabase(ctx context.Context) error {
 	if a.CaptionService != nil {
 		if err := a.CaptionService.Init(ctx); err != nil {
 			a.Logger.Warn("failed initializing caption service from database", "error", err)
+		}
+	}
+	if a.GFilterService != nil {
+		if err := a.GFilterService.Init(ctx); err != nil {
+			a.Logger.Warn("failed initializing global filter service from database", "error", err)
 		}
 	}
 	a.Logger.Info("database layer initialized and ready")

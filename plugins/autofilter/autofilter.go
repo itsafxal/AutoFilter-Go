@@ -133,6 +133,21 @@ func (p *Plugin) HandleTextMessage(m *telegram.NewMessage) error {
 	if m == nil || m.IsChannel() || m.IsChannelPost() {
 		return nil
 	}
+
+	// 1. GLOBAL FILTER PRIORITY: Check Global Filter BEFORE Auto Filter
+	if p.appCtx != nil && p.appCtx.GFilter != nil {
+		handled, err := p.appCtx.GFilter.MatchAndExecute(m)
+		if err != nil && p.appCtx.Logger != nil {
+			p.appCtx.Logger.Error("global filter processing error", "error", err)
+		}
+		if handled {
+			// Global filter matched and responded! Stop further filter processing.
+			// Do NOT execute Auto Filter.
+			return nil
+		}
+	}
+
+	// 2. Not matched by Global Filter: continue to Auto Filter search
 	return p.ExecuteSearch(m, m.Text())
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/itsafxal/MYTGBOTZ/plugins/ping"
 	"github.com/itsafxal/MYTGBOTZ/plugins/start"
 	"github.com/itsafxal/MYTGBOTZ/plugins/channel"
+	"github.com/itsafxal/MYTGBOTZ/plugins/gfilter"
 	"github.com/itsafxal/MYTGBOTZ/plugins/index"
 	"github.com/itsafxal/MYTGBOTZ/plugins/botstats"
 	streamPlugin "github.com/itsafxal/MYTGBOTZ/plugins/stream"
@@ -120,6 +121,7 @@ func run() error {
 		channel.New(application.AppContext),
 		index.New(application.AppContext),
 		botstats.New(application.AppContext),
+		gfilter.New(application.AppContext),
 	)
 	if err != nil {
 		return fmt.Errorf("plugin registration failure: %w", err)
