@@ -32,7 +32,7 @@ flowchart TD
         end
 
         subgraph StorageLayer ["Dual-Database Storage Layer"]
-            SQLiteCache[("SQLite WAL Cache (modernc.org/sqlite)<br/>Sub-millisecond Search & Deduplication")]
+            SQLiteCache[("SQLite WAL Cache modernc.org/sqlite<br/>Sub-millisecond Search and Deduplication")]
             Syncer["Idempotent Startup / Background Syncer"]
         end
     end
@@ -69,7 +69,7 @@ flowchart TD
     Syncer <-->|Fetch Records| MongoDB2
     Syncer <-->|Fetch Records| MongoDB3
 
-    StreamServer <-->|Stream / Direct Download (RFC 7233)| TGUser
+    StreamServer <-->|Stream or Direct Download RFC 7233| TGUser
     StreamServer <-->|Download Byte Chunks| GogramClient
 ```
 
@@ -95,19 +95,21 @@ AutoFilter-Go implements a hybrid, multi-database architecture designed to handl
 flowchart LR
     subgraph Authoritative ["Authoritative Persistent Storage (MongoDB)"]
         direction TB
-        P["Primary Cluster (DATABASE_URI)<br/>• users<br/>• groups<br/>• admins (FSub Loadouts)<br/>• reqone, reqtwo, reqthree<br/>• captions"]
-        S2["Media Cluster DB2 (DATABASE_URI2)<br/>• Telegram-Document (Shard A)"]
-        S3["Media Cluster DB3 (DATABASE_URI3)<br/>• Telegram-Document (Shard B)"]
+        P["Primary Cluster DATABASE_URI<br/>- Users and Groups<br/>- FSub Loadouts and Admins<br/>- Join Requests and Captions"]
+        S2["Media Cluster DB2<br/>Telegram-Document Shard A"]
+        S3["Media Cluster DB3<br/>Telegram-Document Shard B"]
     end
 
     subgraph Runtime ["High-Speed Runtime Engine"]
         direction TB
-        SQL[("SQLite Runtime (media.sqlite3)<br/>• Pure Go (CGO-free)<br/>• WAL Mode<br/>• Memory Cache -64000<br/>• Full-Text & Normalization Indexes")]
+        SQL[("SQLite Runtime media.sqlite3<br/>- Pure Go CGO-free<br/>- WAL Mode<br/>- Memory Cache 64MB")]
     end
 
-    S2 & S3 -->|Startup / Background Sync| SQL
-    SQL -->|< 0.1ms Pre-Write Dedup Check| SQL
-    SQL -->|Write Alternating Shards| S2 & S3
+    S2 -->|Startup Sync| SQL
+    S3 -->|Startup Sync| SQL
+    SQL -->|Sub-0.1ms Dedup Check| SQL
+    SQL -->|Write Alternating Shard A| S2
+    SQL -->|Write Alternating Shard B| S3
 ```
 
 ### 1. Primary MongoDB Cluster (`DATABASE_URI`)
@@ -158,7 +160,7 @@ sequenceDiagram
         Listener->>Mongo: SaveMediaLiveAlternating(doc) -> Round-robin Shard
         Mongo-->>Listener: Saved to DB2 or DB3
         Listener->>SQLite: Insert into local SQLite table
-        SQLite-->>Listener: Indexed (<1ms)
+        SQLite-->>Listener: Indexed in sub-millisecond
     end
 ```
 
@@ -189,22 +191,22 @@ When a user requests a file via `/getfile`, an inline result button, or a deep-l
 
 ```mermaid
 flowchart TD
-    Req["User Requests File (file_id or filep_id)"] --> Dedup["In-Flight Request Deduplication<br/>(Prevents double-click races)"]
-    Dedup --> BanCheck["Authoritative Ban Check<br/>(MongoDB users collection)"]
+    Req["User Requests File (file_id or filep_id)"] --> Dedup["In-Flight Request Deduplication<br/>Prevents double-click races"]
+    Dedup --> BanCheck["Authoritative Ban Check<br/>MongoDB users collection"]
     BanCheck -->|User is banned| Reject["Reject Request"]
-    BanCheck -->|User allowed| FSubCheck["3-Tier Force-Subscribe Check<br/>(Primary & Secondary Channels)"]
+    BanCheck -->|User allowed| FSubCheck["3-Tier Force-Subscribe Check<br/>Primary and Secondary Channels"]
     FSubCheck -->|Not Joined| Prompt["Prompt User with Join Links"]
     FSubCheck -->|Verified| Resolver["Two-Tier Media Resolver"]
 
     Resolver -->|1. Check SQLite Index| SQL["SQLite Media Table"]
     SQL -->|Hit| Dispatcher["Gogram MTProto Sender"]
-    SQL -->|Miss / Cold Cache| Fallback["2. MongoDB Shards (DB2/DB3)"]
+    SQL -->|Miss or Cold Cache| Fallback["2. MongoDB Shards DB2 and DB3"]
     Fallback -->|Found| Dispatcher
 
     Dispatcher -->|ResolveBotFileID| MTProto["MTProto Dispatcher"]
     MTProto -->|SendMedia with NoForwards if filep_| User["Delivered to User's Chat"]
 
-    User --> AutoDel["Schedule Auto-Delete Timer<br/>(AUTO_DELETE_FILE_TIME)"]
+    User --> AutoDel["Schedule Auto-Delete Timer<br/>AUTO_DELETE_FILE_TIME"]
 ```
 
 ---

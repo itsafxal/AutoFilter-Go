@@ -97,15 +97,15 @@ flowchart TD
     end
 
     subgraph DatabaseLayer ["4. Dual-Database Topology"]
-        SQLite[("Pure-Go SQLite Cache<br/>WAL Mode • PRAGMA cache_size=-64000<br/>Sub-millisecond Search & Pre-Write Dedup")]
+        SQLite[("Pure-Go SQLite Cache<br/>WAL Mode - Cache 64MB<br/>Sub-millisecond Search")]
         MongoPrimary[("Primary MongoDB<br/>Users, Groups, FSub, Captions")]
-        MongoDB2[("Secondary MongoDB (DB2)<br/>Media Shard A")]
-        MongoDB3[("Tertiary MongoDB (DB3)<br/>Media Shard B")]
+        MongoDB2[("Secondary MongoDB DB2<br/>Media Shard A")]
+        MongoDB3[("Tertiary MongoDB DB3<br/>Media Shard B")]
     end
 
     Gogram <--> Registry
     OldBots -->|Deep-Link Funneling| Gogram
-    StreamServer <-->|Byte-Range Streams (RFC 7233)| Gogram
+    StreamServer <-->|Byte-Range Streams RFC 7233| Gogram
 
     Registry --> SearchSvc
     Registry --> DeliverySvc
@@ -113,11 +113,13 @@ flowchart TD
     Registry --> AutoDelSvc
 
     SearchSvc <-->|Indexed Search| SQLite
-    SearchSvc -.->|Direct Fallback| MongoDB2 & MongoDB3
+    SearchSvc -.->|Direct Fallback| MongoDB2
+    SearchSvc -.->|Direct Fallback| MongoDB3
 
     DeliverySvc --> InFlight
     InFlight -->|1. Check Cache| SQLite
-    InFlight -->|2. Fallback Fetch| MongoDB2 & MongoDB3
+    InFlight -->|2. Fallback Fetch| MongoDB2
+    InFlight -->|2. Fallback Fetch| MongoDB3
 
     FSubSvc <--> MongoPrimary
     AutoDelSvc <--> SQLite
