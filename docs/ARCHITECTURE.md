@@ -43,7 +43,7 @@ flowchart TD
         MongoDB3[("Tertiary MongoDB (DB3)<br/>Media Shard B")]
     end
 
-    TGUser -->|MTProto Updates & Callbacks| GogramClient
+    TGUser -->|MTProto Updates and Callbacks| GogramClient
     GogramClient -->|Responses & Media| TGUser
     TGChannel -->|Live Media Posts| GogramClient
     TGOld -->|User Funneling Deep-Links| OldBotService
