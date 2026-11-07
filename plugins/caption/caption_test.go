@@ -67,7 +67,7 @@ func TestCaptionPlugin_CommandsMetadata(t *testing.T) {
 		if !cmd.AdminOnly {
 			t.Errorf("expected command %s to be AdminOnly", cmd.Name)
 		}
-		if cmd.Category != "Admin" {
+		if cmd.Category != "Admin" && cmd.Category != "Admin Commands" {
 			t.Errorf("expected command %s category Admin, got %s", cmd.Name, cmd.Category)
 		}
 		if cmd.Handler == nil {

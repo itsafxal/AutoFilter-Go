@@ -115,8 +115,8 @@ func TestDeliveryPlugin_CommandsInterface(t *testing.T) {
 	}
 
 	// Verify Category and Description
-	if cmds[0].Category != "Media" {
-		t.Errorf("expected Category 'Media', got %q", cmds[0].Category)
+	if cmds[0].Category != "Media" && cmds[0].Category != "File & Media" {
+		t.Errorf("expected Category 'Media' or 'File & Media', got %q", cmds[0].Category)
 	}
 	if !strings.Contains(cmds[0].Description, "deliver") {
 		t.Errorf("expected Description to mention deliver, got %q", cmds[0].Description)

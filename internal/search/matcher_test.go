@@ -311,6 +311,154 @@ func TestMatchMovie_StrictResults(t *testing.T) {
 			filename:  "The Early Spring S01E12 480p NF WEB DL Chinese AAC -@MNTG",
 			wantMatch: true,
 		},
+		// Formatting variations for Jailer 2
+		{
+			name:      "Jailer2 matches Jailer 2 with tags",
+			query:     "Jailer2",
+			filename:  "Jailer 2 2026 Tamil HQ HDRip 1080p x264.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "Jailer2 matches plain Jailer 2",
+			query:     "Jailer2",
+			filename:  "Jailer 2.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "Jailer 2 matches Jailer2",
+			query:     "Jailer 2",
+			filename:  "Jailer2.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "Jailer-2 matches Jailer 2",
+			query:     "Jailer-2",
+			filename:  "Jailer 2.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "Jailer_2 matches Jailer 2",
+			query:     "Jailer_2",
+			filename:  "Jailer 2.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "JAILER2 matches Jailer 2",
+			query:     "JAILER2",
+			filename:  "Jailer 2.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "jailer2 matches Jailer 2",
+			query:     "jailer2",
+			filename:  "Jailer 2.mkv",
+			wantMatch: true,
+		},
+		// Strict sequel checks
+		{
+			name:      "Jailer2 MUST REJECT Jailer 3",
+			query:     "Jailer2",
+			filename:  "Jailer 3 2027 Tamil.mkv",
+			wantMatch: false,
+		},
+		{
+			name:      "Jailer 2 MUST REJECT Jailer 3",
+			query:     "Jailer 2",
+			filename:  "Jailer 3 2027 Tamil.mkv",
+			wantMatch: false,
+		},
+		{
+			name:      "Jailer 2 MUST REJECT Jailer 1",
+			query:     "Jailer 2",
+			filename:  "Jailer 1 2023 Tamil.mkv",
+			wantMatch: false,
+		},
+		{
+			name:      "Jailer 2 MUST REJECT plain Jailer (no sequel)",
+			query:     "Jailer 2",
+			filename:  "Jailer.2023.Tamil.1080p.mkv",
+			wantMatch: false,
+		},
+		// Space & symbol variations: I Am Game
+		{
+			name:      "I Am Game matches I.Am.Game.2023",
+			query:     "I Am Game",
+			filename:  "I.Am.Game.2023.1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "IAmGame matches I.Am.Game.2023",
+			query:     "IAmGame",
+			filename:  "I.Am.Game.2023.1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "I.Am.Game matches I Am Game",
+			query:     "I.Am.Game",
+			filename:  "I Am Game 2023 1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "I-Am-Game matches I Am Game",
+			query:     "I-Am-Game",
+			filename:  "I Am Game 2023 1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "I_Am_Game matches I Am Game",
+			query:     "I_Am_Game",
+			filename:  "I Am Game 2023 1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "I  Am  Game (multiple spaces) matches I Am Game",
+			query:     "I  Am  Game",
+			filename:  "I Am Game 2023 1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "I•Am•Game (unicode bullet) matches I Am Game",
+			query:     "I•Am•Game",
+			filename:  "I Am Game 2023 1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "I@Am@Game matches I Am Game",
+			query:     "I@Am@Game",
+			filename:  "I Am Game 2023 1080p.mkv",
+			wantMatch: true,
+		},
+		// KGF sequel variations
+		{
+			name:      "KGF2 matches KGF 2",
+			query:     "KGF2",
+			filename:  "KGF.2.2022.1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "KGF2 matches KGF Chapter 2",
+			query:     "KGF2",
+			filename:  "KGF.Chapter.2.2022.1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "KGF 2 matches KGF Chapter 2",
+			query:     "KGF 2",
+			filename:  "KGF.Chapter.2.2022.1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "KGFChapter2 matches KGF Chapter 2",
+			query:     "KGFChapter2",
+			filename:  "KGF.Chapter.2.2022.1080p.mkv",
+			wantMatch: true,
+		},
+		{
+			name:      "KGF 2 REJECTS KGF 1",
+			query:     "KGF 2",
+			filename:  "KGF.Chapter.1.2018.1080p.mkv",
+			wantMatch: false,
+		},
 	}
 
 	for _, tt := range tests {

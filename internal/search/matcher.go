@@ -12,6 +12,7 @@ type ReleaseMetadata struct {
 	RawFileName     string
 	CleanTitle      string   // Human-readable title: e.g. "Vikram", "Vikram Vedha", "Hargadimaju"
 	NormalizedTitle string   // Lowercase clean title: e.g. "vikram", "vikram vedha"
+	CompactTitle    string   // Compact title without spaces/punctuation: e.g. "jailer2", "iamgame"
 	TitleTokens     []string // Meaningful tokens of the title
 	Year            int      // 4-digit release year (0 if not found)
 	Season          int      // Season number (0 if not found)
@@ -122,6 +123,25 @@ func normalizeSequelToken(tok string) string {
 	default:
 		return tok
 	}
+}
+
+var reSequelFillers = regexp.MustCompile(`(?i)(chapter|part|volume|vol|season)`)
+
+func stripSequelTerms(compact string) string {
+	return reSequelFillers.ReplaceAllString(compact, "")
+}
+
+func extractSequelNumber(tokens []string) string {
+	for _, tok := range tokens {
+		if reYearPattern.MatchString(tok) {
+			continue
+		}
+		norm := normalizeSequelToken(tok)
+		if norm == "1" || norm == "2" || norm == "3" || norm == "4" || norm == "5" || norm == "6" {
+			return norm
+		}
+	}
+	return ""
 }
 
 // ParseRelease parses a raw media filename into structured ReleaseMetadata,
@@ -303,11 +323,17 @@ func ParseRelease(filename string, userQuery string) ReleaseMetadata {
 	}
 
 	// 10. Clean up Title: replace dots and underscores with spaces for CleanTitle
+	// 10. Clean up Title: replace dots and underscores with spaces, split camelCase and numbers
 	cleanTitle := strings.ReplaceAll(titlePart, ".", " ")
 	cleanTitle = strings.ReplaceAll(cleanTitle, "_", " ")
+	cleanTitle = SplitCamelCaseAndNumbers(cleanTitle)
 	cleanTitle = strings.TrimSpace(reWhitespace.ReplaceAllString(cleanTitle, " "))
 	meta.CleanTitle = cleanTitle
 	meta.NormalizedTitle = NormalizeText(cleanTitle)
+	meta.CompactTitle = NormalizeCompact(cleanTitle)
+	if meta.CompactTitle == "" {
+		meta.CompactTitle = NormalizeCompact(filename)
+	}
 
 	// Extract meaningful tokens of title
 	meta.TitleTokens = ExtractMeaningfulTokens(meta.NormalizedTitle)
@@ -324,6 +350,18 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 	normQuery := NormalizeText(userQuery)
 	if normQuery == "" {
 		return false, 0.0
+	}
+
+	splitQuery := SplitCamelCaseAndNumbers(userQuery)
+	normSplitQuery := NormalizeText(splitQuery)
+	qCompact := NormalizeCompact(userQuery)
+
+	relCompact := rel.CompactTitle
+	if relCompact == "" {
+		relCompact = NormalizeCompact(rel.CleanTitle)
+	}
+	if relCompact == "" {
+		relCompact = NormalizeCompact(rel.RawFileName)
 	}
 
 	// 1. Extract query year if user specified one (e.g. "Vikram 2022")
@@ -344,8 +382,21 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 		qEpisode, _ = strconv.Atoi(m[1])
 	}
 
-	// Strip season/ep/year tokens from query string before extracting title tokens
-	cleanQueryText := normQuery
+	// RULE 1: Year Mismatch
+	if qYear > 0 && rel.Year > 0 && qYear != rel.Year {
+		return false, 0.0
+	}
+
+	// RULE 2: Season / Episode Mismatch
+	if qSeason > 0 && rel.Season > 0 && qSeason != rel.Season {
+		return false, 0.0
+	}
+	if qEpisode > 0 && rel.Episode > 0 && qEpisode != rel.Episode {
+		return false, 0.0
+	}
+
+	// Sequel Analysis
+	cleanQueryText := normSplitQuery
 	if qYear > 0 {
 		cleanQueryText = strings.ReplaceAll(cleanQueryText, strconv.Itoa(qYear), " ")
 	}
@@ -360,23 +411,49 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 		cleanQueryText = strings.ReplaceAll(cleanQueryText, "ep "+strconv.Itoa(qEpisode), " ")
 	}
 
-	// Extract meaningful query tokens
+	cleanQueryText = CollapseAcronyms(cleanQueryText)
+
 	qTokens := ExtractMeaningfulTokens(cleanQueryText)
 	if len(qTokens) == 0 {
 		qTokens = strings.Fields(cleanQueryText)
 	}
 
-	// RULE 1: Year Mismatch
-	if qYear > 0 && rel.Year > 0 && qYear != rel.Year {
-		return false, 0.0
+	qSequel := extractSequelNumber(qTokens)
+	relSequel := extractSequelNumber(rel.TitleTokens)
+
+	// STRICT SEQUEL RULE (for movies):
+	// If both query and release specify a sequel number, they must match exactly (e.g. "Jailer 2" cannot match "Jailer 3")
+	if qSeason == 0 && qEpisode == 0 && rel.Season == 0 && rel.Episode == 0 {
+		if qSequel != "" && relSequel != "" && qSequel != relSequel {
+			return false, 0.0
+		}
+		// If query explicitly specifies a sequel number, reject releases that have no sequel
+		if qSequel != "" && relSequel == "" && len(rel.TitleTokens) <= len(qTokens) {
+			return false, 0.0
+		}
 	}
 
-	// RULE 2: Season / Episode Mismatch
-	if qSeason > 0 && rel.Season > 0 && qSeason != rel.Season {
-		return false, 0.0
+	// LAYER 1: Exact Original Title Match
+	if strings.EqualFold(strings.TrimSpace(userQuery), strings.TrimSpace(rel.CleanTitle)) ||
+		strings.EqualFold(strings.TrimSpace(userQuery), strings.TrimSpace(rel.RawFileName)) {
+		return true, 1.0
 	}
-	if qEpisode > 0 && rel.Episode > 0 && qEpisode != rel.Episode {
-		return false, 0.0
+
+	// LAYER 2: Standard Normalized Exact Match
+	if normQuery == rel.NormalizedTitle || normSplitQuery == rel.NormalizedTitle {
+		return true, 1.0
+	}
+
+	// LAYER 3: Compact Normalized Match (e.g. "Jailer2" == "Jailer 2", "IAmGame" == "I Am Game")
+	if qCompact != "" && relCompact != "" && qCompact == relCompact {
+		return true, 0.99
+	}
+
+	// LAYER 3b: Compact Sequel Normalization (e.g. "KGF 2" / "KGF2" == "KGF Chapter 2")
+	if qCompact != "" && relCompact != "" {
+		if stripSequelTerms(qCompact) == stripSequelTerms(relCompact) {
+			return true, 0.98
+		}
 	}
 
 	// RULE 3: TV Show vs Episode Title Check
@@ -386,7 +463,7 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 		showMatched := false
 		for _, qt := range qTokens {
 			for _, tt := range rel.TitleTokens {
-				if qt == tt {
+				if qt == tt || (len(qt) >= 4 && len(tt) >= 4 && LevenshteinDistance(qt, tt) <= 1) {
 					showMatched = true
 					break
 				}
@@ -396,12 +473,11 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 			}
 		}
 		if !showMatched {
-			// Show title was not part of the search query!
 			return false, 0.0
 		}
 	}
 
-	// RULE 4: All Query Tokens Must Match in File's Title Tokens
+	// LAYER 4: Token-Based Matching
 	matchedTitleIndices := make(map[int]struct{})
 	for _, qt := range qTokens {
 		qNormTok := normalizeSequelToken(qt)
@@ -413,14 +489,42 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 				found = true
 				break
 			}
+			// Acronym equivalence (e.g. "k g f" <-> "kgf")
+			if CollapseAcronyms(qNormTok) == CollapseAcronyms(tNormTok) {
+				matchedTitleIndices[i] = struct{}{}
+				found = true
+				break
+			}
+			// Minor spelling mistake tolerance for words >= 4 characters
+			if len(qt) >= 4 && len(tt) >= 4 {
+				maxDist := 1
+				if len(qt) >= 7 && len(tt) >= 7 {
+					maxDist = 2
+				}
+				if LevenshteinDistance(qt, tt) <= maxDist {
+					matchedTitleIndices[i] = struct{}{}
+					found = true
+					break
+				}
+			}
 		}
 		if !found {
-			// Query token not found in title!
+			// Query token not found in title
+			// Fallback check: if token is substring of compact title
+			if len(qt) >= 3 && strings.Contains(relCompact, qt) {
+				continue
+			}
+			// Try controlled fuzzy matching before rejecting completely
+			sim := ComputeSimilarity(userQuery, rel.CleanTitle)
+			if sim >= 0.88 && (qYear == 0 || rel.Year == 0 || qYear == rel.Year) &&
+				(qSequel == "" || relSequel == "" || qSequel == relSequel) {
+				return true, sim * 0.90
+			}
 			return false, 0.0
 		}
 	}
 
-	// RULE 5: Strict Check for Extra Title Tokens (Reject Different Movies)
+	// RULE 5: Strict Check for Extra Substantive Title Tokens (Reject Different Movies)
 	// Example: Query is "Vikram", file is "Vikram Vedha".
 	// The extra word "vedha" is a substantive movie title word, meaning it's a DIFFERENT movie!
 	var extraSubstantiveWords []string
@@ -443,13 +547,12 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 	}
 
 	if len(extraSubstantiveWords) > 0 {
-		// Title has extra words not requested by user (e.g. "Vedha" in "Vikram Vedha")
 		return false, 0.0
 	}
 
 	// Scoring:
 	// Exact match with no extra tokens: 1.0
-	// Sequel/franchise match (e.g. user searched "KGF" and matched "KGF 2"): 0.95
+	// Franchise match (e.g. user searched "KGF" and matched "KGF Chapter 2"): 0.95
 	if len(rel.TitleTokens) == len(matchedTitleIndices) {
 		return true, 1.0
 	}

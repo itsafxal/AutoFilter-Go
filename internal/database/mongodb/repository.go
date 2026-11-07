@@ -627,6 +627,9 @@ func (r *MediaRepository) Search(ctx context.Context, query string, limit int) (
 		return nil, nil
 	}
 
+	var orFilters []bson.M
+
+	// 1. Token AND condition: all words must match in file_name
 	var andConds []bson.M
 	for _, w := range words {
 		cleaned := strings.TrimSpace(w)
@@ -640,16 +643,40 @@ func (r *MediaRepository) Search(ctx context.Context, query string, limit int) (
 			},
 		})
 	}
+	if len(andConds) == 1 {
+		orFilters = append(orFilters, andConds[0])
+	} else if len(andConds) > 1 {
+		orFilters = append(orFilters, bson.M{"$and": andConds})
+	}
 
-	if len(andConds) == 0 {
+	// 2. Flexible sequence regex: word1[-._\s•@]*word2
+	if len(words) > 1 {
+		var quotedWords []string
+		for _, w := range words {
+			if strings.TrimSpace(w) != "" {
+				quotedWords = append(quotedWords, regexp.QuoteMeta(w))
+			}
+		}
+		if len(quotedWords) > 1 {
+			flexPattern := strings.Join(quotedWords, `[-._\s•@]*`)
+			orFilters = append(orFilters, bson.M{
+				"file_name": bson.M{
+					"$regex":   flexPattern,
+					"$options": "i",
+				},
+			})
+		}
+	}
+
+	if len(orFilters) == 0 {
 		return nil, nil
 	}
 
 	var filter bson.M
-	if len(andConds) == 1 {
-		filter = andConds[0]
+	if len(orFilters) == 1 {
+		filter = orFilters[0]
 	} else {
-		filter = bson.M{"$and": andConds}
+		filter = bson.M{"$or": orFilters}
 	}
 
 	opts := options.Find().

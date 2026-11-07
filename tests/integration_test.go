@@ -74,7 +74,7 @@ func TestIntegration_FullPluginRegistryAndHelp(t *testing.T) {
 		"• <code>/ping</code>",
 		"• <code>/info</code>",
 
-		"(aliases: <code>/help</code>)",
+		"<code>/help, /cmd</code>",
 		"(aliases: <code>/about</code>)",
 	}
 

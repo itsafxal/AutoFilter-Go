@@ -110,3 +110,80 @@ func TestExtractQueryTitle(t *testing.T) {
 		t.Errorf("expected normalized text to contain 'monster' and 'lizzie', got %q", norm)
 	}
 }
+
+func TestSplitCamelCaseAndNumbers(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Jailer2", "Jailer 2"},
+		{"IAmGame", "I Am Game"},
+		{"KGFChapter2", "KGF Chapter 2"},
+		{"SpiderMan3", "Spider Man 3"},
+		{"2Fast2Furious", "2 Fast 2 Furious"},
+		{"Avatar2022", "Avatar 2022"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := SplitCamelCaseAndNumbers(tt.input)
+			if got != tt.expected {
+				t.Errorf("SplitCamelCaseAndNumbers(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeCompact(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Jailer2", "jailer2"},
+		{"Jailer 2", "jailer2"},
+		{"Jailer-2", "jailer2"},
+		{"Jailer_2", "jailer2"},
+		{"JAILER2", "jailer2"},
+		{"jailer2", "jailer2"},
+		{"I Am Game", "iamgame"},
+		{"I.Am.Game", "iamgame"},
+		{"I-Am-Game", "iamgame"},
+		{"I_Am_Game", "iamgame"},
+		{"IAmGame", "iamgame"},
+		{"I  Am  Game", "iamgame"},
+		{"I•Am•Game", "iamgame"},
+		{"I@Am@Game", "iamgame"},
+		{"KGF2", "kgf2"},
+		{"KGF 2", "kgf2"},
+		{"K.G.F", "kgf"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := NormalizeCompact(tt.input)
+			if got != tt.expected {
+				t.Errorf("NormalizeCompact(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCollapseAcronyms(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"k g f", "kgf"},
+		{"d d l j", "ddlj"},
+		{"i am game", "i am game"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := CollapseAcronyms(tt.input)
+			if got != tt.expected {
+				t.Errorf("CollapseAcronyms(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}

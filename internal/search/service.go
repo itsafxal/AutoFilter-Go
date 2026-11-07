@@ -61,7 +61,17 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		}
 	}
 
-	tokens := ExtractMeaningfulTokens(norm)
+	splitQuery := SplitCamelCaseAndNumbers(query)
+	normSplit := NormalizeText(splitQuery)
+	compact := NormalizeCompact(query)
+
+	tokens := ExtractMeaningfulTokens(normSplit)
+	if len(tokens) == 0 {
+		tokens = strings.Fields(normSplit)
+	}
+	if len(tokens) == 0 {
+		tokens = ExtractMeaningfulTokens(norm)
+	}
 	if len(tokens) == 0 {
 		tokens = strings.Fields(norm)
 	}
@@ -73,29 +83,105 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 
 	const maxCandidates = 1000
 
-	// 1. Primary ultra-fast candidate query on file_name using FTS5 trigram index
-	var candidateRecords []MediaFile
-	var err error
+	candidatesMap := make(map[string]MediaFile)
+	addCandidates := func(recs []MediaFile) {
+		for _, r := range recs {
+			if _, exists := candidatesMap[r.FileID]; !exists {
+				candidatesMap[r.FileID] = r
+			}
+		}
+	}
 
+	// 1. Primary ultra-fast candidate query on file_name using FTS5 trigram index with split tokens
 	ftsSQL, ftsArgs, canUseFTS := s.buildFTSQuery(tokens, filter, maxCandidates, 0)
 	if canUseFTS {
-		candidateRecords, _, err = s.queryRows(ctx, db, ftsSQL, ftsArgs, maxCandidates)
+		recs, _, _ := s.queryRows(ctx, db, ftsSQL, ftsArgs, maxCandidates)
+		addCandidates(recs)
+	}
+
+	// 1b. If norm is different from normSplit, and no candidates, try FTS on norm tokens
+	if len(candidatesMap) == 0 && norm != normSplit {
+		normTokens := ExtractMeaningfulTokens(norm)
+		if len(normTokens) > 0 {
+			if ftsSQL2, ftsArgs2, canFTS2 := s.buildFTSQuery(normTokens, filter, maxCandidates, 0); canFTS2 {
+				recs, _, _ := s.queryRows(ctx, db, ftsSQL2, ftsArgs2, maxCandidates)
+				addCandidates(recs)
+			}
+		}
+	}
+
+	// 1c. Acronym FTS5 search (e.g. user searched "K.G.F" or "KGF" -> compact "kgf")
+	if len(candidatesMap) == 0 && len(compact) >= 3 {
+		if acroSQL, acroArgs, canAcro := s.buildFTSQuery([]string{compact}, filter, maxCandidates, 0); canAcro {
+			recs, _, _ := s.queryRows(ctx, db, acroSQL, acroArgs, maxCandidates)
+			addCandidates(recs)
+		}
 	}
 
 	// 2. Fallback to LIKE query on file_name if FTS returned no candidates
-	if len(candidateRecords) == 0 {
+	if len(candidatesMap) == 0 {
 		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, false)
-		candidateRecords, _, err = s.queryRows(ctx, db, likeSQL, likeArgs, maxCandidates)
+		recs, _, _ := s.queryRows(ctx, db, likeSQL, likeArgs, maxCandidates)
+		addCandidates(recs)
+	}
+
+	// 2b. Acronym LIKE query (%k%g%f%)
+	if len(candidatesMap) == 0 && len(tokens) > 1 {
+		allSingle := true
+		for _, tok := range tokens {
+			if len(tok) > 1 {
+				allSingle = false
+				break
+			}
+		}
+		if allSingle {
+			acroPattern := "%" + strings.Join(tokens, "%") + "%"
+			acroSQL := `
+				SELECT file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved
+				FROM media
+				WHERE file_name LIKE ?
+				ORDER BY +date_saved DESC
+				LIMIT ? OFFSET 0;
+			`
+			recs, _, _ := s.queryRows(ctx, db, acroSQL, []any{acroPattern, maxCandidates}, maxCandidates)
+			addCandidates(recs)
+		}
+	}
+
+	// 2c. Prefix Trigram query for minor typos (e.g. "Inceptin" -> query "incep")
+	if len(candidatesMap) == 0 {
+		for _, tok := range tokens {
+			if len(tok) >= 5 {
+				prefix := tok[:4]
+				if pSQL, pArgs, canP := s.buildFTSQuery([]string{prefix}, filter, 300, 0); canP {
+					recs, _, _ := s.queryRows(ctx, db, pSQL, pArgs, 300)
+					addCandidates(recs)
+					if len(candidatesMap) > 0 {
+						break
+					}
+				}
+			}
+		}
 	}
 
 	// 3. Fallback to caption ONLY for general searches without specific language/quality filter
-	if err == nil && len(candidateRecords) == 0 && filter.Language == "" && filter.Quality == "" {
+	if len(candidatesMap) == 0 && filter.Language == "" && filter.Quality == "" {
 		capSQL, capArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, true)
-		candidateRecords, _, _ = s.queryRows(ctx, db, capSQL, capArgs, maxCandidates)
+		recs, _, _ := s.queryRows(ctx, db, capSQL, capArgs, maxCandidates)
+		addCandidates(recs)
+	}
+
+	// Flatten candidates
+	candidateRecords := make([]MediaFile, 0, len(candidatesMap))
+	for _, rec := range candidatesMap {
+		candidateRecords = append(candidateRecords, rec)
 	}
 
 	// Apply intelligent release parser and strict movie matching
 	matchedFiles := FilterAndRankStrict(query, candidateRecords)
+	if len(matchedFiles) == 0 && splitQuery != query {
+		matchedFiles = FilterAndRankStrict(splitQuery, candidateRecords)
+	}
 	if filter.Language != "" || filter.Quality != "" {
 		matchedFiles = FilterByMediaFilter(matchedFiles, filter)
 	}
@@ -104,6 +190,9 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 	// (e.g. during background migration, when sync is disabled, or for newly indexed media)
 	if len(matchedFiles) == 0 && s.dbManager != nil && s.dbManager.MongoMediaRepo() != nil {
 		mongoDocs, mErr := s.dbManager.MongoMediaRepo().Search(ctx, query, 100)
+		if (mErr != nil || len(mongoDocs) == 0) && splitQuery != query {
+			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, splitQuery, 100)
+		}
 		if (mErr != nil || len(mongoDocs) == 0) && len(tokens) > 0 {
 			// Fallback: search MongoDB using meaningful tokens (e.g. without stopwords like "The")
 			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, strings.Join(tokens, " "), 100)
@@ -147,6 +236,9 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 				}(mongoCandidates)
 			}
 			matchedFiles = FilterAndRankStrict(query, mongoCandidates)
+			if len(matchedFiles) == 0 && splitQuery != query {
+				matchedFiles = FilterAndRankStrict(splitQuery, mongoCandidates)
+			}
 			if filter.Language != "" || filter.Quality != "" {
 				matchedFiles = FilterByMediaFilter(matchedFiles, filter)
 			}
@@ -283,11 +375,12 @@ func (s *Service) buildFTSQuery(tokens []string, filter SearchFilter, limitPlusO
 
 	for _, token := range shortTokens {
 		if len(token) == 1 && unicode.IsDigit(rune(token[0])) {
-			whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.file_name LIKE ? OR m.file_name LIKE ?)")
+			whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.file_name LIKE ? OR m.file_name LIKE ? OR m.file_name LIKE ?)")
 			args = append(args,
 				"%."+token+".%",
 				"% "+token+" %",
 				"%-"+token+"-%",
+				"%"+token+"%",
 			)
 		} else {
 			whereConditions = append(whereConditions, "m.file_name LIKE ?")
@@ -337,11 +430,12 @@ func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlus
 
 	for _, token := range tokens {
 		if len(token) == 1 && unicode.IsDigit(rune(token[0])) {
-			whereConditions = append(whereConditions, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ?)", col, col, col))
+			whereConditions = append(whereConditions, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR %s LIKE ?)", col, col, col, col))
 			args = append(args,
 				"%."+token+".%",
 				"% "+token+" %",
 				"%-"+token+"-%",
+				"%"+token+"%",
 			)
 		} else {
 			whereConditions = append(whereConditions, fmt.Sprintf("%s LIKE ?", col))

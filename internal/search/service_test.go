@@ -48,6 +48,11 @@ func setupTestDB(t *testing.T) (*database.DatabaseManager, *Service) {
 		{"file_8", "Vikramadithyan (2014) Malayalam 720p HDRip.mkv", 1073741824, "1.0 GB", "video", "Vikramadithyan Dulquer"},
 		{"file_9", "Vikram Vedha (2017) Tamil 1080p.mkv", 2147483648, "2.0 GB", "video", "Vikram Vedha Madhavan"},
 		{"file_10", "Hargadimaju Season 3 Episode 6 Vikram Thilak.mkv", 536870912, "500 MB", "video", "Hargadimaju S03E06"},
+		{"file_11", "Jailer 2 2026 Tamil HQ HDRip 1080p x264.mkv", 2147483648, "2.0 GB", "video", "Jailer 2 Rajinikanth"},
+		{"file_12", "Jailer 2.mkv", 1073741824, "1.0 GB", "video", "Jailer 2"},
+		{"file_13", "Jailer 3 2028 Tamil.mkv", 2147483648, "2.0 GB", "video", "Jailer 3"},
+		{"file_14", "I.Am.Game.2023.1080p.mkv", 1610612736, "1.5 GB", "video", "I Am Game 2023"},
+		{"file_15", "Inception.2010.1080p.mkv", 2147483648, "2.0 GB", "video", "Inception Christopher Nolan"},
 	}
 
 	for _, r := range records {
@@ -229,4 +234,114 @@ func TestSearchService_GetSuggestions(t *testing.T) {
 	if len(sugs) == 0 {
 		t.Errorf("expected suggestions for 'kgff', got 0")
 	}
+}
+
+func TestSearchService_IntelligentMovieSearch(t *testing.T) {
+	dbManager, service := setupTestDB(t)
+	defer dbManager.Close()
+
+	ctx := context.Background()
+
+	// 1. Mandatory Bug Case: "Jailer2" must return "Jailer 2" directly in normal search results
+	t.Run("Jailer2 finds Jailer 2 directly", func(t *testing.T) {
+		res, err := service.Search(ctx, "Jailer2", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 2 {
+			t.Fatalf("expected 2 files for 'Jailer2', got %d", len(res.Files))
+		}
+		for _, f := range res.Files {
+			if f.FileID != "file_11" && f.FileID != "file_12" {
+				t.Errorf("unexpected file returned for 'Jailer2': %s (%s)", f.FileID, f.FileName)
+			}
+		}
+	})
+
+	// 2. Formatting variations of Jailer 2
+	variations := []string{"Jailer 2", "Jailer-2", "Jailer_2", "JAILER2", "jailer2"}
+	for _, v := range variations {
+		t.Run("Variation: "+v, func(t *testing.T) {
+			res, err := service.Search(ctx, v, 10, 0, SearchFilter{})
+			if err != nil {
+				t.Fatalf("Search error for %q: %v", v, err)
+			}
+			if len(res.Files) != 2 {
+				t.Errorf("expected 2 files for %q, got %d", v, len(res.Files))
+			}
+		})
+	}
+
+	// 3. Strict Sequel Isolation: "Jailer2" and "Jailer 2" MUST NEVER return "Jailer 3"
+	t.Run("Jailer 2 rejects Jailer 3", func(t *testing.T) {
+		res, err := service.Search(ctx, "Jailer2", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		for _, f := range res.Files {
+			if f.FileID == "file_13" {
+				t.Fatalf("CRITICAL: Jailer2 matched Jailer 3 (file_13)!")
+			}
+		}
+	})
+
+	// 4. Space and symbol variations: "I Am Game"
+	gameVariations := []string{
+		"I Am Game",
+		"IAmGame",
+		"I.Am.Game",
+		"I-Am-Game",
+		"I_Am_Game",
+		"I  Am  Game",
+		"I•Am•Game",
+		"I@Am@Game",
+	}
+	for _, gv := range gameVariations {
+		t.Run("Game Variation: "+gv, func(t *testing.T) {
+			res, err := service.Search(ctx, gv, 10, 0, SearchFilter{})
+			if err != nil {
+				t.Fatalf("Search error for %q: %v", gv, err)
+			}
+			if len(res.Files) != 1 || res.Files[0].FileID != "file_14" {
+				t.Errorf("expected file_14 for %q, got %d files: %v", gv, len(res.Files), res.Files)
+			}
+		})
+	}
+
+	// 5. Acronym / Sequel matching: "KGF2" and "K.G.F"
+	t.Run("KGF2 matches KGF 2 prints", func(t *testing.T) {
+		res, err := service.Search(ctx, "KGF2", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 2 {
+			t.Errorf("expected 2 files for 'KGF2', got %d", len(res.Files))
+		}
+		for _, f := range res.Files {
+			if f.FileID != "file_2" && f.FileID != "file_3" {
+				t.Errorf("expected file_2 or file_3, got %s (%s)", f.FileID, f.FileName)
+			}
+		}
+	})
+
+	t.Run("K.G.F matches KGF movies", func(t *testing.T) {
+		res, err := service.Search(ctx, "K.G.F", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) < 2 {
+			t.Errorf("expected at least 2 files for 'K.G.F', got %d", len(res.Files))
+		}
+	})
+
+	// 6. Typo matching: "Inceptin" finds "Inception"
+	t.Run("Inceptin finds Inception", func(t *testing.T) {
+		res, err := service.Search(ctx, "Inceptin", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 1 || res.Files[0].FileID != "file_15" {
+			t.Errorf("expected file_15 for 'Inceptin', got %d files: %v", len(res.Files), res.Files)
+		}
+	})
 }
