@@ -156,7 +156,12 @@ func ParseRelease(filename string, userQuery string) ReleaseMetadata {
 
 	var queryTokens []string
 	if userQuery != "" {
-		qNorm := NormalizeText(userQuery)
+		intent := ParseQueryIntent(userQuery)
+		qTitle := intent.CleanTitle
+		if qTitle == "" {
+			qTitle = userQuery
+		}
+		qNorm := NormalizeText(qTitle)
 		queryTokens = strings.Fields(qNorm)
 	}
 
@@ -347,14 +352,20 @@ func ParseRelease(filename string, userQuery string) ReleaseMetadata {
 // MatchMovie performs intelligent, strict matching between a user search query and ReleaseMetadata.
 // Returns whether it strictly matches, along with a similarity score [0.0, 1.0].
 func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
-	normQuery := NormalizeText(userQuery)
+	intent := ParseQueryIntent(userQuery)
+	effectiveQuery := intent.CleanTitle
+	if effectiveQuery == "" {
+		effectiveQuery = userQuery
+	}
+
+	normQuery := NormalizeText(effectiveQuery)
 	if normQuery == "" {
 		return false, 0.0
 	}
 
-	splitQuery := SplitCamelCaseAndNumbers(userQuery)
+	splitQuery := SplitCamelCaseAndNumbers(effectiveQuery)
 	normSplitQuery := NormalizeText(splitQuery)
-	qCompact := NormalizeCompact(userQuery)
+	qCompact := NormalizeCompact(effectiveQuery)
 
 	relCompact := rel.CompactTitle
 	if relCompact == "" {
@@ -366,19 +377,25 @@ func MatchMovie(userQuery string, rel ReleaseMetadata) (bool, float64) {
 
 	// 1. Extract query year if user specified one (e.g. "Vikram 2022")
 	var qYear int
-	if m := reYearPattern.FindStringSubmatch(userQuery); len(m) > 1 {
+	if intent.Year > 0 {
+		qYear = intent.Year
+	} else if m := reYearPattern.FindStringSubmatch(userQuery); len(m) > 1 {
 		qYear, _ = strconv.Atoi(m[1])
 	}
 
 	// 2. Extract query season if user specified one (e.g. "Hargadimaju S3")
 	var qSeason int
-	if m := reSeasonOnly.FindStringSubmatch(userQuery); len(m) > 1 {
+	if intent.Season > 0 {
+		qSeason = intent.Season
+	} else if m := reSeasonOnly.FindStringSubmatch(userQuery); len(m) > 1 {
 		qSeason, _ = strconv.Atoi(m[1])
 	}
 
 	// 3. Extract query episode if user specified one (e.g. "Episode 6")
 	var qEpisode int
-	if m := reEpisodeOnly.FindStringSubmatch(userQuery); len(m) > 1 {
+	if intent.Episode > 0 {
+		qEpisode = intent.Episode
+	} else if m := reEpisodeOnly.FindStringSubmatch(userQuery); len(m) > 1 {
 		qEpisode, _ = strconv.Atoi(m[1])
 	}
 
@@ -575,6 +592,17 @@ func FilterAndRankStrict(query string, records []MediaFile) []MediaFile {
 	for _, r := range records {
 		rel := ParseRelease(r.FileName, query)
 		isMatch, score := MatchMovie(query, rel)
+		if !isMatch && strings.TrimSpace(r.Caption) != "" {
+			capRel := ParseRelease(r.Caption, query)
+			capMatch, capScore := MatchMovie(query, capRel)
+			if capMatch {
+				isMatch = true
+				score = capScore - 0.05
+				if score < 0.1 {
+					score = 0.1
+				}
+			}
+		}
 		if isMatch {
 			matched = append(matched, scoredItem{file: r, score: score})
 		}

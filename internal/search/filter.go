@@ -150,6 +150,9 @@ func MatchesLanguage(fileName, caption, targetLang string) bool {
 	if target == "" {
 		return true
 	}
+	if norm := NormalizeLanguageCode(target); norm != "" {
+		target = norm
+	}
 
 	fileLangs := DetectFileLanguages(fileName, caption)
 	if len(fileLangs) == 0 {
@@ -160,6 +163,9 @@ func MatchesLanguage(fileName, caption, targetLang string) bool {
 		if l == target {
 			return true
 		}
+	}
+	if target == "multi" && len(fileLangs) > 1 {
+		return true
 	}
 
 	return false

@@ -36,6 +36,26 @@ func TestNormalizeText(t *testing.T) {
 			input:    "जवान",
 			expected: "jawan",
 		},
+		{
+			name:     "deterministic overlapping compound transliteration malayalam",
+			input:    "വിക്രം വേധ",
+			expected: "vikram vedha",
+		},
+		{
+			name:     "deterministic longer transliteration malayalam",
+			input:    "വിക്രമാദിത്യൻ",
+			expected: "vikramadithyan",
+		},
+		{
+			name:     "deterministic compound transliteration tamil",
+			input:    "விக்ரம் வேதா",
+			expected: "vikram vedha",
+		},
+		{
+			name:     "standalone shorter transliteration malayalam",
+			input:    "വിക്രം",
+			expected: "vikram",
+		},
 	}
 
 	for _, tt := range tests {

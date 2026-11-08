@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -607,6 +608,46 @@ func (r *MediaRepository) GetFileDetails(ctx context.Context, fileID string) (*M
 	return nil, nil
 }
 
+// extractSearchTokens splits query into meaningful search tokens by splitting on whitespace,
+// common punctuation delimiters (dots, hyphens, underscores, slashes, colons, bullets),
+// and letter-digit boundaries (e.g. "Jailer2" -> ["Jailer", "2"], "I.Am.Game" -> ["I", "Am", "Game"]).
+func extractSearchTokens(s string) []string {
+	var tokens []string
+	var current strings.Builder
+	runes := []rune(s)
+	n := len(runes)
+
+	for i := 0; i < n; i++ {
+		r := runes[i]
+		// Treat punctuation and whitespace as token delimiters
+		if unicode.IsSpace(r) || r == '.' || r == '-' || r == '_' || r == ':' || r == '/' || r == '\\' || r == '@' || r == '•' || r == '·' || r == '|' || r == '~' || r == '[' || r == ']' || r == '(' || r == ')' {
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+			continue
+		}
+
+		// Split on letter-to-digit and digit-to-letter transitions (e.g. "Jailer2" -> "Jailer", "2")
+		if i > 0 {
+			prev := runes[i-1]
+			if (unicode.IsLetter(prev) && unicode.IsDigit(r)) || (unicode.IsDigit(prev) && unicode.IsLetter(r)) {
+				if current.Len() > 0 {
+					tokens = append(tokens, current.String())
+					current.Reset()
+				}
+			}
+		}
+
+		current.WriteRune(r)
+	}
+
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
+}
+
 // Search executes a fast concurrent search across all media shards for documents matching the query.
 func (r *MediaRepository) Search(ctx context.Context, query string, limit int) ([]MediaDoc, error) {
 	if r == nil || len(r.shards) == 0 {
@@ -622,8 +663,8 @@ func (r *MediaRepository) Search(ctx context.Context, query string, limit int) (
 		limit = 100
 	}
 
-	words := strings.Fields(trimmed)
-	if len(words) == 0 {
+	tokens := extractSearchTokens(trimmed)
+	if len(tokens) == 0 {
 		return nil, nil
 	}
 
@@ -631,14 +672,10 @@ func (r *MediaRepository) Search(ctx context.Context, query string, limit int) (
 
 	// 1. Token AND condition: all words must match in file_name
 	var andConds []bson.M
-	for _, w := range words {
-		cleaned := strings.TrimSpace(w)
-		if cleaned == "" {
-			continue
-		}
+	for _, tok := range tokens {
 		andConds = append(andConds, bson.M{
 			"file_name": bson.M{
-				"$regex":   regexp.QuoteMeta(cleaned),
+				"$regex":   regexp.QuoteMeta(tok),
 				"$options": "i",
 			},
 		})
@@ -649,23 +686,20 @@ func (r *MediaRepository) Search(ctx context.Context, query string, limit int) (
 		orFilters = append(orFilters, bson.M{"$and": andConds})
 	}
 
-	// 2. Flexible sequence regex: word1[-._\s•@]*word2
-	if len(words) > 1 {
-		var quotedWords []string
-		for _, w := range words {
-			if strings.TrimSpace(w) != "" {
-				quotedWords = append(quotedWords, regexp.QuoteMeta(w))
-			}
+	// 2. Flexible sequence regex: tok1[-._\s•@]*tok2
+	// Bounded delimiter class [-._\s•@]* prevents catastrophic backtracking and excessive DB load
+	if len(tokens) > 1 {
+		var quotedTokens []string
+		for _, tok := range tokens {
+			quotedTokens = append(quotedTokens, regexp.QuoteMeta(tok))
 		}
-		if len(quotedWords) > 1 {
-			flexPattern := strings.Join(quotedWords, `[-._\s•@]*`)
-			orFilters = append(orFilters, bson.M{
-				"file_name": bson.M{
-					"$regex":   flexPattern,
-					"$options": "i",
-				},
-			})
-		}
+		flexPattern := strings.Join(quotedTokens, `[-._\s•@]*`)
+		orFilters = append(orFilters, bson.M{
+			"file_name": bson.M{
+				"$regex":   flexPattern,
+				"$options": "i",
+			},
+		})
 	}
 
 	if len(orFilters) == 0 {

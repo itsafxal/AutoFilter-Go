@@ -27,6 +27,7 @@ __debug_bin*
 *.sqlite3-wal
 *.sqlite3-shm
 *.db
+backups/
 
 # Test coverage and debug output
 *.out

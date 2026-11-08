@@ -42,7 +42,23 @@ func NewService(dbManager *database.DatabaseManager, logger *slog.Logger) *Servi
 
 // Search executes a fast indexed query against SQLite with no COUNT(*) table scan overhead.
 func (s *Service) Search(ctx context.Context, query string, limit, offset int, filter SearchFilter) (*SearchResult, error) {
-	norm := NormalizeText(query)
+	intent := ParseQueryIntent(query)
+	if filter.Language == "" && intent.Language != "" {
+		filter.Language = intent.Language
+	}
+	if filter.Quality == "" && intent.Quality != "" {
+		filter.Quality = intent.Quality
+	}
+
+	searchTitle := intent.CleanTitle
+	if searchTitle == "" {
+		searchTitle = query
+	}
+
+	norm := NormalizeText(searchTitle)
+	if norm == "" {
+		norm = NormalizeText(query)
+	}
 	if norm == "" {
 		return &SearchResult{Query: query}, nil
 	}
@@ -61,9 +77,9 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		}
 	}
 
-	splitQuery := SplitCamelCaseAndNumbers(query)
+	splitQuery := SplitCamelCaseAndNumbers(searchTitle)
 	normSplit := NormalizeText(splitQuery)
-	compact := NormalizeCompact(query)
+	compact := NormalizeCompact(searchTitle)
 
 	tokens := ExtractMeaningfulTokens(normSplit)
 	if len(tokens) == 0 {
@@ -92,41 +108,72 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		}
 	}
 
+	var allStrictFiles []MediaFile
+	var matchedFiles []MediaFile
+	evaluate := func() {
+		if len(candidatesMap) == 0 {
+			return
+		}
+		candidateRecords := make([]MediaFile, 0, len(candidatesMap))
+		for _, rec := range candidatesMap {
+			candidateRecords = append(candidateRecords, rec)
+		}
+		allStrictFiles = FilterAndRankStrict(searchTitle, candidateRecords)
+		if len(allStrictFiles) == 0 && searchTitle != query {
+			allStrictFiles = FilterAndRankStrict(query, candidateRecords)
+		}
+		if len(allStrictFiles) == 0 && splitQuery != searchTitle {
+			allStrictFiles = FilterAndRankStrict(splitQuery, candidateRecords)
+		}
+		if len(allStrictFiles) == 0 {
+			allStrictFiles = FilterAndRankStrict(normSplit, candidateRecords)
+		}
+
+		matchedFiles = allStrictFiles
+		if filter.Language != "" || filter.Quality != "" {
+			matchedFiles = FilterByMediaFilter(allStrictFiles, filter)
+		}
+	}
+
 	// 1. Primary ultra-fast candidate query on file_name using FTS5 trigram index with split tokens
 	ftsSQL, ftsArgs, canUseFTS := s.buildFTSQuery(tokens, filter, maxCandidates, 0)
 	if canUseFTS {
 		recs, _, _ := s.queryRows(ctx, db, ftsSQL, ftsArgs, maxCandidates)
 		addCandidates(recs)
+		evaluate()
 	}
 
-	// 1b. If norm is different from normSplit, and no candidates, try FTS on norm tokens
-	if len(candidatesMap) == 0 && norm != normSplit {
+	// 1b. If no matching files yet, and norm is different from normSplit, try FTS on norm tokens
+	if len(matchedFiles) == 0 && norm != normSplit {
 		normTokens := ExtractMeaningfulTokens(norm)
 		if len(normTokens) > 0 {
 			if ftsSQL2, ftsArgs2, canFTS2 := s.buildFTSQuery(normTokens, filter, maxCandidates, 0); canFTS2 {
 				recs, _, _ := s.queryRows(ctx, db, ftsSQL2, ftsArgs2, maxCandidates)
 				addCandidates(recs)
+				evaluate()
 			}
 		}
 	}
 
 	// 1c. Acronym FTS5 search (e.g. user searched "K.G.F" or "KGF" -> compact "kgf")
-	if len(candidatesMap) == 0 && len(compact) >= 3 {
+	if len(matchedFiles) == 0 && len(compact) >= 3 {
 		if acroSQL, acroArgs, canAcro := s.buildFTSQuery([]string{compact}, filter, maxCandidates, 0); canAcro {
 			recs, _, _ := s.queryRows(ctx, db, acroSQL, acroArgs, maxCandidates)
 			addCandidates(recs)
+			evaluate()
 		}
 	}
 
-	// 2. Fallback to LIKE query on file_name if FTS returned no candidates
-	if len(candidatesMap) == 0 {
+	// 2. Fallback to LIKE query on file_name if no matching files yet
+	if len(matchedFiles) == 0 {
 		likeSQL, likeArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, false)
 		recs, _, _ := s.queryRows(ctx, db, likeSQL, likeArgs, maxCandidates)
 		addCandidates(recs)
+		evaluate()
 	}
 
 	// 2b. Acronym LIKE query (%k%g%f%)
-	if len(candidatesMap) == 0 && len(tokens) > 1 {
+	if len(matchedFiles) == 0 && len(tokens) > 1 {
 		allSingle := true
 		for _, tok := range tokens {
 			if len(tok) > 1 {
@@ -145,18 +192,20 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 			`
 			recs, _, _ := s.queryRows(ctx, db, acroSQL, []any{acroPattern, maxCandidates}, maxCandidates)
 			addCandidates(recs)
+			evaluate()
 		}
 	}
 
 	// 2c. Prefix Trigram query for minor typos (e.g. "Inceptin" -> query "incep")
-	if len(candidatesMap) == 0 {
+	if len(matchedFiles) == 0 {
 		for _, tok := range tokens {
 			if len(tok) >= 5 {
 				prefix := tok[:4]
 				if pSQL, pArgs, canP := s.buildFTSQuery([]string{prefix}, filter, 300, 0); canP {
 					recs, _, _ := s.queryRows(ctx, db, pSQL, pArgs, 300)
 					addCandidates(recs)
-					if len(candidatesMap) > 0 {
+					evaluate()
+					if len(matchedFiles) > 0 {
 						break
 					}
 				}
@@ -165,37 +214,29 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 	}
 
 	// 3. Fallback to caption ONLY for general searches without specific language/quality filter
-	if len(candidatesMap) == 0 && filter.Language == "" && filter.Quality == "" {
+	if len(matchedFiles) == 0 && filter.Language == "" && filter.Quality == "" {
 		capSQL, capArgs := s.buildLikeQuery(tokens, filter, maxCandidates, 0, true)
 		recs, _, _ := s.queryRows(ctx, db, capSQL, capArgs, maxCandidates)
 		addCandidates(recs)
-	}
-
-	// Flatten candidates
-	candidateRecords := make([]MediaFile, 0, len(candidatesMap))
-	for _, rec := range candidatesMap {
-		candidateRecords = append(candidateRecords, rec)
-	}
-
-	// Apply intelligent release parser and strict movie matching
-	matchedFiles := FilterAndRankStrict(query, candidateRecords)
-	if len(matchedFiles) == 0 && splitQuery != query {
-		matchedFiles = FilterAndRankStrict(splitQuery, candidateRecords)
-	}
-	if filter.Language != "" || filter.Quality != "" {
-		matchedFiles = FilterByMediaFilter(matchedFiles, filter)
+		evaluate()
 	}
 
 	// 4. Fallback to authoritative MongoDB media shards if SQLite returned no matches
 	// (e.g. during background migration, when sync is disabled, or for newly indexed media)
 	if len(matchedFiles) == 0 && s.dbManager != nil && s.dbManager.MongoMediaRepo() != nil {
-		mongoDocs, mErr := s.dbManager.MongoMediaRepo().Search(ctx, query, 100)
-		if (mErr != nil || len(mongoDocs) == 0) && splitQuery != query {
+		mongoDocs, mErr := s.dbManager.MongoMediaRepo().Search(ctx, searchTitle, 100)
+		if (mErr != nil || len(mongoDocs) == 0) && searchTitle != query {
+			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, query, 100)
+		}
+		if (mErr != nil || len(mongoDocs) == 0) && splitQuery != searchTitle {
 			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, splitQuery, 100)
 		}
 		if (mErr != nil || len(mongoDocs) == 0) && len(tokens) > 0 {
 			// Fallback: search MongoDB using meaningful tokens (e.g. without stopwords like "The")
 			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, strings.Join(tokens, " "), 100)
+		}
+		if (mErr != nil || len(mongoDocs) == 0) && norm != searchTitle && norm != query {
+			mongoDocs, mErr = s.dbManager.MongoMediaRepo().Search(ctx, norm, 100)
 		}
 		if mErr == nil && len(mongoDocs) > 0 {
 			var mongoCandidates []MediaFile
@@ -213,8 +254,10 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 				}
 				mongoCandidates = append(mongoCandidates, mf)
 			}
+			addCandidates(mongoCandidates)
+			evaluate()
 			// Opportunistically cache to SQLite in a single background batch
-			if len(mongoCandidates) > 0 && s.dbManager != nil {
+			if len(mongoCandidates) > 0 && s.dbManager != nil && s.dbManager.SqlMediaRepo() != nil {
 				go func(candidates []MediaFile) {
 					recs := make([]appsql.MediaRecord, 0, len(candidates))
 					for _, rec := range candidates {
@@ -230,33 +273,48 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 							DateSaved: rec.DateSaved,
 						})
 					}
-					if s.dbManager.SqlMediaRepo() != nil {
-						_ = s.dbManager.SqlMediaRepo().BulkSaveMedia(context.Background(), recs)
-					}
+					_ = s.dbManager.SqlMediaRepo().BulkSaveMedia(context.Background(), recs)
 				}(mongoCandidates)
-			}
-			matchedFiles = FilterAndRankStrict(query, mongoCandidates)
-			if len(matchedFiles) == 0 && splitQuery != query {
-				matchedFiles = FilterAndRankStrict(splitQuery, mongoCandidates)
-			}
-			if filter.Language != "" || filter.Quality != "" {
-				matchedFiles = FilterByMediaFilter(matchedFiles, filter)
 			}
 		}
 	}
 
 	// If no records found
 	if len(matchedFiles) == 0 {
+		if len(allStrictFiles) > 0 && filter.Language != "" {
+			movies := GroupFilesIntoCanonicalMovies(allStrictFiles, query, intent)
+			availLangs := collectAvailableLanguages(movies)
+			res := &SearchResult{
+				Query:              query,
+				CleanQuery:         norm,
+				Files:              []MediaFile{},
+				Movies:             movies,
+				Total:              0,
+				Offset:             offset,
+				Page:               1,
+				TotalPages:         0,
+				HasNext:            false,
+				HasPrev:            offset > 0,
+				RequestedLanguage:  filter.Language,
+				LanguageMatched:    false,
+				AvailableLanguages: availLangs,
+			}
+			s.resultCache.set(cacheKey, res)
+			return res, nil
+		}
+
 		emptyRes := &SearchResult{
-			Query:      query,
-			CleanQuery: norm,
-			Files:      []MediaFile{},
-			Total:      0,
-			Offset:     offset,
-			Page:       1,
-			TotalPages: 0,
-			HasNext:    false,
-			HasPrev:    offset > 0,
+			Query:             query,
+			CleanQuery:        norm,
+			Files:             []MediaFile{},
+			Total:             0,
+			Offset:            offset,
+			Page:              1,
+			TotalPages:        0,
+			HasNext:           false,
+			HasPrev:           offset > 0,
+			RequestedLanguage: filter.Language,
+			LanguageMatched:   false,
 		}
 		s.resultCache.set(cacheKey, emptyRes)
 		return emptyRes, nil
@@ -288,20 +346,26 @@ func (s *Service) Search(ctx context.Context, query string, limit, offset int, f
 		}
 	}
 
-	result := &SearchResult{
-		Query:      query,
-		CleanQuery: norm,
-		Files:      files,
-		Total:      total,
-		Offset:     offset,
-		NextOffset: nextOffset,
-		PrevOffset: prevOffset,
-		Page:       page,
-		TotalPages: totalPages,
-		HasNext:    hasNext,
-		HasPrev:    offset > 0,
-	}
+	groupedMovies := GroupFilesIntoCanonicalMovies(allStrictFiles, query, intent)
+	availLangs := collectAvailableLanguages(groupedMovies)
 
+	result := &SearchResult{
+		Query:              query,
+		CleanQuery:         norm,
+		Files:              files,
+		Movies:             groupedMovies,
+		Total:              total,
+		Offset:             offset,
+		NextOffset:         nextOffset,
+		PrevOffset:         prevOffset,
+		Page:               page,
+		TotalPages:         totalPages,
+		HasNext:            hasNext,
+		HasPrev:            offset > 0,
+		RequestedLanguage:  filter.Language,
+		LanguageMatched:    true,
+		AvailableLanguages: availLangs,
+	}
 	s.resultCache.set(cacheKey, result)
 	return result, nil
 }
@@ -382,22 +446,13 @@ func (s *Service) buildFTSQuery(tokens []string, filter SearchFilter, limitPlusO
 				"%-"+token+"-%",
 				"%"+token+"%",
 			)
+		} else if token == "am" || token == "im" || token == "m" {
+			whereConditions = append(whereConditions, "(m.file_name LIKE ? OR m.file_name LIKE ? OR m.file_name LIKE ? OR m.file_name LIKE ?)")
+			args = append(args, "%am%", "%im%", "%i'm%", "%i m%")
 		} else {
 			whereConditions = append(whereConditions, "m.file_name LIKE ?")
 			args = append(args, "%"+token+"%")
 		}
-	}
-
-	if filter.Language != "" {
-		cond, cArgs := buildLanguageCondition("m", filter.Language)
-		whereConditions = append(whereConditions, cond)
-		args = append(args, cArgs...)
-	}
-
-	if filter.Quality != "" {
-		cond, cArgs := buildQualityCondition("m", filter.Quality)
-		whereConditions = append(whereConditions, cond)
-		args = append(args, cArgs...)
 	}
 
 	extraWhere := ""
@@ -437,22 +492,13 @@ func (s *Service) buildLikeQuery(tokens []string, filter SearchFilter, limitPlus
 				"%-"+token+"-%",
 				"%"+token+"%",
 			)
+		} else if token == "am" || token == "im" || token == "m" {
+			whereConditions = append(whereConditions, fmt.Sprintf("(%s LIKE ? OR %s LIKE ? OR %s LIKE ? OR %s LIKE ?)", col, col, col, col))
+			args = append(args, "%am%", "%im%", "%i'm%", "%i m%")
 		} else {
 			whereConditions = append(whereConditions, fmt.Sprintf("%s LIKE ?", col))
 			args = append(args, "%"+token+"%")
 		}
-	}
-
-	if filter.Language != "" {
-		cond, cArgs := buildLanguageCondition("", filter.Language)
-		whereConditions = append(whereConditions, cond)
-		args = append(args, cArgs...)
-	}
-
-	if filter.Quality != "" {
-		cond, cArgs := buildQualityCondition("", filter.Quality)
-		whereConditions = append(whereConditions, cond)
-		args = append(args, cArgs...)
 	}
 
 	whereClause := "1=1"
@@ -833,4 +879,18 @@ func buildQualityCondition(colPrefix, qual string) (string, []any) {
 	}
 
 	return "(" + strings.Join(clauses, " OR ") + ")", args
+}
+
+func collectAvailableLanguages(movies []CanonicalMovie) []string {
+	seen := make(map[string]bool)
+	var langs []string
+	for _, m := range movies {
+		for _, v := range m.LanguageVariants {
+			if v.Language != "" && !seen[v.Language] {
+				seen[v.Language] = true
+				langs = append(langs, v.Language)
+			}
+		}
+	}
+	return langs
 }

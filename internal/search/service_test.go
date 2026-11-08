@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -342,6 +343,378 @@ func TestSearchService_IntelligentMovieSearch(t *testing.T) {
 		}
 		if len(res.Files) != 1 || res.Files[0].FileID != "file_15" {
 			t.Errorf("expected file_15 for 'Inceptin', got %d files: %v", len(res.Files), res.Files)
+		}
+	})
+
+	// 7. Unicode Transliteration Search
+	t.Run("Transliterated Malayalam query finds correct movie", func(t *testing.T) {
+		resVV, err := service.Search(ctx, "വിക്രം വേധ", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(resVV.Files) != 1 || resVV.Files[0].FileID != "file_9" {
+			t.Errorf("expected file_9 (Vikram Vedha) for 'വിക്രം വേധ', got %v", resVV.Files)
+		}
+
+		resV, err := service.Search(ctx, "വിക്രം", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(resV.Files) != 2 {
+			t.Fatalf("expected 2 files for 'വിക്രം', got %d", len(resV.Files))
+		}
+		for _, f := range resV.Files {
+			if f.FileID != "file_6" && f.FileID != "file_7" {
+				t.Errorf("unexpected file returned for 'വിക്രം': %s (%s)", f.FileID, f.FileName)
+			}
+		}
+	})
+
+	// 8. Candidate Retrieval Fallback when initial FTS returns non-matching candidates
+	t.Run("Caption fallback when filename FTS returns candidate that fails strict matching", func(t *testing.T) {
+		db := dbManager.SQLManager().DB()
+		// file_irr matches FTS trigram for "dune" in filename, but is a series episode / unrelated
+		_, _ = db.Exec(`
+			INSERT INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved)
+			VALUES ('file_irr', 'ref', 'DuneReviewEpisode4Discussion.mkv', 104857600, '100 MB', 'video', 'video/mp4', 'Review talk', datetime('now'));
+		`)
+		// file_cap has random filename, but caption contains the actual movie "Dune Part Two 2024 1080p"
+		_, _ = db.Exec(`
+			INSERT INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved)
+			VALUES ('file_cap', 'ref', 'VID_20240301_001.mkv', 2147483648, '2.0 GB', 'video', 'video/mp4', 'Dune Part Two 2024 1080p BluRay', datetime('now'));
+		`)
+
+		resDune, err := service.Search(ctx, "Dune Part Two", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(resDune.Files) != 1 || resDune.Files[0].FileID != "file_cap" {
+			t.Errorf("expected file_cap for 'Dune Part Two' via supplementary caption fallback, got %v", resDune.Files)
+		}
+	})
+}
+
+func TestSearch_ProductionVerificationSuite(t *testing.T) {
+	dbManager, service := setupTestDB(t)
+	defer dbManager.Close()
+
+	ctx := context.Background()
+
+	// 1. Jailer2 = Jailer 2
+	t.Run("Jailer2 = Jailer 2", func(t *testing.T) {
+		res, err := service.Search(ctx, "Jailer2", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 2 {
+			t.Fatalf("expected 2 files for 'Jailer2', got %d", len(res.Files))
+		}
+		for _, f := range res.Files {
+			if f.FileID != "file_11" && f.FileID != "file_12" {
+				t.Errorf("expected Jailer 2 files (file_11, file_12), got %s (%s)", f.FileID, f.FileName)
+			}
+		}
+	})
+
+	// 2. IAmGame = I Am Game
+	t.Run("IAmGame = I Am Game", func(t *testing.T) {
+		res, err := service.Search(ctx, "IAmGame", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 1 || res.Files[0].FileID != "file_14" {
+			t.Errorf("expected file_14 (I Am Game), got %v", res.Files)
+		}
+	})
+
+	// 3. I.Am.Game = I Am Game
+	t.Run("I.Am.Game = I Am Game", func(t *testing.T) {
+		res, err := service.Search(ctx, "I.Am.Game", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 1 || res.Files[0].FileID != "file_14" {
+			t.Errorf("expected file_14 (I Am Game), got %v", res.Files)
+		}
+	})
+
+	// 4. I@Am@Game = I Am Game
+	t.Run("I@Am@Game = I Am Game", func(t *testing.T) {
+		res, err := service.Search(ctx, "I@Am@Game", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 1 || res.Files[0].FileID != "file_14" {
+			t.Errorf("expected file_14 (I Am Game), got %v", res.Files)
+		}
+	})
+
+	// 5. KGF2 = KGF 2
+	t.Run("KGF2 = KGF 2", func(t *testing.T) {
+		res, err := service.Search(ctx, "KGF2", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(res.Files) != 2 {
+			t.Fatalf("expected 2 files for 'KGF2', got %d", len(res.Files))
+		}
+		for _, f := range res.Files {
+			if f.FileID != "file_2" && f.FileID != "file_3" {
+				t.Errorf("expected KGF Chapter 2 files (file_2, file_3), got %s (%s)", f.FileID, f.FileName)
+			}
+		}
+	})
+
+	// 6. KGF2 must not return KGF 1
+	t.Run("KGF2 must not return KGF 1", func(t *testing.T) {
+		res, err := service.Search(ctx, "KGF2", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		for _, f := range res.Files {
+			if f.FileID == "file_1" {
+				t.Fatalf("REGRESSION: KGF2 matched KGF 1 (file_1: %s)!", f.FileName)
+			}
+		}
+	})
+
+	// 7. Jailer 2 must not return Jailer 3
+	t.Run("Jailer 2 must not return Jailer 3", func(t *testing.T) {
+		for _, q := range []string{"Jailer 2", "Jailer2"} {
+			res, err := service.Search(ctx, q, 10, 0, SearchFilter{})
+			if err != nil {
+				t.Fatalf("Search error for %q: %v", q, err)
+			}
+			for _, f := range res.Files {
+				if f.FileID == "file_13" {
+					t.Fatalf("REGRESSION: %q matched Jailer 3 (file_13: %s)!", q, f.FileName)
+				}
+			}
+		}
+	})
+
+	// 8. Vikram must not return Vikram Vedha
+	t.Run("Vikram must not return Vikram Vedha", func(t *testing.T) {
+		res, err := service.Search(ctx, "Vikram", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		for _, f := range res.Files {
+			if f.FileID == "file_9" {
+				t.Fatalf("REGRESSION: 'Vikram' matched Vikram Vedha (file_9: %s)!", f.FileName)
+			}
+			if f.FileID == "file_8" {
+				t.Fatalf("REGRESSION: 'Vikram' matched Vikramadithyan (file_8: %s)!", f.FileName)
+			}
+		}
+	})
+}
+
+func TestSearchService_ImGame_LanguageAndGroupingSuite(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "imgame_test.db")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{
+		SQLiteDBPath:  dbPath,
+		SyncBatchSize: 100,
+	}
+	dbManager := database.NewDatabaseManager(cfg, logger)
+	if err := dbManager.Init(context.Background()); err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer dbManager.Close()
+
+	db := dbManager.SQLManager().DB()
+	records := []struct {
+		id       string
+		name     string
+		size     int64
+		sizeStr  string
+		fileType string
+		caption  string
+	}{
+		{"file_img_mal_4k", "I'm.Game.2026.Malayalam.2160p.4K.HDR.mkv", 6500000000, "6.5 GB", "video", "I'm Game 2026 Malayalam 4K"},
+		{"file_img_mal_1080", "I'm.Game.2026.Malayalam.1080p.WEBRip.x264.DD+5.1.mkv", 2500000000, "2.5 GB", "video", "I'm Game Malayalam 1080p"},
+		{"file_img_mal_720", "I'm.Game.2026.Malayalam.720p.HEVC.x265.mkv", 1200000000, "1.2 GB", "video", "I'm Game Malayalam 720p"},
+		{"file_img_mal_480", "I'm.Game.2026.Malayalam.480p.x264.mkv", 600000000, "600 MB", "video", "I'm Game Malayalam 480p"},
+		{"file_img_tel_1080", "I'm.Game.2026.Telugu.1080p.WEBRip.mkv", 2300000000, "2.3 GB", "video", "I'm Game Telugu 1080p"},
+		{"file_img_tel_720", "I'm.Game.2026.Telugu.720p.mkv", 1100000000, "1.1 GB", "video", "I'm Game Telugu 720p"},
+		{"file_jailer_2", "Jailer 2 2026 Tamil HQ HDRip 1080p x264.mkv", 2147483648, "2.0 GB", "video", "Jailer 2 Rajinikanth"},
+		{"file_jailer_3", "Jailer 3 2028 Tamil.mkv", 2147483648, "2.0 GB", "video", "Jailer 3"},
+	}
+
+	for _, r := range records {
+		_, err := db.Exec(`
+			INSERT INTO media (file_id, file_ref, file_name, file_size, size, file_type, mime_type, caption, date_saved)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+		`, r.id, "ref", r.name, r.size, r.sizeStr, r.fileType, "video/mp4", r.caption, time.Now())
+		if err != nil {
+			t.Fatalf("failed to insert test record: %v", err)
+		}
+	}
+
+	service := NewService(dbManager, logger)
+	ctx := context.Background()
+
+	// 1. Mandatory 14 query variations of "I'm Game"
+	imGameVariations := []string{
+		"I'm Game",
+		"i'm game",
+		"I Am Game",
+		"i am game",
+		"I'm Game Malayalam",
+		"I Am Game Malayalam",
+		"i'm game malayalam",
+		"I.Am.Game",
+		"I-Am-Game",
+		"I_Am_Game",
+		"IAmGame",
+		"I@Am@Game",
+		"Im Game",
+		"I m Game",
+	}
+
+	for _, query := range imGameVariations {
+		t.Run("QueryVariation_"+query, func(t *testing.T) {
+			res, err := service.Search(ctx, query, 10, 0, SearchFilter{})
+			if err != nil {
+				t.Fatalf("Search failed for query %q: %v", query, err)
+			}
+			if len(res.Files) == 0 {
+				t.Fatalf("No files returned for query %q", query)
+			}
+			if len(res.Movies) != 1 {
+				t.Fatalf("Expected exactly 1 canonical movie for %q, got %d", query, len(res.Movies))
+			}
+			if res.Movies[0].CompactTitle != "iamgame" {
+				t.Errorf("Expected movie CompactTitle to be 'iamgame', got %q", res.Movies[0].CompactTitle)
+			}
+
+			// Ensure Jailer is never mixed in
+			for _, f := range res.Files {
+				if f.FileID == "file_jailer_2" || f.FileID == "file_jailer_3" {
+					t.Fatalf("Unrelated movie %s returned for query %q", f.FileName, query)
+				}
+			}
+		})
+	}
+
+	// 2. Language prioritization when Malayalam is requested
+	t.Run("LanguagePrioritization_Malayalam", func(t *testing.T) {
+		res, err := service.Search(ctx, "I'm Game Malayalam", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if res.RequestedLanguage != "malayalam" {
+			t.Errorf("Expected RequestedLanguage 'malayalam', got %q", res.RequestedLanguage)
+		}
+		if !res.LanguageMatched {
+			t.Errorf("Expected LanguageMatched to be true")
+		}
+		if len(res.Movies) != 1 {
+			t.Fatalf("Expected 1 canonical movie, got %d", len(res.Movies))
+		}
+		movie := res.Movies[0]
+		if len(movie.LanguageVariants) < 2 {
+			t.Fatalf("Expected at least 2 language variants, got %d", len(movie.LanguageVariants))
+		}
+		// First variant MUST be Malayalam
+		if movie.LanguageVariants[0].NormalizedLanguage != "malayalam" {
+			t.Errorf("Expected first variant to be Malayalam, got %q", movie.LanguageVariants[0].NormalizedLanguage)
+		}
+		if len(movie.LanguageVariants[0].Files) != 4 {
+			t.Errorf("Expected 4 files in Malayalam variant, got %d", len(movie.LanguageVariants[0].Files))
+		}
+	})
+
+	// 3. Language prioritization when Telugu is requested
+	t.Run("LanguagePrioritization_Telugu", func(t *testing.T) {
+		res, err := service.Search(ctx, "I'm Game Telugu", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if res.RequestedLanguage != "telugu" {
+			t.Errorf("Expected RequestedLanguage 'telugu', got %q", res.RequestedLanguage)
+		}
+		if !res.LanguageMatched {
+			t.Errorf("Expected LanguageMatched to be true")
+		}
+		movie := res.Movies[0]
+		// First variant MUST be Telugu
+		if movie.LanguageVariants[0].NormalizedLanguage != "telugu" {
+			t.Errorf("Expected first variant to be Telugu, got %q", movie.LanguageVariants[0].NormalizedLanguage)
+		}
+		if len(movie.LanguageVariants[0].Files) != 2 {
+			t.Errorf("Expected 2 files in Telugu variant, got %d", len(movie.LanguageVariants[0].Files))
+		}
+	})
+
+	// 4. Missing Language notification behavior
+	t.Run("LanguageMissingNotification_Hindi", func(t *testing.T) {
+		res, err := service.Search(ctx, "I'm Game Hindi", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if res.RequestedLanguage != "hindi" {
+			t.Errorf("Expected RequestedLanguage 'hindi', got %q", res.RequestedLanguage)
+		}
+		if res.LanguageMatched {
+			t.Errorf("Expected LanguageMatched to be false because Hindi is not available")
+		}
+		if len(res.Movies) != 1 {
+			t.Fatalf("Expected 1 canonical movie found, got %d", len(res.Movies))
+		}
+		// AvailableLanguages must contain Malayalam and Telugu, but NOT Hindi
+		foundMal := false
+		foundTel := false
+		foundHin := false
+		for _, l := range res.AvailableLanguages {
+			if strings.EqualFold(l, "Malayalam") {
+				foundMal = true
+			}
+			if strings.EqualFold(l, "Telugu") {
+				foundTel = true
+			}
+			if strings.EqualFold(l, "Hindi") {
+				foundHin = true
+			}
+		}
+		if !foundMal || !foundTel {
+			t.Errorf("Expected AvailableLanguages to list Malayalam and Telugu, got %v", res.AvailableLanguages)
+		}
+		if foundHin {
+			t.Errorf("AvailableLanguages should NOT contain Hindi, got %v", res.AvailableLanguages)
+		}
+	})
+
+	// 5. Preserving original file IDs and filenames
+	t.Run("OriginalMetadataPreservation", func(t *testing.T) {
+		res, err := service.Search(ctx, "I'm Game", 10, 0, SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		fileMap := make(map[string]string)
+		for _, f := range res.Files {
+			fileMap[f.FileID] = f.FileName
+		}
+
+		expectedFiles := map[string]string{
+			"file_img_mal_4k":   "I'm.Game.2026.Malayalam.2160p.4K.HDR.mkv",
+			"file_img_mal_1080": "I'm.Game.2026.Malayalam.1080p.WEBRip.x264.DD+5.1.mkv",
+			"file_img_mal_720":  "I'm.Game.2026.Malayalam.720p.HEVC.x265.mkv",
+			"file_img_mal_480":  "I'm.Game.2026.Malayalam.480p.x264.mkv",
+			"file_img_tel_1080": "I'm.Game.2026.Telugu.1080p.WEBRip.mkv",
+			"file_img_tel_720":  "I'm.Game.2026.Telugu.720p.mkv",
+		}
+
+		for id, expectedName := range expectedFiles {
+			actualName, ok := fileMap[id]
+			if !ok {
+				t.Errorf("Missing file ID %s in search results", id)
+			} else if actualName != expectedName {
+				t.Errorf("File ID %s has modified filename: got %q, want %q", id, actualName, expectedName)
+			}
 		}
 	})
 }

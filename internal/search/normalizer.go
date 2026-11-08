@@ -2,6 +2,7 @@ package search
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -52,6 +53,32 @@ var transliterationMap = map[string]string{
 	"केजीएफ":  "kgf",
 }
 
+type transliterationEntry struct {
+	src    string
+	target string
+}
+
+// sortedTransliterations holds transliteration mappings ordered by length descending.
+// This guarantees deterministic replacement where compound/longer titles (e.g. "വിക്രം വേധ")
+// are always processed before substrings (e.g. "വിക്രം").
+var sortedTransliterations []transliterationEntry
+
+func init() {
+	sortedTransliterations = make([]transliterationEntry, 0, len(transliterationMap))
+	for src, target := range transliterationMap {
+		sortedTransliterations = append(sortedTransliterations, transliterationEntry{src: src, target: target})
+	}
+	// Sort by rune length descending, then alphabetically by src for 100% determinism
+	sort.SliceStable(sortedTransliterations, func(i, j int) bool {
+		li := len([]rune(sortedTransliterations[i].src))
+		lj := len([]rune(sortedTransliterations[j].src))
+		if li != lj {
+			return li > lj
+		}
+		return sortedTransliterations[i].src < sortedTransliterations[j].src
+	})
+}
+
 var (
 	reChannelTagHandle = regexp.MustCompile(`(?i)(?:^|[\s\[\(\{\-_|~])@[a-zA-Z0-9_]+(?:\s|[\)\]\}\-_|~]|$)`)
 	reURL              = regexp.MustCompile(`https?://\S+|www\.\S+|t\.me/\S+`)
@@ -62,7 +89,78 @@ var (
 	reSeasonEp         = regexp.MustCompile(`(?i)\b(?:s|season)[\s._-]*(\d{1,2})[\s._-]*(?:e|ep|episode)[\s._-]*(\d{1,2})\b`)
 	reNameLabel        = regexp.MustCompile(`(?i)^[^\w]*(?:name|title|file|movie)[\s:➜\-=]+(.+)$`)
 	reIgnoreLines      = regexp.MustCompile(`(?i)^[^\w]*(?:size|quality|language|audio|powered|join|link|download|uploaded)[\s:➜\-=]+`)
+
+	// Contraction patterns for canonical English title normalization
+	reContractionIm       = regexp.MustCompile(`(?i)\b(?:i['’]m|i\s+m|im)\b`)
+	reContractionDont     = regexp.MustCompile(`(?i)\b(?:don['’]t|dont)\b`)
+	reContractionCant     = regexp.MustCompile(`(?i)\b(?:can['’]t|cant)\b`)
+	reContractionWont     = regexp.MustCompile(`(?i)\b(?:won['’]t|wont)\b`)
+	reContractionDoesnt   = regexp.MustCompile(`(?i)\b(?:doesn['’]t|doesnt)\b`)
+	reContractionDidnt    = regexp.MustCompile(`(?i)\b(?:didn['’]t|didnt)\b`)
+	reContractionIsnt     = regexp.MustCompile(`(?i)\b(?:isn['’]t|isnt)\b`)
+	reContractionArent    = regexp.MustCompile(`(?i)\b(?:aren['’]t|arent)\b`)
+	reContractionWasnt    = regexp.MustCompile(`(?i)\b(?:wasn['’]t|wasnt)\b`)
+	reContractionWerent   = regexp.MustCompile(`(?i)\b(?:weren['’]t|werent)\b`)
+	reContractionHavent   = regexp.MustCompile(`(?i)\b(?:haven['’]t|havent)\b`)
+	reContractionHasnt    = regexp.MustCompile(`(?i)\b(?:hasn['’]t|hasnt)\b`)
+	reContractionHadnt    = regexp.MustCompile(`(?i)\b(?:hadn['’]t|hadnt)\b`)
+	reContractionCouldnt  = regexp.MustCompile(`(?i)\b(?:couldn['’]t|couldnt)\b`)
+	reContractionWouldnt  = regexp.MustCompile(`(?i)\b(?:wouldn['’]t|wouldnt)\b`)
+	reContractionShouldnt = regexp.MustCompile(`(?i)\b(?:shouldn['’]t|shouldnt)\b`)
+	reContractionIts      = regexp.MustCompile(`(?i)\bit['’]s\b`)
+	reContractionThats    = regexp.MustCompile(`(?i)\bthat['’]s\b`)
+	reContractionWhats    = regexp.MustCompile(`(?i)\bwhat['’]s\b`)
+	reContractionWhos     = regexp.MustCompile(`(?i)\bwho['’]s\b`)
+	reContractionTheres   = regexp.MustCompile(`(?i)\bthere['’]s\b`)
+	reContractionHeres    = regexp.MustCompile(`(?i)\bhere['’]s\b`)
+	reContractionYoure    = regexp.MustCompile(`(?i)\b(?:you['’]re|youre)\b`)
+	reContractionWere     = regexp.MustCompile(`(?i)\bwe['’]re\b`)
+	reContractionTheyre   = regexp.MustCompile(`(?i)\b(?:they['’]re|theyre)\b`)
+	reContractionIve      = regexp.MustCompile(`(?i)\b(?:i['’]ve|ive)\b`)
+	reContractionIll      = regexp.MustCompile(`(?i)\bi['’]ll\b`)
+	reContractionId       = regexp.MustCompile(`(?i)\bi['’]d\b`)
+	rePossessiveS         = regexp.MustCompile(`(?i)([a-z0-9]+)['’]s\b`)
+	reApostrophes         = regexp.MustCompile(`['’‘` + "`" + `]`)
 )
+
+// ExpandContractions normalizes contractions and apostrophes into their canonical English forms.
+// E.g. "I'm Game" -> "i am game", "Im Game" -> "i am game", "I m Game" -> "i am game", "Don't" -> "do not".
+func ExpandContractions(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = reContractionIm.ReplaceAllString(s, "i am")
+	s = reContractionDont.ReplaceAllString(s, "do not")
+	s = reContractionCant.ReplaceAllString(s, "cannot")
+	s = reContractionWont.ReplaceAllString(s, "will not")
+	s = reContractionDoesnt.ReplaceAllString(s, "does not")
+	s = reContractionDidnt.ReplaceAllString(s, "did not")
+	s = reContractionIsnt.ReplaceAllString(s, "is not")
+	s = reContractionArent.ReplaceAllString(s, "are not")
+	s = reContractionWasnt.ReplaceAllString(s, "was not")
+	s = reContractionWerent.ReplaceAllString(s, "were not")
+	s = reContractionHavent.ReplaceAllString(s, "have not")
+	s = reContractionHasnt.ReplaceAllString(s, "has not")
+	s = reContractionHadnt.ReplaceAllString(s, "had not")
+	s = reContractionCouldnt.ReplaceAllString(s, "could not")
+	s = reContractionWouldnt.ReplaceAllString(s, "would not")
+	s = reContractionShouldnt.ReplaceAllString(s, "should not")
+	s = reContractionIts.ReplaceAllString(s, "it is")
+	s = reContractionThats.ReplaceAllString(s, "that is")
+	s = reContractionWhats.ReplaceAllString(s, "what is")
+	s = reContractionWhos.ReplaceAllString(s, "who is")
+	s = reContractionTheres.ReplaceAllString(s, "there is")
+	s = reContractionHeres.ReplaceAllString(s, "here is")
+	s = reContractionYoure.ReplaceAllString(s, "you are")
+	s = reContractionWere.ReplaceAllString(s, "we are")
+	s = reContractionTheyre.ReplaceAllString(s, "they are")
+	s = reContractionIve.ReplaceAllString(s, "i have")
+	s = reContractionIll.ReplaceAllString(s, "i will")
+	s = reContractionId.ReplaceAllString(s, "i would")
+	s = rePossessiveS.ReplaceAllString(s, "${1}s")
+	s = reApostrophes.ReplaceAllString(s, " ")
+	return s
+}
 
 // isTitleRune checks whether a rune is a meaningful letter, digit, or combining mark.
 // unicode.IsMark is crucial for preserving Indic script vowels and matras (e.g. Malayalam, Hindi, Tamil).
@@ -107,16 +205,12 @@ func NormalizeCompact(text string) string {
 	if text == "" {
 		return ""
 	}
-	for src, target := range transliterationMap {
-		if strings.Contains(text, src) {
-			text = strings.ReplaceAll(text, src, target)
-		}
-	}
-	text = strings.ToLower(text)
+	split := SplitCamelCaseAndNumbers(text)
+	norm := NormalizeText(split)
 	var b strings.Builder
-	b.Grow(len(text))
-	for _, r := range text {
-		if isTitleRune(r) {
+	b.Grow(len(norm))
+	for _, r := range norm {
+		if isTitleRune(r) && !unicode.IsSpace(r) {
 			b.WriteRune(r)
 		}
 	}
@@ -194,10 +288,10 @@ func NormalizeText(text string) string {
 		return ""
 	}
 
-	// Transliteration replacements
-	for src, target := range transliterationMap {
-		if strings.Contains(text, src) {
-			text = strings.ReplaceAll(text, src, target)
+	// Deterministic transliteration replacements (longer substrings processed first)
+	for _, entry := range sortedTransliterations {
+		if strings.Contains(text, entry.src) {
+			text = strings.ReplaceAll(text, entry.src, entry.target)
 		}
 	}
 
@@ -207,6 +301,9 @@ func NormalizeText(text string) string {
 
 	// Lowercase
 	text = strings.ToLower(text)
+
+	// Expand standard contractions and normalize apostrophes
+	text = ExpandContractions(text)
 
 	// Replace non-title runes (punctuation, symbols, dots, hyphens, underscores, emojis, bullets) with spaces
 	var b strings.Builder
