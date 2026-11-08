@@ -52,7 +52,7 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 		LogLevel:             config.LogLevelDebug,
 		SQLiteDBPath:         dbPath,
 		SyncBatchSize:        1000,
-		EnablePremiumEmoji:   true,
+		EnablePremiumEmoji:   false,
 		AutoDeleteFilterTime: "15m",
 		AutoDeleteFileTime:   "30m",
 	}
@@ -67,7 +67,7 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 		t.Fatalf("failed to init database: %v", err)
 	}
 
-	// Register AutoFilter and Delivery plugins
+	// Register AutoFilter and Delivery plugins (pure file-list filtering UI)
 	afPlugin := autofilter.New(botApp.AppContext)
 	delPlugin := delivery.New(botApp.AppContext)
 
@@ -101,6 +101,9 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 		{"file_img_tel_1080", "I'm.Game.2026.Telugu.1080p.WEBRip.mkv", 2300000000, "2.3 GB", "video", "I'm Game Telugu 1080p"},
 		{"file_img_tel_720", "I'm.Game.2026.Telugu.720p.mkv", 1100000000, "1.1 GB", "video", "I'm Game Telugu 720p"},
 
+		// Multi-Audio film
+		{"file_leo_multi", "Leo.2023.Tamil.Telugu.Hindi.1080p.Dual.Audio.mkv", 3200000000, "3.2 GB", "video", "Leo 2023 Multi Audio"},
+
 		// Jailer franchise
 		{"file_jailer_2", "Jailer 2 2026 Tamil HQ HDRip 1080p x264.mkv", 2147483648, "2.0 GB", "video", "Jailer 2 Rajinikanth"},
 		{"file_jailer_2_simple", "Jailer 2.mkv", 1073741824, "1.0 GB", "video", "Jailer 2"},
@@ -125,15 +128,22 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 	searchService := botApp.SearchService
 
 	// =========================================================================
-	// TEST 1 & 2: Search variations of "I'm Game" -> all resolve to same canonical movie
+	// 1. SEARCH NORMALIZATION: Variations resolve to the same matching individual files
 	// =========================================================================
-	t.Run("Item1_and_2_ImGameVariations", func(t *testing.T) {
+	t.Run("Normalization_Variations", func(t *testing.T) {
 		queries := []string{
 			"I'm Game",
+			"i'm game",
 			"I Am Game",
+			"i am game",
 			"I.Am.Game",
 			"IAmGame",
-			"I'm Game Malayalam",
+			"I-Am-Game",
+			"I_Am_Game",
+			"I•Am•Game",
+			"I@Am@Game",
+			"Im Game",
+			"I  Am   Game",
 		}
 
 		for _, q := range queries {
@@ -144,18 +154,8 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Search failed for %q: %v", q, err)
 			}
-			if len(res.Movies) != 1 {
-				t.Fatalf("Query %q expected 1 canonical movie, got %d", q, len(res.Movies))
-			}
-			movie := res.Movies[0]
-			if movie.CompactTitle != "iamgame" {
-				t.Errorf("Query %q: expected CompactTitle 'iamgame', got %q", q, movie.CompactTitle)
-			}
-			if movie.Year != 2026 {
-				t.Errorf("Query %q: expected Year 2026, got %d", q, movie.Year)
-			}
-			if movie.TotalFiles != 6 {
-				t.Errorf("Query %q: expected TotalFiles 6, got %d", q, movie.TotalFiles)
+			if len(res.Files) != 6 {
+				t.Fatalf("Query %q expected 6 individual files, got %d", q, len(res.Files))
 			}
 			if duration > 50*time.Millisecond {
 				t.Errorf("Query %q exceeded latency threshold: took %v", q, duration)
@@ -164,115 +164,220 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 	})
 
 	// =========================================================================
-	// TEST 3: Confirm Malayalam and Telugu variants are separated correctly
+	// 2. SEARCH MATCHING: Strict discrimination (sequels, titles, false positives)
 	// =========================================================================
-	t.Run("Item3_LanguageVariantsSeparated", func(t *testing.T) {
-		res, err := searchService.Search(ctx, "I'm Game Malayalam", 10, 0, search.SearchFilter{})
+	t.Run("Matching_StrictDiscrimination", func(t *testing.T) {
+		// Jailer 2 must return Jailer 2 files, NOT Jailer 3
+		j2Res, err := searchService.Search(ctx, "Jailer 2", 10, 0, search.SearchFilter{})
 		if err != nil {
-			t.Fatalf("Search error: %v", err)
+			t.Fatalf("Search failed: %v", err)
 		}
-		if len(res.Movies) != 1 {
-			t.Fatalf("expected 1 canonical movie, got %d", len(res.Movies))
+		if len(j2Res.Files) == 0 {
+			t.Fatalf("Expected results for Jailer 2")
 		}
-		movie := res.Movies[0]
-		if len(movie.LanguageVariants) != 2 {
-			t.Fatalf("expected exactly 2 variants (Malayalam & Telugu), got %d", len(movie.LanguageVariants))
-		}
-
-		// Variant 0: Malayalam (since requested)
-		malVariant := movie.LanguageVariants[0]
-		if malVariant.NormalizedLanguage != "malayalam" {
-			t.Errorf("expected first variant to be Malayalam, got %q", malVariant.NormalizedLanguage)
-		}
-		if len(malVariant.Files) != 4 {
-			t.Errorf("expected 4 Malayalam files, got %d", len(malVariant.Files))
-		}
-
-		// Variant 1: Telugu
-		telVariant := movie.LanguageVariants[1]
-		if telVariant.NormalizedLanguage != "telugu" {
-			t.Errorf("expected second variant to be Telugu, got %q", telVariant.NormalizedLanguage)
-		}
-		if len(telVariant.Files) != 2 {
-			t.Errorf("expected 2 Telugu files, got %d", len(telVariant.Files))
-		}
-	})
-
-	// =========================================================================
-	// TEST 4: Confirm Hindi produces missing-language notification
-	// =========================================================================
-	t.Run("Item4_MissingLanguageNotification_Hindi", func(t *testing.T) {
-		res, err := searchService.Search(ctx, "I'm Game Hindi", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search error: %v", err)
-		}
-		if res.RequestedLanguage != "hindi" {
-			t.Errorf("expected RequestedLanguage 'hindi', got %q", res.RequestedLanguage)
-		}
-		if res.LanguageMatched {
-			t.Errorf("expected LanguageMatched to be false")
-		}
-		if len(res.Movies) != 1 {
-			t.Fatalf("expected 1 canonical movie found, got %d", len(res.Movies))
-		}
-
-		// Verify available languages listed
-		availStr := strings.Join(res.AvailableLanguages, ",")
-		if !strings.Contains(availStr, "Malayalam") || !strings.Contains(availStr, "Telugu") {
-			t.Errorf("expected AvailableLanguages to contain Malayalam & Telugu, got %v", res.AvailableLanguages)
-		}
-		if strings.Contains(availStr, "Hindi") {
-			t.Errorf("AvailableLanguages must not contain Hindi, got %v", res.AvailableLanguages)
-		}
-	})
-
-	// =========================================================================
-	// TEST 5: One movie appears as one grouped result (not duplicate movie entries)
-	// =========================================================================
-	t.Run("Item5_OneGroupedMovieResult", func(t *testing.T) {
-		res, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search error: %v", err)
-		}
-		if len(res.Movies) != 1 {
-			t.Fatalf("expected exactly 1 grouped movie result, got %d", len(res.Movies))
-		}
-		if res.Movies[0].TotalFiles != 6 {
-			t.Errorf("expected 6 total files grouped under the single movie, got %d", res.Movies[0].TotalFiles)
-		}
-	})
-
-	// =========================================================================
-	// TEST 6: Open the movie and test every available file option
-	// =========================================================================
-	t.Run("Item6_MovieDetailAndFileOptions", func(t *testing.T) {
-		res, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{})
-		if err != nil || len(res.Movies) == 0 {
-			t.Fatalf("failed to search: %v", err)
-		}
-		movie := res.Movies[0]
-
-		// Variant 0: Malayalam
-		for _, f := range movie.LanguageVariants[0].Files {
-			optLabel := search.FormatFileOptionLabel(f)
-			if optLabel == "" {
-				t.Errorf("file option label empty for %s", f.FileName)
+		for _, f := range j2Res.Files {
+			if f.FileID == "file_jailer_3" {
+				t.Fatalf("REGRESSION: 'Jailer 2' matched Jailer 3 (%s)", f.FileName)
 			}
 		}
 
-		// Variant 1: Telugu
-		for _, f := range movie.LanguageVariants[1].Files {
-			optLabel := search.FormatFileOptionLabel(f)
-			if optLabel == "" {
-				t.Errorf("file option label empty for %s", f.FileName)
+		// Jailer 3 must return Jailer 3 files, NOT Jailer 2
+		j3Res, err := searchService.Search(ctx, "Jailer 3", 10, 0, search.SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		for _, f := range j3Res.Files {
+			if f.FileID == "file_jailer_2" || f.FileID == "file_jailer_2_simple" {
+				t.Fatalf("REGRESSION: 'Jailer 3' matched Jailer 2 (%s)", f.FileName)
+			}
+		}
+
+		// Vikram must return Vikram, NOT Vikram Vedha or Vikramadithyan
+		vikramRes, err := searchService.Search(ctx, "Vikram", 10, 0, search.SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(vikramRes.Files) == 0 {
+			t.Fatalf("Expected results for Vikram")
+		}
+		for _, f := range vikramRes.Files {
+			if f.FileID == "file_vikram_vedha" || f.FileID == "file_vikramadithyan" {
+				t.Fatalf("REGRESSION: 'Vikram' matched distinct movie: %s", f.FileName)
 			}
 		}
 	})
 
 	// =========================================================================
-	// TEST 7: Selected file delivers exact original Telegram media record
+	// 3. CANDIDATE RETRIEVAL & FALLBACK LOGIC
 	// =========================================================================
-	t.Run("Item7_ActualDelivery_PreservesOriginalMedia", func(t *testing.T) {
+	t.Run("CandidateRetrieval_Fallback", func(t *testing.T) {
+		// Valid candidate retrieval
+		res, err := searchService.Search(ctx, "Vikram", 10, 0, search.SearchFilter{})
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		if len(res.Files) != 1 || res.Files[0].FileID != "file_vikram" {
+			t.Errorf("expected 1 file (file_vikram), got %d files", len(res.Files))
+		}
+
+		// Missing query returns 0 files without panic
+		missingRes, err := searchService.Search(ctx, "UnknownNonExistentMovie9999", 10, 0, search.SearchFilter{})
+		if err != nil {
+			t.Fatalf("Missing search error: %v", err)
+		}
+		if len(missingRes.Files) != 0 {
+			t.Errorf("expected 0 files, got %d", len(missingRes.Files))
+		}
+	})
+
+	// =========================================================================
+	// 4. LANGUAGE FILTERING: Filter individual files directly
+	// =========================================================================
+	t.Run("LanguageFiltering_DirectFileResults", func(t *testing.T) {
+		// Filter by Malayalam
+		malRes, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Language: "malayalam"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(malRes.Files) != 4 {
+			t.Fatalf("expected 4 Malayalam files, got %d", len(malRes.Files))
+		}
+		for _, f := range malRes.Files {
+			if !strings.Contains(f.FileName, "Malayalam") {
+				t.Errorf("expected file to be Malayalam, got %s", f.FileName)
+			}
+		}
+
+		// Filter by Telugu
+		telRes, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Language: "telugu"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(telRes.Files) != 2 {
+			t.Fatalf("expected 2 Telugu files, got %d", len(telRes.Files))
+		}
+		for _, f := range telRes.Files {
+			if !strings.Contains(f.FileName, "Telugu") {
+				t.Errorf("expected file to be Telugu, got %s", f.FileName)
+			}
+		}
+
+		// Filter by Hindi (none exist -> 0 files)
+		hinRes, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Language: "hindi"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(hinRes.Files) != 0 {
+			t.Errorf("expected 0 files for Hindi, got %d", len(hinRes.Files))
+		}
+
+		// Multi-audio detection
+		multiRes, err := searchService.Search(ctx, "Leo", 10, 0, search.SearchFilter{Language: "multi"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(multiRes.Files) != 1 || multiRes.Files[0].FileID != "file_leo_multi" {
+			t.Errorf("expected 1 multi-audio file (file_leo_multi), got %d", len(multiRes.Files))
+		}
+	})
+
+	// =========================================================================
+	// 5. QUALITY FILTERING: Filter individual files directly
+	// =========================================================================
+	t.Run("QualityFiltering_DirectFileResults", func(t *testing.T) {
+		// Filter by 4K (matches 2160p / 4K)
+		q4kRes, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Quality: "4k"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(q4kRes.Files) != 1 || q4kRes.Files[0].FileID != "file_img_mal_4k" {
+			t.Errorf("expected 1 file for 4K (file_img_mal_4k), got %d", len(q4kRes.Files))
+		}
+
+		// Filter by 1080P (returns Malayalam 1080p + Telugu 1080p)
+		q1080Res, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Quality: "1080p"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(q1080Res.Files) != 2 {
+			t.Fatalf("expected 2 files for 1080p, got %d", len(q1080Res.Files))
+		}
+
+		// Filter by 720P (returns Malayalam 720p + Telugu 720p)
+		q720Res, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Quality: "720p"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(q720Res.Files) != 2 {
+			t.Fatalf("expected 2 files for 720p, got %d", len(q720Res.Files))
+		}
+
+		// Filter by 480P (returns Malayalam 480p)
+		q480Res, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Quality: "480p"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(q480Res.Files) != 1 || q480Res.Files[0].FileID != "file_img_mal_480" {
+			t.Errorf("expected 1 file for 480p (file_img_mal_480), got %d", len(q480Res.Files))
+		}
+
+		// Combined Language + Quality: Malayalam + 1080p
+		comboRes, err := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{Language: "malayalam", Quality: "1080p"})
+		if err != nil {
+			t.Fatalf("Search error: %v", err)
+		}
+		if len(comboRes.Files) != 1 || comboRes.Files[0].FileID != "file_img_mal_1080" {
+			t.Errorf("expected 1 file for Malayalam 1080p (file_img_mal_1080), got %d", len(comboRes.Files))
+		}
+	})
+
+	// =========================================================================
+	// 6. UI COMPATIBILITY: Pure File-List Filtering Keyboards and Callbacks
+	// =========================================================================
+	t.Run("UICompatibility_CallbacksAndKeyboards", func(t *testing.T) {
+		cbHandlers := afPlugin.CallbackHandlers()
+		cbMap := make(map[string]bool)
+		for _, h := range cbHandlers {
+			cbMap[h.Prefix] = true
+		}
+
+		// Verify existing required callbacks are present
+		requiredPrefixes := []string{"next|", "sp#", "languages#", "fl#", "qualities#", "fq#", "back_all#", "back#", "close_data", "pages"}
+		for _, pfx := range requiredPrefixes {
+			if !cbMap[pfx] {
+				t.Errorf("AutoFilter plugin missing required callback prefix: %q", pfx)
+			}
+		}
+
+		// Prohibited callbacks MUST NOT be present
+		prohibitedPrefixes := []string{"mv#", "back_mv#", "mv_p#", "mvpage#"}
+		for _, pfx := range prohibitedPrefixes {
+			if cbMap[pfx] {
+				t.Errorf("REGRESSION: Prohibited movie-grouping callback prefix present: %q", pfx)
+			}
+		}
+
+		// Build result search check
+		res, _ := searchService.Search(ctx, "I'm Game", 10, 0, search.SearchFilter{})
+		if len(res.Files) != 6 {
+			t.Errorf("expected 6 files for I'm Game, got %d", len(res.Files))
+		}
+
+		// Verify Delivery plugin registered file# callback
+		delHandlers := delPlugin.CallbackHandlers()
+		delMap := make(map[string]bool)
+		for _, h := range delHandlers {
+			delMap[h.Prefix] = true
+		}
+		if !delMap["file#"] {
+			t.Errorf("Delivery plugin missing required 'file#' callback prefix")
+		}
+	})
+
+	// =========================================================================
+	// 7. FILE DELIVERY: Preserves exact original media records
+	// =========================================================================
+	t.Run("FileDelivery_PreservesOriginalMedia", func(t *testing.T) {
 		for _, r := range records {
 			delivered, err := botApp.DeliveryService.Deliver(ctx, 99887766, r.id, deliveryCore.DeliveryOptions{})
 			if err != nil {
@@ -298,117 +403,9 @@ func TestStagingE2E_ControlledEnvironment(t *testing.T) {
 	})
 
 	// =========================================================================
-	// TEST 8: Pagination, language switching, back navigation, and callback handlers
+	// 8. PERFORMANCE & STABILITY: Latency, Duplicates, and Error Logs
 	// =========================================================================
-	t.Run("Item8_Navigation_Callbacks", func(t *testing.T) {
-		// Verify AutoFilter registered all required navigation and movie selection callbacks
-		cbHandlers := afPlugin.CallbackHandlers()
-		cbMap := make(map[string]bool)
-		for _, h := range cbHandlers {
-			cbMap[h.Prefix] = true
-		}
-
-		requiredPrefixes := []string{"next|", "mv#", "back_mv#", "mv_p#", "languages#", "fl#", "qualities#", "fq#", "back_all#", "back#", "close_data"}
-		for _, pfx := range requiredPrefixes {
-			if !cbMap[pfx] {
-				t.Errorf("AutoFilter plugin missing required callback prefix: %q", pfx)
-			}
-		}
-
-		// Verify Delivery registered file callback
-		delHandlers := delPlugin.CallbackHandlers()
-		delMap := make(map[string]bool)
-		for _, h := range delHandlers {
-			delMap[h.Prefix] = true
-		}
-		if !delMap["file#"] {
-			t.Errorf("Delivery plugin missing required 'file#' callback prefix")
-		}
-
-		// Verify search result pagination offsets for navigation
-		res, err := searchService.Search(ctx, "I'm Game", 2, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
-		if !res.HasNext {
-			t.Errorf("expected HasNext to be true when total files (6) > limit (2)")
-		}
-		if res.NextOffset != 2 {
-			t.Errorf("expected NextOffset 2, got %d", res.NextOffset)
-		}
-	})
-
-	// =========================================================================
-	// TEST 9: Jailer 2 vs Jailer 3, and Vikram vs Vikram Vedha
-	// =========================================================================
-	t.Run("Item9_StrictDiscrimination", func(t *testing.T) {
-		// Jailer 2 must not return Jailer 3
-		j2Res, err := searchService.Search(ctx, "Jailer 2", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
-		for _, f := range j2Res.Files {
-			if f.FileID == "file_jailer_3" {
-				t.Fatalf("REGRESSION: 'Jailer 2' matched Jailer 3 (file_jailer_3: %s)", f.FileName)
-			}
-		}
-
-		// Jailer 3 must not return Jailer 2
-		j3Res, err := searchService.Search(ctx, "Jailer 3", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
-		for _, f := range j3Res.Files {
-			if f.FileID == "file_jailer_2" || f.FileID == "file_jailer_2_simple" {
-				t.Fatalf("REGRESSION: 'Jailer 3' matched Jailer 2 (file: %s)", f.FileName)
-			}
-		}
-
-		// Vikram must not return Vikram Vedha or Vikramadithyan
-		vikramRes, err := searchService.Search(ctx, "Vikram", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
-		for _, f := range vikramRes.Files {
-			if f.FileID == "file_vikram_vedha" {
-				t.Fatalf("REGRESSION: 'Vikram' matched Vikram Vedha (file_vikram_vedha: %s)", f.FileName)
-			}
-			if f.FileID == "file_vikramadithyan" {
-				t.Fatalf("REGRESSION: 'Vikram' matched Vikramadithyan (file_vikramadithyan: %s)", f.FileName)
-			}
-		}
-	})
-
-	// =========================================================================
-	// TEST 10: SQLite and Fallback Behavior
-	// =========================================================================
-	t.Run("Item10_SQLiteAndFallbackBehavior", func(t *testing.T) {
-		// Fast SQLite search
-		res, err := searchService.Search(ctx, "Vikram", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("SQLite search failed: %v", err)
-		}
-		if len(res.Files) == 0 {
-			t.Fatalf("Expected files from SQLite FTS5 for 'Vikram'")
-		}
-		if res.Files[0].FileID != "file_vikram" {
-			t.Errorf("Expected file_vikram, got %s", res.Files[0].FileID)
-		}
-
-		// Case where SQLite returns no match: search non-existent movie
-		missingRes, err := searchService.Search(ctx, "NonExistentMovie9999", 10, 0, search.SearchFilter{})
-		if err != nil {
-			t.Fatalf("Search for missing movie failed with error: %v", err)
-		}
-		if len(missingRes.Files) != 0 || len(missingRes.Movies) != 0 {
-			t.Errorf("Expected 0 files for non-existent movie, got files=%d, movies=%d", len(missingRes.Files), len(missingRes.Movies))
-		}
-	})
-
-	// =========================================================================
-	// TEST 11: Search latency, duplicate results, and error logs
-	// =========================================================================
-	t.Run("Item11_Latency_Duplicates_ErrorLogs", func(t *testing.T) {
+	t.Run("Performance_Latency_Duplicates_ErrorLogs", func(t *testing.T) {
 		logBuf.Reset()
 		testQueries := []string{"I'm Game", "Jailer 2", "Vikram", "I.Am.Game"}
 

@@ -6,25 +6,29 @@ import (
 )
 
 var (
-	reResolutionFilter = regexp.MustCompile(`(?i)\b(2160p|4k|1080p|720p|480p|360p|576p)\b`)
-	reMultiAudio       = regexp.MustCompile(`(?i)\b(multi|dual[\s._-]*audio|dual[\s._-]*track|multi[\s._-]*audio|multi[\s._-]*track)\b`)
+	reResolutionFilter = regexp.MustCompile(`(?i)\b(2160\s*p|4k|uhd|ultra[\s._-]*hd|1080\s*p|720\s*p|480\s*p|360\s*p|576\s*p)\b`)
+	reMultiAudio       = regexp.MustCompile(`(?i)\b(multi|dual[\s._-]*audio|dual[\s._-]*track|multi[\s._-]*audio|multi[\s._-]*track|dual)\b`)
 
-	// Language word boundary regexes
-	reMalayalam = regexp.MustCompile(`(?i)\b(malayalam|mal)\b`)
-	reTamil     = regexp.MustCompile(`(?i)\b(tamil|tam)\b`)
-	reHindi     = regexp.MustCompile(`(?i)\b(hindi|hin)\b`)
-	reTelugu    = regexp.MustCompile(`(?i)\b(telugu|tel)\b`)
-	reKannada   = regexp.MustCompile(`(?i)\b(kannada|kan)\b`)
+	// Language word boundary and native script regexes
+	reMalayalam = regexp.MustCompile(`(?i)\b(malayalam|mal)\b|മലയാളം`)
+	reTamil     = regexp.MustCompile(`(?i)\b(tamil|tam)\b|தமிழ்`)
+	reHindi     = regexp.MustCompile(`(?i)\b(hindi|hin)\b|हिन्दी|हिंदी`)
+	reTelugu    = regexp.MustCompile(`(?i)\b(telugu|tel)\b|తెలుగు`)
+	reKannada   = regexp.MustCompile(`(?i)\b(kannada|kan)\b|ಕನ್ನಡ`)
 	reEnglish   = regexp.MustCompile(`(?i)\b(english|eng)\b`)
-	reBengali   = regexp.MustCompile(`(?i)\b(bengali|ben)\b`)
-	reMarathi   = regexp.MustCompile(`(?i)\b(marathi|mar)\b`)
-	rePunjabi   = regexp.MustCompile(`(?i)\b(punjabi|pun)\b`)
-	reGujarati  = regexp.MustCompile(`(?i)\b(gujarati|guj)\b`)
+	reBengali   = regexp.MustCompile(`(?i)\b(bengali|ben)\b|বাংলা`)
+	reMarathi   = regexp.MustCompile(`(?i)\b(marathi|mar)\b|मराठी`)
+	rePunjabi   = regexp.MustCompile(`(?i)\b(punjabi|pun)\b|ਪੰਜਾਬੀ`)
+	reGujarati  = regexp.MustCompile(`(?i)\b(gujarati|guj)\b|ગુજરાતી`)
 )
 
 func canonicalRes(raw string) string {
 	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "4k" || raw == "2160p" {
+	raw = strings.ReplaceAll(raw, " ", "")
+	raw = strings.ReplaceAll(raw, ".", "")
+	raw = strings.ReplaceAll(raw, "-", "")
+	raw = strings.ReplaceAll(raw, "_", "")
+	if raw == "4k" || raw == "2160p" || raw == "uhd" || strings.Contains(raw, "ultrahd") {
 		return "4k"
 	}
 	return raw

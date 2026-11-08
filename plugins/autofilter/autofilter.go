@@ -43,17 +43,14 @@ var qualities = []string{
 
 // searchSession stores state for pagination and filtering
 type searchSession struct {
-	Query         string
-	UserID        int64
-	UserMention   string
-	ChatID        int64
-	Language      string
-	Quality       string
-	Suggestions   []string
-	UpdatedAt     time.Time
-	CachedMovies  []search.CanonicalMovie
-	SelectedMovie int
-	SelectedLang  int
+	Query       string
+	UserID      int64
+	UserMention string
+	ChatID      int64
+	Language    string
+	Quality     string
+	Suggestions []string
+	UpdatedAt   time.Time
 }
 
 // Plugin implements the Auto-Filter Search Engine plugin.
@@ -128,9 +125,6 @@ func (p *Plugin) CallbackHandlers() []plugins.CallbackDefinition {
 		{Prefix: "back#", Handler: p.HandleBackToFilesCallback},
 		{Prefix: "close_data", Handler: p.HandleCloseCallback},
 		{Prefix: "pages", Handler: p.HandlePagesCallback},
-		{Prefix: "mv#", Handler: p.HandleMovieSelectCallback},
-		{Prefix: "back_mv#", Handler: p.HandleBackToMoviesCallback},
-		{Prefix: "mv_p#", Handler: p.HandleMoviePageCallback},
 	}
 }
 
@@ -253,55 +247,17 @@ func (p *Plugin) ExecuteSearch(m *telegram.NewMessage, rawQuery string) error {
 
 	// If results found, display interactive file list
 	if len(result.Files) > 0 {
-		sess := &searchSession{
-			Query:         query,
-			UserID:        userID,
-			UserMention:   userMention,
-			ChatID:        m.ChatID(),
-			UpdatedAt:     time.Now(),
-			CachedMovies:  result.Movies,
-			SelectedMovie: 0,
-			SelectedLang:  0,
-		}
-		p.saveSession(searchKey, sess)
+		p.saveSession(searchKey, &searchSession{
+			Query:       query,
+			UserID:      userID,
+			UserMention: userMention,
+			ChatID:      m.ChatID(),
+			UpdatedAt:   time.Now(),
+		})
 
 		botName := p.getBotName(m.Client)
-
-		var text string
-		var kb *telegram.ReplyInlineMarkup
-
-		// Check if requested language wasn't matched but movies exist
-		if result.RequestedLanguage != "" && !result.LanguageMatched && len(result.Movies) > 0 {
-			text = p.formatNoLanguageVariantText(userMention, query, result.RequestedLanguage, result.Movies, botName)
-			kb = p.buildNoLanguageVariantKeyboard(result.Movies, searchKey)
-		} else if len(result.Movies) == 1 {
-			// Single canonical movie matched
-			movie := result.Movies[0]
-			langIdx := 0
-			if result.RequestedLanguage != "" {
-				for vi, v := range movie.LanguageVariants {
-					if v.NormalizedLanguage == result.RequestedLanguage {
-						langIdx = vi
-						break
-					}
-				}
-			}
-			sess.SelectedMovie = 0
-			sess.SelectedLang = langIdx
-			p.saveSession(searchKey, sess)
-
-			variant := movie.LanguageVariants[langIdx]
-			text = p.formatMovieDetailText(userMention, movie, variant, botName)
-			kb = p.buildMovieFilesKeyboard(movie, 0, langIdx, searchKey, false, 0)
-		} else if len(result.Movies) > 1 {
-			// Multiple canonical movies matched
-			text = p.formatMoviesListText(userMention, query, len(result.Movies), botName)
-			kb = p.buildCanonicalMoviesKeyboard(result.Movies, searchKey)
-		} else {
-			// Fallback to flat file list
-			text = p.formatResultText(userMention, query, result.Page, result.TotalPages, result.Total, botName)
-			kb = p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
-		}
+		text := p.formatResultText(userMention, query, result.Page, result.TotalPages, result.Total, botName)
+		kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 		replyMsg, replyErr := m.Reply(text, &telegram.SendOptions{
 			ParseMode:   "html",
@@ -607,27 +563,10 @@ func (p *Plugin) HandleSpellCheckCallback(cb *telegram.CallbackQuery) error {
 		return nil
 	}
 
-	sess.CachedMovies = result.Movies
 	botName := p.getBotName(cb.Client)
 	userMention := p.getUserMentionForSession(sess, cb.Sender)
-
-	var text string
-	var kb *telegram.ReplyInlineMarkup
-
-	if len(result.Movies) == 1 {
-		movie := result.Movies[0]
-		sess.SelectedMovie = 0
-		sess.SelectedLang = 0
-		variant := movie.LanguageVariants[0]
-		text = p.formatMovieDetailText(userMention, movie, variant, botName)
-		kb = p.buildMovieFilesKeyboard(movie, 0, 0, searchKey, false, 0)
-	} else if len(result.Movies) > 1 {
-		text = p.formatMoviesListText(userMention, selectedQuery, len(result.Movies), botName)
-		kb = p.buildCanonicalMoviesKeyboard(result.Movies, searchKey)
-	} else {
-		text = p.formatResultText(userMention, selectedQuery, result.Page, result.TotalPages, result.Total, botName)
-		kb = p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
-	}
+	text := p.formatResultText(userMention, selectedQuery, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -762,37 +701,13 @@ func (p *Plugin) HandleFilterLanguageCallback(cb *telegram.CallbackQuery) error 
 
 	sess.Language = langCode
 	sess.UpdatedAt = time.Now()
-	sess.CachedMovies = result.Movies
 	p.saveSession(searchKey, sess)
 
 	botName := p.getBotName(cb.Client)
 	displayQuery := p.getDisplayQuery(sess)
 	userMention := p.getUserMentionForSession(sess, cb.Sender)
-
-	var text string
-	var kb *telegram.ReplyInlineMarkup
-
-	if len(result.Movies) == 1 {
-		movie := result.Movies[0]
-		selectedLang := 0
-		for vi, v := range movie.LanguageVariants {
-			if v.NormalizedLanguage == langCode {
-				selectedLang = vi
-				break
-			}
-		}
-		sess.SelectedLang = selectedLang
-		p.saveSession(searchKey, sess)
-		variant := movie.LanguageVariants[selectedLang]
-		text = p.formatMovieDetailText(userMention, movie, variant, botName)
-		kb = p.buildMovieFilesKeyboard(movie, 0, selectedLang, searchKey, false, 0)
-	} else if len(result.Movies) > 1 {
-		text = p.formatMoviesListText(userMention, displayQuery, len(result.Movies), botName)
-		kb = p.buildCanonicalMoviesKeyboard(result.Movies, searchKey)
-	} else {
-		text = p.formatResultText(userMention, displayQuery, result.Page, result.TotalPages, result.Total, botName)
-		kb = p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, true)
-	}
+	text := p.formatResultText(userMention, displayQuery, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, true)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -1075,6 +990,7 @@ func (p *Plugin) HandleBackToAllFilesCallback(cb *telegram.CallbackQuery) error 
 	sess.Language = ""
 	sess.Quality = ""
 	sess.UpdatedAt = time.Now()
+	p.saveSession(searchKey, sess)
 
 	result, err := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{})
 	if err != nil || len(result.Files) == 0 {
@@ -1082,30 +998,10 @@ func (p *Plugin) HandleBackToAllFilesCallback(cb *telegram.CallbackQuery) error 
 		return nil
 	}
 
-	sess.CachedMovies = result.Movies
-	p.saveSession(searchKey, sess)
-
 	botName := p.getBotName(cb.Client)
 	userMention := p.getUserMentionForSession(sess, cb.Sender)
-
-	var text string
-	var kb *telegram.ReplyInlineMarkup
-
-	if len(result.Movies) == 1 {
-		movie := result.Movies[0]
-		sess.SelectedMovie = 0
-		sess.SelectedLang = 0
-		p.saveSession(searchKey, sess)
-		variant := movie.LanguageVariants[0]
-		text = p.formatMovieDetailText(userMention, movie, variant, botName)
-		kb = p.buildMovieFilesKeyboard(movie, 0, 0, searchKey, false, 0)
-	} else if len(result.Movies) > 1 {
-		text = p.formatMoviesListText(userMention, sess.Query, len(result.Movies), botName)
-		kb = p.buildCanonicalMoviesKeyboard(result.Movies, searchKey)
-	} else {
-		text = p.formatResultText(userMention, sess.Query, result.Page, result.TotalPages, result.Total, botName)
-		kb = p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
-	}
+	text := p.formatResultText(userMention, sess.Query, result.Page, result.TotalPages, result.Total, botName)
+	kb := p.buildResultKeyboard(result.Files, searchKey, result.Page, result.TotalPages, false)
 
 	_, editErr := cb.Edit(text, &telegram.SendOptions{
 		ParseMode:   "html",
@@ -1137,259 +1033,6 @@ func (p *Plugin) HandlePagesCallback(cb *telegram.CallbackQuery) error {
 			Alert: false,
 		})
 	}
-	return nil
-}
-
-// HandleMovieSelectCallback processes selection of a canonical movie or language variant.
-// Format: mv#<searchKey>#<movieIdx>#<langIdx>
-func (p *Plugin) HandleMovieSelectCallback(cb *telegram.CallbackQuery) error {
-	if cb == nil {
-		return nil
-	}
-
-	if p.isMaintenanceMode() {
-		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
-		if !isAdmin {
-			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
-				Alert: true,
-			})
-			return nil
-		}
-	}
-
-	parts := strings.Split(cb.DataString(), "#")
-	if len(parts) < 4 {
-		_, _ = cb.Answer("Invalid selection data", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	searchKey := parts[1]
-	movieIdx, err := strconv.Atoi(parts[2])
-	if err != nil {
-		_, _ = cb.Answer("Invalid movie index", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-	langIdx, err := strconv.Atoi(parts[3])
-	if err != nil {
-		langIdx = 0
-	}
-
-	msg, _ := cb.GetMessage()
-	sess := p.getSession(searchKey)
-	if sess == nil && msg != nil {
-		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
-		if sess != nil {
-			p.saveSession(searchKey, sess)
-		}
-	}
-
-	if sess == nil {
-		_, _ = cb.Answer("🔁 Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ 😇", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	if cb.SenderID != sess.UserID {
-		_, _ = cb.Answer("✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	if len(sess.CachedMovies) == 0 {
-		res, sErr := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{})
-		if sErr == nil && len(res.Movies) > 0 {
-			sess.CachedMovies = res.Movies
-		}
-	}
-
-	if movieIdx < 0 || movieIdx >= len(sess.CachedMovies) {
-		_, _ = cb.Answer("Movie not found or expired.", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	movie := sess.CachedMovies[movieIdx]
-	if langIdx < 0 || langIdx >= len(movie.LanguageVariants) {
-		langIdx = 0
-	}
-	variant := movie.LanguageVariants[langIdx]
-
-	sess.SelectedMovie = movieIdx
-	sess.SelectedLang = langIdx
-	sess.UpdatedAt = time.Now()
-	p.saveSession(searchKey, sess)
-
-	botName := p.getBotName(cb.Client)
-	userMention := p.getUserMentionForSession(sess, cb.Sender)
-	text := p.formatMovieDetailText(userMention, movie, variant, botName)
-	hasMultiple := len(sess.CachedMovies) > 1
-	kb := p.buildMovieFilesKeyboard(movie, movieIdx, langIdx, searchKey, hasMultiple, 0)
-
-	_, editErr := cb.Edit(text, &telegram.SendOptions{
-		ParseMode:   "html",
-		ReplyMarkup: kb,
-	})
-	if editErr != nil && isMessageNotModified(editErr) {
-		_, _ = cb.Edit(text, &telegram.SendOptions{
-			ReplyMarkup: kb,
-		})
-	}
-
-	_, _ = cb.Answer("")
-	return nil
-}
-
-// HandleBackToMoviesCallback returns from movie detail view back to the canonical movies list.
-// Format: back_mv#<searchKey>
-func (p *Plugin) HandleBackToMoviesCallback(cb *telegram.CallbackQuery) error {
-	if cb == nil {
-		return nil
-	}
-
-	if p.isMaintenanceMode() {
-		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
-		if !isAdmin {
-			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{
-				Alert: true,
-			})
-			return nil
-		}
-	}
-
-	parts := strings.Split(cb.DataString(), "#")
-	if len(parts) < 2 {
-		_, _ = cb.Answer("Invalid navigation data", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	searchKey := parts[1]
-	msg, _ := cb.GetMessage()
-	sess := p.getSession(searchKey)
-	if sess == nil && msg != nil {
-		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
-		if sess != nil {
-			p.saveSession(searchKey, sess)
-		}
-	}
-
-	if sess == nil {
-		_, _ = cb.Answer("🔁 Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ 😇", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	if cb.SenderID != sess.UserID {
-		_, _ = cb.Answer("✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	if len(sess.CachedMovies) == 0 {
-		res, sErr := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{})
-		if sErr == nil && len(res.Movies) > 0 {
-			sess.CachedMovies = res.Movies
-		}
-	}
-
-	if len(sess.CachedMovies) == 0 {
-		_, _ = cb.Answer("No movies found.", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	botName := p.getBotName(cb.Client)
-	userMention := p.getUserMentionForSession(sess, cb.Sender)
-	text := p.formatMoviesListText(userMention, sess.Query, len(sess.CachedMovies), botName)
-	kb := p.buildCanonicalMoviesKeyboard(sess.CachedMovies, searchKey)
-
-	_, editErr := cb.Edit(text, &telegram.SendOptions{
-		ParseMode:   "html",
-		ReplyMarkup: kb,
-	})
-	if editErr != nil && isMessageNotModified(editErr) {
-		_, _ = cb.Edit(text, &telegram.SendOptions{
-			ReplyMarkup: kb,
-		})
-	}
-
-	_, _ = cb.Answer("")
-	return nil
-}
-
-// HandleMoviePageCallback handles pagination of files within a canonical movie language variant.
-// Format: mv_p#<searchKey>#<movieIdx>#<langIdx>#<page>
-func (p *Plugin) HandleMoviePageCallback(cb *telegram.CallbackQuery) error {
-	if cb == nil {
-		return nil
-	}
-
-	if p.isMaintenanceMode() {
-		isAdmin := p.appCtx != nil && p.appCtx.Config != nil && p.appCtx.Config.IsAdmin(cb.SenderID)
-		if !isAdmin {
-			_, _ = cb.Answer("⚠️ Bot is currently under maintenance. Please try again later.", &telegram.CallbackOptions{Alert: true})
-			return nil
-		}
-	}
-
-	parts := strings.Split(cb.DataString(), "#")
-	if len(parts) < 5 {
-		_, _ = cb.Answer("Invalid pagination data", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	searchKey := parts[1]
-	movieIdx, _ := strconv.Atoi(parts[2])
-	langIdx, _ := strconv.Atoi(parts[3])
-	page, _ := strconv.Atoi(parts[4])
-
-	msg, _ := cb.GetMessage()
-	sess := p.getSession(searchKey)
-	if sess == nil && msg != nil {
-		sess = p.recoverSessionFromMessage(msg, cb.SenderID)
-		if sess != nil {
-			p.saveSession(searchKey, sess)
-		}
-	}
-
-	if sess == nil {
-		_, _ = cb.Answer("🔁 Sᴇᴀʀᴄʜ ᴇxᴘɪʀᴇᴅ ᴏʀ ɴᴏᴛ ғᴏᴜɴᴅ. Pʟᴇᴀsᴇ sᴇᴀʀᴄʜ ᴀɢᴀɪɴ 😇", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	if cb.SenderID != sess.UserID {
-		_, _ = cb.Answer("✋ Tʜɪs ɪs ɴᴏᴛ ғᴏʀ ʏᴏᴜ! Pʟᴇᴀsᴇ ᴍᴀᴋᴇ ʏᴏᴜʀ ᴏᴡɴ sᴇᴀʀᴄʜ.", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	if len(sess.CachedMovies) == 0 {
-		res, sErr := p.appCtx.Search.Search(context.Background(), sess.Query, maxFilesPerPage, 0, search.SearchFilter{})
-		if sErr == nil && len(res.Movies) > 0 {
-			sess.CachedMovies = res.Movies
-		}
-	}
-
-	if movieIdx < 0 || movieIdx >= len(sess.CachedMovies) {
-		_, _ = cb.Answer("Movie not found.", &telegram.CallbackOptions{Alert: true})
-		return nil
-	}
-
-	movie := sess.CachedMovies[movieIdx]
-	if langIdx < 0 || langIdx >= len(movie.LanguageVariants) {
-		langIdx = 0
-	}
-	variant := movie.LanguageVariants[langIdx]
-
-	botName := p.getBotName(cb.Client)
-	userMention := p.getUserMentionForSession(sess, cb.Sender)
-	text := p.formatMovieDetailText(userMention, movie, variant, botName)
-	hasMultiple := len(sess.CachedMovies) > 1
-	kb := p.buildMovieFilesKeyboard(movie, movieIdx, langIdx, searchKey, hasMultiple, page)
-
-	_, editErr := cb.Edit(text, &telegram.SendOptions{
-		ParseMode:   "html",
-		ReplyMarkup: kb,
-	})
-	if editErr != nil && isMessageNotModified(editErr) {
-		_, _ = cb.Edit(text, &telegram.SendOptions{
-			ReplyMarkup: kb,
-		})
-	}
-
-	_, _ = cb.Answer("")
 	return nil
 }
 
@@ -2182,369 +1825,6 @@ func isKnownQuality(q string) bool {
 		return true
 	}
 	return false
-}
-
-func (p *Plugin) buildMovieFilesKeyboard(movie search.CanonicalMovie, movieIdx, selectedLangIdx int, searchKey string, hasMultipleMovies bool, page int) *telegram.ReplyInlineMarkup {
-	kb := telegram.NewKeyboard()
-
-	// 1. Language switcher tabs if multiple language variants exist
-	if len(movie.LanguageVariants) > 1 {
-		var langButtons []telegram.KeyboardButton
-		for i, v := range movie.LanguageVariants {
-			var label string
-			if i == selectedLangIdx {
-				label = fmt.Sprintf("🟢 %s (%d)", v.Language, len(v.Files))
-			} else {
-				label = fmt.Sprintf("⚪ %s (%d)", v.Language, len(v.Files))
-			}
-			btn := telegram.Button.Data(label, fmt.Sprintf("mv#%s#%d#%d", searchKey, movieIdx, i))
-			langButtons = append(langButtons, btn)
-			if len(langButtons) == 2 || i == len(movie.LanguageVariants)-1 {
-				kb.AddRow(langButtons...)
-				langButtons = nil
-			}
-		}
-	}
-
-	// 2. File buttons for selected language variant
-	if selectedLangIdx < 0 || selectedLangIdx >= len(movie.LanguageVariants) {
-		selectedLangIdx = 0
-	}
-	variant := movie.LanguageVariants[selectedLangIdx]
-
-	perPage := maxFilesPerPage
-	totalPages := (len(variant.Files) + perPage - 1) / perPage
-	if totalPages < 1 {
-		totalPages = 1
-	}
-	if page < 0 {
-		page = 0
-	}
-	if page >= totalPages {
-		page = totalPages - 1
-	}
-
-	start := page * perPage
-	end := start + perPage
-	if end > len(variant.Files) {
-		end = len(variant.Files)
-	}
-
-	displayFiles := variant.Files[start:end]
-	for _, f := range displayFiles {
-		if p.isPremiumEmojiEnabled() {
-			fileLabel := formatFileButtonLabelCustom(f, true)
-			kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)).Icon(p.getFileSizePrefixEmojiID()))
-		} else {
-			fileLabel := formatFileButtonLabel(f)
-			kb.AddRow(telegram.Button.Data(fileLabel, fmt.Sprintf("file#%s", f.FileID)))
-		}
-	}
-
-	// 3. Navigation row if totalPages > 1
-	if totalPages > 1 {
-		var navButtons []telegram.KeyboardButton
-		if page > 0 {
-			prevData := fmt.Sprintf("mv_p#%s#%d#%d#%d", searchKey, movieIdx, selectedLangIdx, page-1)
-			if p.isPremiumEmojiEnabled() {
-				navButtons = append(navButtons, telegram.Button.Data("Previous", prevData).Icon(p.getPrevEmojiID()).Success())
-			} else {
-				navButtons = append(navButtons, telegram.Button.Data("◀ Previous", prevData).Success())
-			}
-		}
-
-		pageLabel := fmt.Sprintf("📄 Page %d / %d", page+1, totalPages)
-		if p.isPremiumEmojiEnabled() {
-			pageLabel = fmt.Sprintf("page %d/%d", page+1, totalPages)
-			pageBtn := telegram.Button.Data(pageLabel, "pages").Icon(p.getPageButtonEmojiID())
-			if page > 0 {
-				navButtons = append(navButtons, pageBtn.Danger())
-			} else {
-				navButtons = append(navButtons, pageBtn.Success())
-			}
-		} else {
-			pageBtn := telegram.Button.Data(pageLabel, "pages")
-			if page > 0 {
-				navButtons = append(navButtons, pageBtn.Danger())
-			} else {
-				navButtons = append(navButtons, pageBtn.Success())
-			}
-		}
-
-		if page < totalPages-1 {
-			nextData := fmt.Sprintf("mv_p#%s#%d#%d#%d", searchKey, movieIdx, selectedLangIdx, page+1)
-			if p.isPremiumEmojiEnabled() {
-				navButtons = append(navButtons, telegram.Button.Data("Next", nextData).Icon(p.getNextEmojiID()).Success())
-			} else {
-				navButtons = append(navButtons, telegram.Button.Data("Next ▶", nextData).Success())
-			}
-		}
-		kb.AddRow(navButtons...)
-	}
-
-	// 4. Back button / Close button
-	if hasMultipleMovies {
-		kb.AddRow(
-			telegram.Button.Data("↭ ʙᴀᴄᴋ ᴛᴏ ᴍᴏᴠɪᴇs ↭", fmt.Sprintf("back_mv#%s", searchKey)).Danger(),
-			telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"),
-		)
-	} else {
-		kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"))
-	}
-
-	return kb.Build()
-}
-
-func (p *Plugin) buildCanonicalMoviesKeyboard(movies []search.CanonicalMovie, searchKey string) *telegram.ReplyInlineMarkup {
-	kb := telegram.NewKeyboard()
-
-	for i, m := range movies {
-		yearStr := ""
-		if m.Year > 0 {
-			yearStr = fmt.Sprintf(" (%d)", m.Year)
-		}
-		sequelStr := ""
-		if m.Sequel != "" {
-			sequelStr = " " + m.Sequel
-		}
-		fileCountStr := fmt.Sprintf(" [%d files]", m.TotalFiles)
-
-		label := fmt.Sprintf("🎬 %s%s%s%s", m.CanonicalTitle, sequelStr, yearStr, fileCountStr)
-		if len([]rune(label)) > 55 {
-			label = string([]rune(label)[:52]) + "..."
-		}
-		kb.AddRow(telegram.Button.Data(label, fmt.Sprintf("mv#%s#%d#0", searchKey, i)))
-	}
-
-	kb.AddRow(telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"))
-	return kb.Build()
-}
-
-func (p *Plugin) buildNoLanguageVariantKeyboard(movies []search.CanonicalMovie, searchKey string) *telegram.ReplyInlineMarkup {
-	kb := telegram.NewKeyboard()
-
-	type langCount struct {
-		name      string
-		normCode  string
-		fileCount int
-	}
-
-	var langCounts []langCount
-	seen := make(map[string]int)
-
-	for _, m := range movies {
-		for _, v := range m.LanguageVariants {
-			if v.NormalizedLanguage == "original" || v.NormalizedLanguage == "" {
-				continue
-			}
-			if idx, ok := seen[v.NormalizedLanguage]; ok {
-				langCounts[idx].fileCount += len(v.Files)
-			} else {
-				seen[v.NormalizedLanguage] = len(langCounts)
-				langCounts = append(langCounts, langCount{
-					name:      v.Language,
-					normCode:  v.NormalizedLanguage,
-					fileCount: len(v.Files),
-				})
-			}
-		}
-	}
-
-	var row []telegram.KeyboardButton
-	for i, lc := range langCounts {
-		btn := telegram.Button.Data(
-			fmt.Sprintf("🌐 %s (%d)", lc.name, lc.fileCount),
-			fmt.Sprintf("fl#%s#%s", lc.normCode, searchKey),
-		)
-		row = append(row, btn)
-		if len(row) == 2 || i == len(langCounts)-1 {
-			kb.AddRow(row...)
-			row = nil
-		}
-	}
-
-	kb.AddRow(
-		telegram.Button.Data("↭ Sʜᴏᴡ Aʟʟ Fɪʟᴇs ↭", fmt.Sprintf("back_all#%s", searchKey)),
-		telegram.Button.Data("❌ Cʟᴏsᴇ", "close_data"),
-	)
-	return kb.Build()
-}
-
-func (p *Plugin) formatMovieDetailText(userMention string, movie search.CanonicalMovie, variant search.LanguageVariant, botName string) string {
-	deleteMins := p.getFilterDeleteMinutes()
-
-	movieTitle := movie.CanonicalTitle
-	if movie.Sequel != "" {
-		movieTitle += " " + movie.Sequel
-	}
-	if movie.Year > 0 {
-		movieTitle += fmt.Sprintf(" (%d)", movie.Year)
-	}
-
-	variantLang := variant.Language
-	if variantLang == "" || variantLang == "Original" {
-		variantLang = "Default / Original"
-	}
-
-	if p.isPremiumEmojiEnabled() {
-		return fmt.Sprintf(
-			"𝗛𝗘𝗬 <emoji id=\"%d\">👋</emoji> %s <emoji id=\"%d\">🫶</emoji>\n\n"+
-				"<emoji id=\"%d\">📁</emoji> <b>Movie :</b> %s\n"+
-				"🌐 <b>Language :</b> %s\n"+
-				"🎞 <b>Files Available :</b> %d\n\n"+
-				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
-				"©%s <emoji id=\"%d\">🗡️</emoji>",
-			p.getGreetingPrefixEmojiID(),
-			userMention,
-			p.getGreetingSuffixEmojiID(),
-			p.getQueryEmojiID(),
-			html.EscapeString(movieTitle),
-			html.EscapeString(variantLang),
-			len(variant.Files),
-			p.getNotePrefixEmojiID(),
-			p.getNoteSuffixEmojiID(),
-			deleteMins,
-			p.getNoteExpireEmojiID(),
-			html.EscapeString(botName),
-			p.getBotNameEmojiID(),
-		)
-	}
-
-	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s 🫶\n\n"+
-			"📁 <b>Movie :</b> %s\n"+
-			"🌐 <b>Language :</b> %s\n"+
-			"🎞 <b>Files Available :</b> %d\n\n"+
-			"<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
-			"©%s 🗡️",
-		userMention,
-		html.EscapeString(movieTitle),
-		html.EscapeString(variantLang),
-		len(variant.Files),
-		deleteMins,
-		html.EscapeString(botName),
-	)
-}
-
-func (p *Plugin) formatMoviesListText(userMention, query string, movieCount int, botName string) string {
-	deleteMins := p.getFilterDeleteMinutes()
-
-	if p.isPremiumEmojiEnabled() {
-		return fmt.Sprintf(
-			"𝗛𝗘𝗬 <emoji id=\"%d\">👋</emoji> %s <emoji id=\"%d\">🫶</emoji>\n\n"+
-				"<emoji id=\"%d\">📁</emoji> <b>Query :</b> %s\n"+
-				"🎬 <b>Found %d Movies</b>\n\n"+
-				"Please select a movie below:\n\n"+
-				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
-				"©%s <emoji id=\"%d\">🗡️</emoji>",
-			p.getGreetingPrefixEmojiID(),
-			userMention,
-			p.getGreetingSuffixEmojiID(),
-			p.getQueryEmojiID(),
-			html.EscapeString(query),
-			movieCount,
-			p.getNotePrefixEmojiID(),
-			p.getNoteSuffixEmojiID(),
-			deleteMins,
-			p.getNoteExpireEmojiID(),
-			html.EscapeString(botName),
-			p.getBotNameEmojiID(),
-		)
-	}
-
-	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s 🫶\n\n"+
-			"📁 <b>Query :</b> %s\n"+
-			"🎬 <b>Found %d Movies</b>\n\n"+
-			"Please select a movie below:\n\n"+
-			"<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
-			"©%s 🗡️",
-		userMention,
-		html.EscapeString(query),
-		movieCount,
-		deleteMins,
-		html.EscapeString(botName),
-	)
-}
-
-func (p *Plugin) formatNoLanguageVariantText(userMention, query, reqLang string, movies []search.CanonicalMovie, botName string) string {
-	deleteMins := p.getFilterDeleteMinutes()
-
-	type langCount struct {
-		name      string
-		normCode  string
-		fileCount int
-	}
-	var langCounts []langCount
-	seen := make(map[string]int)
-	for _, m := range movies {
-		for _, v := range m.LanguageVariants {
-			if v.NormalizedLanguage == "original" || v.NormalizedLanguage == "" {
-				continue
-			}
-			if idx, ok := seen[v.NormalizedLanguage]; ok {
-				langCounts[idx].fileCount += len(v.Files)
-			} else {
-				seen[v.NormalizedLanguage] = len(langCounts)
-				langCounts = append(langCounts, langCount{
-					name:      v.Language,
-					normCode:  v.NormalizedLanguage,
-					fileCount: len(v.Files),
-				})
-			}
-		}
-	}
-
-	var langListLines []string
-	for _, lc := range langCounts {
-		langListLines = append(langListLines, fmt.Sprintf("• <b>%s</b> (%d files)", lc.name, lc.fileCount))
-	}
-	langListStr := strings.Join(langListLines, "\n")
-	if langListStr == "" {
-		langListStr = "• Available in original release"
-	}
-
-	displayLang := search.FormatLanguageDisplay(reqLang)
-
-	if p.isPremiumEmojiEnabled() {
-		return fmt.Sprintf(
-			"𝗛𝗘𝗬 <emoji id=\"%d\">👋</emoji> %s <emoji id=\"%d\">🫶</emoji>\n\n"+
-				"⚠️ <b>No %s variant found for:</b>\n"+
-				"<code>%s</code>\n\n"+
-				"✨ <b>Available Languages:</b>\n%s\n\n"+
-				"Please select an available language below:\n\n"+
-				"<blockquote><emoji id=\"%d\">✍️</emoji> NOTE : <emoji id=\"%d\">⚠️</emoji> This Message Will Be Auto Deleted Within %d Mins <emoji id=\"%d\">❗️</emoji></blockquote>\n"+
-				"©%s <emoji id=\"%d\">🗡️</emoji>",
-			p.getGreetingPrefixEmojiID(),
-			userMention,
-			p.getGreetingSuffixEmojiID(),
-			html.EscapeString(displayLang),
-			html.EscapeString(query),
-			langListStr,
-			p.getNotePrefixEmojiID(),
-			p.getNoteSuffixEmojiID(),
-			deleteMins,
-			p.getNoteExpireEmojiID(),
-			html.EscapeString(botName),
-			p.getBotNameEmojiID(),
-		)
-	}
-
-	return fmt.Sprintf(
-		"𝗛𝗘𝗬 👋 %s 🫶\n\n"+
-			"⚠️ <b>No %s variant found for:</b>\n"+
-			"<code>%s</code>\n\n"+
-			"✨ <b>Available Languages:</b>\n%s\n\n"+
-			"Please select an available language below:\n\n"+
-			"<blockquote>✍️ NOTE : ⚠️ This Message Will Be Auto Deleted Within %d Mins ❗️</blockquote>\n"+
-			"©%s 🗡️",
-		userMention,
-		html.EscapeString(displayLang),
-		html.EscapeString(query),
-		langListStr,
-		deleteMins,
-		html.EscapeString(botName),
-	)
 }
 
 // Session helpers
